@@ -50,12 +50,22 @@ Each role reads its model from [`config/models.yaml`](config/models.yaml), so an
 
 Claude Code adds its own context and ignores temperature and max_tokens, so confidence scores from `cli` are not comparable with the API. Evaluation and calibration scripts call `require_api()` and refuse to run on `cli`. The `cli` backend also strips `ANTHROPIC_API_KEY` from its environment so it can never spend API credits by accident.
 
+## Watch it work
+
+```bash
+python app/server.py        # then open http://localhost:8000
+```
+
+A local viewer (standard library only, no extra install). Pick a probe ticket or paste your own, and watch it go through every stage live: received, cleaned, classified, confidence gate, re-check, routed, drafted. Each model step shows exactly what was sent and what came back. Probe tickets also show the expected answer next to the result. Uses whichever backend is set (`cli` by default).
+
 ## Repo layout
 
 ```
 config/       taxonomy (8 categories, 23 subcategories), models, thresholds, policy facts
-src/pipeline/ clean, gate, route, llm wrapper (classify and draft come next)
-tests/        unit tests for the rule-based stages
+src/pipeline/ clean, classify, gate, route, draft, run (one ticket end to end), llm wrapper
+app/          local viewer: watch each ticket move through the stages
+tests/        unit tests (rules, prompts, full run with mocked models)
+scripts/      run_probes.py: score the edge-case probes
 data/         synthetic tickets and the dev / MVP test / held-out split
 docs/         design brief
 ```

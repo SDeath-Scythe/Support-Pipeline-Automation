@@ -38,5 +38,11 @@ def parse(reply: str) -> Extraction:
     return Extraction.model_validate(json.loads(match.group()))
 
 
-def classify(cleaned_text: str) -> Extraction:
-    return parse(call("classifier", system_prompt(), f"<ticket>\n{cleaned_text}\n</ticket>"))
+def user_prompt(cleaned_text: str) -> str:
+    return f"<ticket>\n{cleaned_text}\n</ticket>"
+
+
+def classify(cleaned_text: str, role: str = "classifier") -> Extraction:
+    """Classify with the given role. The re-check calls this with role="rechecker":
+    the second model classifies blind, without seeing the first answer, so it can't be anchored by it."""
+    return parse(call(role, system_prompt(), user_prompt(cleaned_text)))

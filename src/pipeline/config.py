@@ -21,6 +21,7 @@ def load_yaml(name: str) -> dict[str, Any]:
 class Subcategory:
     key: str
     label: str
+    label_ar: str
     category: str
     team: str
     default_priority: str
@@ -33,6 +34,7 @@ class Subcategory:
 class Taxonomy:
     teams: dict[str, dict[str, str]]
     categories: dict[str, str]          # category key -> label
+    categories_ar: dict[str, str]       # category key -> Arabic label (shown in the UI)
     subcategories: dict[str, Subcategory]
 
     def get(self, subcategory: str) -> Subcategory:
@@ -44,14 +46,17 @@ def taxonomy() -> Taxonomy:
     raw = load_yaml("taxonomy.yaml")
     subs: dict[str, Subcategory] = {}
     cats: dict[str, str] = {}
+    cats_ar: dict[str, str] = {}
     for cat_key, cat in raw["categories"].items():
         cats[cat_key] = cat["label"]
+        cats_ar[cat_key] = cat.get("label_ar", cat["label"])
         for sub_key, sub in cat["subcategories"].items():
             if sub_key in subs:
                 raise ValueError(f"Duplicate subcategory key: {sub_key}")
             subs[sub_key] = Subcategory(
                 key=sub_key,
                 label=sub["label"],
+                label_ar=sub.get("label_ar", sub["label"]),
                 category=cat_key,
                 team=cat["team"],
                 default_priority=sub["default_priority"],
@@ -59,7 +64,7 @@ def taxonomy() -> Taxonomy:
                 high_risk=bool(sub.get("high_risk", False)),
                 always_escalate=bool(cat.get("always_escalate", False)),
             )
-    return Taxonomy(teams=raw["teams"], categories=cats, subcategories=subs)
+    return Taxonomy(teams=raw["teams"], categories=cats, categories_ar=cats_ar, subcategories=subs)
 
 
 @lru_cache(maxsize=1)

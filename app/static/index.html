@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>متابعة خط التذاكر</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #EDF0F3;
+  --card: #FFFFFF;
+  --ink: #18263A;
+  --muted: #6B7788;
+  --line: #D5DBE3;
+  --rule: #6B7788;
+  --model: #3F4BB8;
+  --model-tint: #E8EAFA;
+  --ok: #0E7C70;
+  --ok-tint: #DDF1EE;
+  --warn: #B26B00;
+  --warn-tint: #FBEEDB;
+  --bad: #B42318;
+  --bad-tint: #FBE4E1;
+  --font: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #121A25; --card: #1A2433; --ink: #E4E9F0; --muted: #93A0B2; --line: #2C3A4E;
+    --rule: #93A0B2; --model: #9AA3F2; --model-tint: #262E57;
+    --ok: #4CC2B2; --ok-tint: #143A36; --warn: #E2A447; --warn-tint: #3D2E14; --bad: #F07A6E; --bad-tint: #43201D;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.6 var(--font); }
+button, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--model); outline-offset: 2px; }
+
+header { display: flex; align-items: center; gap: 16px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--card); }
+header h1 { font-size: 18px; margin: 0; font-weight: 700; }
+header .sub { color: var(--muted); font-size: 13px; }
+.backend { margin-inline-start: auto; font-size: 13px; color: var(--muted); }
+.backend b { color: var(--ink); font-weight: 600; }
+
+.layout { display: grid; grid-template-columns: 340px 1fr; min-height: calc(100vh - 57px); }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside { border-inline-end: 0; border-bottom: 1px solid var(--line); }
+  .queue { max-height: 300px; }
+  main { padding: 18px 16px 48px; }
+  header { flex-wrap: wrap; padding: 12px 16px; gap: 4px 12px; }
+  header .sub { display: none; }
+  .backend { margin-inline-start: 0; width: 100%; }
+}
+
+/* Queue */
+aside { border-inline-end: 1px solid var(--line); padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+aside h2 { font-size: 14px; margin: 0; font-weight: 600; }
+textarea.new { width: 100%; min-height: 84px; resize: vertical; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.row { display: flex; gap: 8px; }
+.btn { border: 1px solid var(--ink); background: var(--ink); color: var(--paper); padding: 7px 14px; border-radius: 8px; cursor: pointer; font-weight: 500; }
+.btn.ghost { background: transparent; color: var(--ink); }
+.btn:disabled { opacity: .45; cursor: default; }
+.queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+.queue li button { width: 100%; text-align: start; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 8px 10px; cursor: pointer; display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: start; }
+.queue li button:hover { background: var(--card); }
+.queue li button[aria-current="true"] { background: var(--card); border-color: var(--line); }
+.dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 7px; border: 2px solid var(--muted); }
+.dot.running { border-color: var(--model); animation: pulse 1s infinite alternate; }
+.dot.drafted { background: var(--ok); border-color: var(--ok); }
+.dot.flagged { background: var(--warn); border-color: var(--warn); }
+.dot.escalated { background: var(--bad); border-color: var(--bad); }
+.q-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; }
+.q-meta { font-size: 12px; color: var(--muted); direction: ltr; text-align: right; }
+@keyframes pulse { from { opacity: 1; } to { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .dot.running, .stage.running .state { animation: none; } }
+
+/* Main */
+main { padding: 22px 28px 60px; max-width: 920px; width: 100%; }
+.empty { color: var(--muted); padding: 60px 0; }
+.slip { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; font-size: 17px; }
+.slip .label { font-size: 12px; color: var(--muted); }
+
+ol.stages { list-style: none; padding: 0; margin: 22px 0 0; counter-reset: st; }
+.stage { position: relative; padding: 0 0 18px 0; padding-inline-start: 44px; }
+.stage::before { counter-increment: st; content: counter(st); position: absolute; inset-inline-start: 0; top: 2px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 600; background: var(--card); border: 1px solid var(--line); color: var(--muted); }
+.stage::after { content: ""; position: absolute; inset-inline-start: 13.5px; top: 32px; bottom: 0; width: 1px; background: var(--line); }
+.stage:last-child::after { display: none; }
+.stage.done::before { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.stage.running::before { border-color: var(--model); color: var(--model); }
+.stage.skipped { opacity: .55; }
+.stage.error::before { background: var(--bad); color: #fff; border-color: var(--bad); }
+.stage-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.stage-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.kind { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--rule); direction: ltr; }
+.kind.model { color: var(--model); background: var(--model-tint); border-color: transparent; }
+.state { margin-inline-start: auto; font-size: 12px; color: var(--muted); direction: ltr; }
+.stage.running .state { color: var(--model); animation: pulse 1s infinite alternate; }
+.body { margin-top: 8px; }
+.body:empty { display: none; }
+.note { color: var(--muted); font-size: 14px; }
+
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: 14px; margin: 8px 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.kv dd.ltr { text-align: right; }
+.ltr { direction: ltr; unicode-bidi: isolate; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.chip { font-size: 12.5px; padding: 2px 9px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
+.chip.warn { background: var(--warn-tint); border-color: transparent; color: var(--warn); }
+.chip.bad { background: var(--bad-tint); border-color: transparent; color: var(--bad); }
+.chip.ok { background: var(--ok-tint); border-color: transparent; color: var(--ok); }
+.big { font-size: 18px; font-weight: 600; }
+.cleaned { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+
+details { margin-top: 8px; font-size: 13px; }
+summary { cursor: pointer; color: var(--muted); }
+pre { white-space: pre-wrap; word-break: break-word; direction: ltr; text-align: left; font: 12.5px/1.5 var(--mono); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; max-height: 320px; overflow: auto; }
+
+/* The confidence scale: the one loud element */
+.scale { margin: 14px 0 6px; direction: ltr; }
+.track { position: relative; height: 34px; border-radius: 6px; overflow: hidden; display: flex; }
+.zone { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; direction: rtl; }
+.zone.esc { background: var(--bad-tint); color: var(--bad); }
+.zone.rec { background: var(--warn-tint); color: var(--warn); }
+.zone.pass { background: var(--ok-tint); color: var(--ok); }
+.markers { position: relative; height: 44px; }
+.mark { position: absolute; top: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; font-size: 12px; white-space: nowrap; transition: left .6s ease; }
+.mark .pin { width: 2px; height: 12px; background: var(--ink); }
+.mark.model .pin { background: var(--muted); }
+.mark.model { color: var(--muted); }
+.mark.final { font-weight: 700; }
+.ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.decision { font-weight: 600; }
+.decision.pass { color: var(--ok); } .decision.recheck { color: var(--warn); } .decision.escalate { color: var(--bad); }
+
+.bubble { background: var(--card); border: 1px solid var(--line); border-radius: 14px 14px 14px 4px; padding: 12px 16px; font-size: 16px; line-height: 1.8; max-width: 640px; }
+textarea.edit { width: 100%; max-width: 640px; min-height: 120px; padding: 12px 16px; border: 1px solid var(--model); border-radius: 12px; background: var(--card); font-size: 16px; line-height: 1.8; }
+
+.result { margin-top: 8px; border-radius: 10px; padding: 16px 18px; border: 1px solid var(--line); background: var(--card); }
+.result.drafted { border-color: var(--ok); }
+.result.flagged { border-color: var(--warn); }
+.result.escalated { border-color: var(--bad); }
+.outcome { font-size: 20px; font-weight: 700; margin: 0; }
+.result.drafted .outcome { color: var(--ok); } .result.flagged .outcome { color: var(--warn); } .result.escalated .outcome { color: var(--bad); }
+.actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.gold { margin-top: 14px; font-size: 13.5px; }
+.gold table { border-collapse: collapse; width: 100%; max-width: 640px; }
+.gold td { padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.gold td:first-child { color: var(--muted); width: 150px; }
+.gold .y { color: var(--ok); font-weight: 600; } .gold .n { color: var(--bad); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>متابعة خط التذاكر</h1>
+  <span class="sub">كل تذكرة، مرحلة بمرحلة</span>
+  <span class="backend" id="backend"></span>
+</header>
+
+<div class="layout">
+  <aside>
+    <h2>تذكرة جديدة</h2>
+    <textarea class="new" id="newText" placeholder="الصق نص تذكرة هنا، مثل: حولت خمسين الف وما وصلت…"></textarea>
+    <div class="row">
+      <button class="btn" id="runNew">شغّل التذكرة</button>
+      <button class="btn ghost" id="runAll">شغّل كل القائمة</button>
+    </div>
+    <h2>القائمة</h2>
+    <ul class="queue" id="queue"></ul>
+  </aside>
+
+  <main id="main">
+    <p class="empty">اختار تذكرة من القائمة أو الصق وحدة جديدة، وراح تشوف شلون تمر بكل مرحلة.</p>
+  </main>
+</div>
+
+<script>
+const STAGES = [
+  ["received", "الاستلام", "rule", "التذكرة مثل ما كتبها الزبون"],
+  ["clean", "التنظيف", "rule", "توحيد الأرقام والمسافات"],
+  ["classify", "التصنيف والاستخراج", "classifier", "يحدد نوع المشكلة ويطلع رقم العملية والمبلغ"],
+  ["gate", "بوابة الثقة", "rule", "يقرر: يكمل، يتراجع، أو يتصعّد"],
+  ["recheck", "المراجعة الثانية", "rechecker", "نموذج ثاني يصنّف بدون ما يشوف الجواب الأول"],
+  ["route", "التوجيه والأولوية", "rule", "القسم المسؤول ودرجة الاستعجال"],
+  ["draft", "المسودة", "drafter", "رد مقترح، الموظف يعتمده أو يعدله"],
+];
+const OUTCOME_AR = { drafted: "جاهزة للاعتماد", flagged: "جاهزة، بس بيها نقطة تحتاج تأكيد", escalated: "متصعّدة: يستلمها موظف" };
+const DECISION_AR = { pass: "يكمل للتوجيه والمسودة", recheck: "يروح للمراجعة الثانية", escalate: "يتصعّد لموظف" };
+const FIELD_AR = { reference: "رقم العملية", amount: "المبلغ", date: "التاريخ", recipient_number: "رقم المستلم",
+  agent_location: "اسم الوكيل ومكانه", merchant: "اسم المتجر", bill_type: "نوع الفاتورة", phone_number: "الرقم المشحون", screenshot: "صورة من الشاشة" };
+const CHANGE_AR = { arabic_digits: "رقم عربي تحوّل", tatweel: "تطويل انشال", extra_spaces: "مسافة زايدة" };
+
+let META = null, TICKETS = [], current = null, busy = false;
+const status = {}; // ticket key -> outcome
+
+const $ = (s, r = document) => r.querySelector(s);
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v; else n.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) n.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return n;
+}
+const fmtAmount = (ex) => ex.amount_iqd != null ? `${ex.amount_iqd.toLocaleString("en")} دينار` : ex.amount_usd != null ? `${ex.amount_usd} دولار` : null;
+const subLabel = (k) => META.subcategories[k] ? `${META.subcategories[k].category_label} › ${META.subcategories[k].label}` : k;
+const norm = (s) => s ? String(s).replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[^0-9A-Za-z]/g, "").toLowerCase() : null;
+
+async function init() {
+  [META, TICKETS] = await Promise.all([fetch("/api/meta").then(r => r.json()), fetch("/api/tickets").then(r => r.json())]);
+  $("#backend").innerHTML = "";
+  $("#backend").append("يشتغل على: ", el("b", { text: META.backend === "cli" ? "خطة Claude (تطوير)" : "API" }),
+    `  ·  ${META.models.classifier} / ${META.models.drafter}`);
+  renderQueue();
+}
+
+function renderQueue() {
+  const q = $("#queue"); q.innerHTML = "";
+  TICKETS.forEach((t, i) => {
+    const key = t.id || `custom-${i}`;
+    const b = el("button", { "aria-current": String(current === key) },
+      el("span", { class: `dot ${status[key] || ""}` }),
+      el("span", {}, el("span", { class: "q-text", text: t.text }), el("span", { class: "q-meta", text: `${t.id}${t.trap ? " · " + t.trap : ""}` })));
+    b.onclick = () => !busy && run(t, key);
+    q.append(el("li", {}, b));
+  });
+}
+
+function buildView(ticket) {
+  const main = $("#main"); main.innerHTML = "";
+  const list = el("ol", { class: "stages" });
+  for (const [id, name, kind, desc] of STAGES) {
+    const model = kind !== "rule" ? META.models[kind] : null;
+    list.append(el("li", { class: "stage", id: `st-${id}` },
+      el("div", { class: "stage-head" },
+        el("h3", { text: name }),
+        el("span", { class: model ? "kind model" : "kind", text: model || "قاعدة ثابتة" }),
+        el("span", { class: "state", text: "" })),
+      el("div", { class: "note", text: desc }),
+      el("div", { class: "body" })));
+  }
+  main.append(
+    el("div", { class: "slip" }, el("div", { class: "label", text: ticket.id ? `التذكرة ${ticket.id}` : "تذكرة جديدة" }), el("div", { text: ticket.text })),
+    list,
+    el("div", { id: "result" }));
+}
+
+function setStage(id, st, ms) {
+  const n = $(`#st-${id}`); if (!n) return null;
+  n.className = `stage ${st}`;
+  const label = { running: "يشتغل…", done: `${(ms / 1000).toFixed(1)}s`, skipped: "تخطّى", error: "خطأ" }[st] || "";
+  $(".state", n).textContent = label;
+  return $(".body", n);
+}
+
+function promptDetails(d) {
+  return el("details", {}, el("summary", { text: "شوف اللي انرسل للنموذج وجوابه" }),
+    el("div", { class: "note", text: "الرسالة:" }), el("pre", { text: d.user_prompt || "" }),
+    el("div", { class: "note", text: "الجواب كما هو:" }), el("pre", { text: d.reply || "" }));
+}
+
+function fieldsList(ex) {
+  const rows = [
+    ["سؤال ثاني", ex.secondary_subcategory ? subLabel(ex.secondary_subcategory) : null],
+    ["رقم العملية", ex.reference], ["رقم المستلم", ex.recipient_phone],
+    ["المبلغ", fmtAmount(ex)], ["الوقت", ex.date],
+  ];
+  const dl = el("dl", { class: "kv" });
+  for (const [k, v] of rows) dl.append(el("dt", { text: k }), el("dd", { class: /^[0-9 -]+$/.test(v || "") ? "ltr" : "", text: v ?? "—" }));
+  return dl;
+}
+
+function scale(d) {
+  const t = META.thresholds, pct = x => `${Math.max(0, Math.min(1, x)) * 100}%`;
+  const wrap = el("div", { class: "scale" });
+  const track = el("div", { class: "track" },
+    el("div", { class: "zone esc", style: `width:${pct(t.recheck_from)}`, text: "تصعيد" }),
+    el("div", { class: "zone rec", style: `width:${pct(t.pass_above - t.recheck_from)}`, text: "مراجعة" }),
+    el("div", { class: "zone pass", style: `width:${pct(1 - t.pass_above)}`, text: "يكمل" }));
+  const markers = el("div", { class: "markers" });
+  const changed = Math.abs(d.model_confidence - d.confidence) > 0.005;
+  if (changed) markers.append(el("div", { class: "mark model", style: `left:${pct(d.model_confidence)}` }, el("span", { class: "pin" }), `النموذج ${d.model_confidence.toFixed(2)}`));
+  const fin = el("div", { class: "mark final", style: `left:${pct(changed ? d.model_confidence : d.confidence)}` }, el("span", { class: "pin" }), `${changed ? "بعد القواعد" : "الثقة"} ${d.confidence.toFixed(2)}`);
+  markers.append(fin);
+  if (changed) requestAnimationFrame(() => setTimeout(() => (fin.style.left = pct(d.confidence)), 250));
+  wrap.append(track, markers, el("div", { class: "ticks" }, el("span", { text: "0" }), el("span", { text: t.recheck_from }), el("span", { text: t.pass_above }), el("span", { text: "1" })));
+  return wrap;
+}
+
+const FLAG_AR = { fraud: "احتيال: يتصعّد دائماً", "missing:reference": "رقم العملية ناقص، الثقة انحدّت لـ 0.60",
+  "missing:amount": "المبلغ ناقص، الثقة انحدّت لـ 0.60", ref_not_in_text: "رقم العملية مو موجود بالنص",
+  invalid_category: "تصنيف غير موجود", recheck_disagreed: "النموذج الثاني ما اتفق", model_error: "خطأ بالنموذج" };
+
+function render(e) {
+  const d = e.data, body = setStage(e.stage, e.status, e.ms);
+  if (e.stage === "result") return renderResult(d);
+  if (!body) return;
+  body.innerHTML = "";
+  if (e.status === "skipped") return body.append(el("div", { class: "note", text: d.why ? `ما احتاجت: ${d.why}` : "ما احتاجت" }));
+  if (e.status === "error") return body.append(el("div", { class: "chip bad", text: d.error }));
+  if (e.status === "running") return;
+
+  if (e.stage === "received") body.append(el("div", { class: "note", text: `${d.chars} حرف` }));
+  if (e.stage === "clean") {
+    body.append(el("div", { class: "cleaned", text: d.text }));
+    const ch = Object.entries(d.changes).filter(([, n]) => n > 0);
+    body.append(el("div", { class: "chips" }, ch.length ? ch.map(([k, n]) => el("span", { class: "chip", text: `${n} ${CHANGE_AR[k]}` })) : el("span", { class: "note", text: "ما احتاجت تنظيف" })));
+  }
+  if (e.stage === "classify" || e.stage === "recheck") {
+    const ex = d.extraction;
+    if (e.stage === "recheck") body.append(el("div", { class: `chip ${d.agree ? "ok" : "bad"}`, text: d.agree ? "متفق مع التصنيف الأول" : `مختلف: قال ${subLabel(d.second)}` }));
+    body.append(el("div", { class: "big", text: subLabel(ex.subcategory) }), fieldsList(ex),
+      el("div", { class: "note" }, `ثقة النموذج بنفسه: ${ex.confidence.toFixed(2)} · `, el("span", { class: "ltr", text: ex.rationale })), promptDetails(d));
+  }
+  if (e.stage === "gate") {
+    body.append(scale(d), el("div", { class: `decision ${d.decision}`, text: DECISION_AR[d.decision] }));
+    const chips = [...d.flags.map(f => el("span", { class: f === "fraud" ? "chip bad" : "chip warn", text: FLAG_AR[f] || f }))];
+    if (d.high_risk && d.decision === "recheck" && d.confidence >= META.thresholds.pass_above) chips.push(el("span", { class: "chip warn", text: "نوع حساس: يتراجع دائماً" }));
+    if (chips.length) body.append(el("div", { class: "chips" }, chips));
+  }
+  if (e.stage === "route") body.append(el("dl", { class: "kv" }, el("dt", { text: "القسم" }), el("dd", { text: d.team_ar }), el("dt", { text: "الأولوية" }), el("dd", { class: "ltr", text: d.priority })));
+  if (e.stage === "draft") {
+    if (d.ask_for?.length) body.append(el("div", { class: "chips" }, el("span", { class: "note", text: "يطلب من الزبون: " }), d.ask_for.map(f => el("span", { class: "chip warn", text: FIELD_AR[f] || f }))));
+    body.append(el("div", { class: "bubble", id: "draftText", text: d.reply }), promptDetails(d));
+  }
+}
+
+function renderResult(d) {
+  const box = el("div", { class: `result ${d.outcome}` },
+    el("p", { class: "outcome", text: OUTCOME_AR[d.outcome] }),
+    d.notes_ar?.length ? el("div", { class: "chips" }, d.notes_ar.map(n => el("span", { class: "chip", text: n }))) : null,
+    d.team ? el("div", { class: "note", text: `${META.teams[d.team]?.label_ar || d.team} · ${d.priority}` }) : null);
+  if (d.draft_ar) {
+    const actions = el("div", { class: "actions" });
+    const approve = el("button", { class: "btn", text: "اعتمد الرد" });
+    const edit = el("button", { class: "btn ghost", text: "عدّل الرد" });
+    const take = el("button", { class: "btn ghost", text: "استلمها بنفسي" });
+    approve.onclick = () => { actions.replaceChildren(el("span", { class: "chip ok", text: "انعتمد الرد (تجربة، ما ينرسل شي)" })); };
+    edit.onclick = () => {
+      const bubble = $("#draftText"); const ta = el("textarea", { class: "edit" }); ta.value = bubble.textContent;
+      bubble.replaceWith(ta); ta.id = "draftText"; ta.focus();
+      actions.replaceChildren(el("button", { class: "btn", text: "اعتمد التعديل", onclick: "" }));
+      actions.firstChild.onclick = () => { const b = el("div", { class: "bubble", id: "draftText", text: ta.value }); ta.replaceWith(b); actions.replaceChildren(el("span", { class: "chip ok", text: "انعتمد الرد المعدّل" })); };
+    };
+    take.onclick = () => { actions.replaceChildren(el("span", { class: "chip", text: "صارت عندك، المسودة ما تنرسل" })); };
+    actions.append(approve, edit, take); box.append(actions);
+  }
+  if (current && TICKETS.find(t => t.id === current)?.subcategory) box.append(goldTable(TICKETS.find(t => t.id === current), d));
+  $("#result").replaceChildren(box);
+}
+
+function goldTable(g, d) {
+  const ex = d.extraction || {};
+  const rows = [
+    ["النوع", g.subcategory, ex.subcategory, subLabel],
+    ["رقم العملية", g.reference, ex.reference, x => x ?? "—", true],
+    ["المبلغ (دينار)", g.amount_iqd, ex.amount_iqd, x => x?.toLocaleString("en") ?? "—"],
+    ["المبلغ (دولار)", g.amount_usd, ex.amount_usd, x => x ?? "—"],
+    ["الأولوية", g.priority, d.priority, x => x ?? "—"],
+    ["النتيجة", g.outcome, d.outcome, x => OUTCOME_AR[x] ?? "—"],
+  ];
+  const tb = el("tbody");
+  for (const [k, want, got, f, isRef] of rows) {
+    const ok = isRef ? norm(want) === norm(got) : (want ?? null) === (got ?? null);
+    tb.append(el("tr", {}, el("td", { text: k }), el("td", { text: f(want) }), el("td", { class: ok ? "y" : "n", text: ok ? "✓" : `✗ طلع: ${f(got)}` })));
+  }
+  return el("div", { class: "gold" }, el("div", { class: "note", text: `الجواب المتوقع · ${g.trap}` }), el("table", {}, tb));
+}
+
+function run(ticket, key) {
+  return new Promise(resolve => {
+    busy = true; current = key; status[key] = "running"; renderQueue(); buildView(ticket);
+    if (window.innerWidth <= 900) $("#main").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    for (const btn of ["#runNew", "#runAll"]) $(btn).disabled = true;
+    const es = new EventSource(`/api/stream?text=${encodeURIComponent(ticket.text)}`);
+    let outcome = null;
+    es.onmessage = m => { const e = JSON.parse(m.data); if (e.stage === "result") outcome = e.data.outcome; render(e); };
+    const done = () => {
+      es.close(); busy = false; status[key] = outcome || ""; renderQueue();
+      for (const btn of ["#runNew", "#runAll"]) $(btn).disabled = false;
+      resolve();
+    };
+    es.addEventListener("end", done);
+    es.onerror = () => { if (!outcome) $("#result").replaceChildren(el("div", { class: "result escalated" }, el("p", { class: "outcome", text: "انقطع الاتصال بالخادم" }), el("div", { class: "note", text: "تأكد إن python app/server.py بعده شغّال، وجرب مرة ثانية." }))); done(); };
+  });
+}
+
+$("#runNew").onclick = () => {
+  const text = $("#newText").value.trim(); if (!text || busy) return;
+  const t = { id: `n${TICKETS.filter(x => x.id?.startsWith("n")).length + 1}`, text };
+  TICKETS.unshift(t); $("#newText").value = ""; run(t, t.id);
+};
+$("#runAll").onclick = async () => { if (busy) return; for (const t of [...TICKETS]) await run(t, t.id); };
+
+init();
+</script>
+</body>
+</html>

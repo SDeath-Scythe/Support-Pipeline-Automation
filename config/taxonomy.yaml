@@ -21,76 +21,87 @@ teams:
 categories:
   transfers:
     label: "Transfers"
+    label_ar: "التحويلات"
     team: transfers
     subcategories:
       not_received:
         label: "Not received or deducted"
+        label_ar: "التحويل ما وصل أو انخصم"
         default_priority: P2
         required_fields: [reference, amount]
         high_risk: false
       wrong_recipient:
         label: "Wrong recipient"
+        label_ar: "تحويل لشخص غلط"
         default_priority: P2
         required_fields: [reference, amount]
         high_risk: false
       reversal_request:
         label: "Reversal request"
+        label_ar: "طلب إرجاع تحويل"
         default_priority: P2
         required_fields: [reference, amount]
         high_risk: true
 
   account_access:
     label: "Account & access"
+    label_ar: "الحساب والدخول"
     team: accounts
     subcategories:
-      login_otp: { label: "Login / OTP", default_priority: P2, required_fields: [], high_risk: false }
-      forgot_pin: { label: "Forgot PIN", default_priority: P3, required_fields: [], high_risk: false }
-      blocked_account: { label: "Blocked account", default_priority: P2, required_fields: [], high_risk: false }
-      sim_change: { label: "SIM change", default_priority: P2, required_fields: [], high_risk: true }
+      login_otp: { label: "Login / OTP", label_ar: "الدخول ورمز التحقق", default_priority: P2, required_fields: [], high_risk: false }
+      forgot_pin: { label: "Forgot PIN", label_ar: "نسيان الرمز السري", default_priority: P3, required_fields: [], high_risk: false }
+      blocked_account: { label: "Blocked account", label_ar: "حساب مقفول", default_priority: P2, required_fields: [], high_risk: false }
+      sim_change: { label: "SIM change", label_ar: "تبديل الشريحة", default_priority: P2, required_fields: [], high_risk: true }
 
   verification:
     label: "Verification"
+    label_ar: "التوثيق"
     team: onboarding
     subcategories:
-      rejected_or_pending: { label: "Rejected or pending", default_priority: P3, required_fields: [], high_risk: false }
-      limit_upgrade: { label: "Limit upgrade", default_priority: P3, required_fields: [], high_risk: false }
+      rejected_or_pending: { label: "Rejected or pending", label_ar: "توثيق مرفوض أو معلّق", default_priority: P3, required_fields: [], high_risk: false }
+      limit_upgrade: { label: "Limit upgrade", label_ar: "رفع الحد", default_priority: P3, required_fields: [], high_risk: false }
 
   agents_cash:
     label: "Agents & cash"
+    label_ar: "الوكلاء والكاش"
     team: agent_network
     subcategories:
-      overcharged_fee: { label: "Overcharged fee", hint: "an agent took a bigger fee than allowed for cash-in or cash-out", default_priority: P3, required_fields: [amount], high_risk: false }
-      cash_in_not_credited: { label: "Cash-in not credited", hint: "gave cash to an agent to load the account (شحن الحساب) and it did not arrive", default_priority: P2, required_fields: [amount], high_risk: false }
-      cash_out_refused: { label: "Cash-out refused", default_priority: P3, required_fields: [], high_risk: false }
+      overcharged_fee: { label: "Overcharged fee", label_ar: "الوكيل أخذ عمولة زايدة", hint: "an agent took a bigger fee than allowed for cash-in or cash-out", default_priority: P3, required_fields: [amount], high_risk: false }
+      cash_in_not_credited: { label: "Cash-in not credited", label_ar: "إيداع عند وكيل ما نزل", hint: "gave cash to an agent to load the account (شحن الحساب) and it did not arrive", default_priority: P2, required_fields: [amount], high_risk: false }
+      cash_out_refused: { label: "Cash-out refused", label_ar: "وكيل رفض السحب", default_priority: P3, required_fields: [], high_risk: false }
 
   cards:
     label: "Cards"
+    label_ar: "البطاقات"
     team: cards
     subcategories:
-      card_payment_failed: { label: "Card payment failed", default_priority: P3, required_fields: [amount], high_risk: false }
-      delivery_or_activation: { label: "Delivery or activation", default_priority: P3, required_fields: [], high_risk: false }
+      card_payment_failed: { label: "Card payment failed", label_ar: "دفع بالبطاقة فشل", default_priority: P3, required_fields: [amount], high_risk: false }
+      delivery_or_activation: { label: "Delivery or activation", label_ar: "توصيل أو تفعيل البطاقة", default_priority: P3, required_fields: [], high_risk: false }
 
   bills_topup:
     label: "Bills & top-up"
+    label_ar: "الفواتير والشحن"
     team: bills
     subcategories:
-      bill_not_reflected: { label: "Bill paid, not reflected", default_priority: P3, required_fields: [amount], high_risk: false }
-      topup_failed: { label: "Top-up failed", hint: "buying phone credit or a data bundle (شحن رصيد، شحن خط، كارت) failed or was deducted without arriving", default_priority: P3, required_fields: [amount], high_risk: false }
-      merchant_payment: { label: "Merchant payment", default_priority: P3, required_fields: [amount], high_risk: false }
+      bill_not_reflected: { label: "Bill paid, not reflected", label_ar: "فاتورة مدفوعة وما انحسبت", default_priority: P3, required_fields: [amount], high_risk: false }
+      topup_failed: { label: "Top-up failed", label_ar: "شحن رصيد فشل", hint: "buying phone credit or a data bundle (شحن رصيد، شحن خط، كارت) failed or was deducted without arriving", default_priority: P3, required_fields: [amount], high_risk: false }
+      merchant_payment: { label: "Merchant payment", label_ar: "دفع لمتجر", default_priority: P3, required_fields: [amount], high_risk: false }
 
   fraud_security:
     label: "Fraud & security"
+    label_ar: "الاحتيال والأمان"
     team: fraud
     always_escalate: true
     subcategories:
-      suspected_scam: { label: "Suspected scam / OTP shared", default_priority: P1, required_fields: [], high_risk: true }
-      unauthorized_charge: { label: "Unauthorized or unknown charge", default_priority: P1, required_fields: [], high_risk: true }
+      suspected_scam: { label: "Suspected scam / OTP shared", label_ar: "احتيال أو مشاركة الرمز", default_priority: P1, required_fields: [], high_risk: true }
+      unauthorized_charge: { label: "Unauthorized or unknown charge", label_ar: "خصم غير معروف", default_priority: P1, required_fields: [], high_risk: true }
 
   general:
     label: "General"
+    label_ar: "عام"
     team: general
     subcategories:
-      app_bug: { label: "App bug", default_priority: P3, required_fields: [], high_risk: false }
-      fees_limits_question: { label: "Fees & limits question", hint: "asks about, or disputes, an app fee or a limit (not an agent fee)", default_priority: P3, required_fields: [], high_risk: false }
-      complaint: { label: "Complaint", default_priority: P3, required_fields: [], high_risk: false }
-      unclear: { label: "Unclear", default_priority: P3, required_fields: [], high_risk: false }
+      app_bug: { label: "App bug", label_ar: "خلل بالتطبيق", default_priority: P3, required_fields: [], high_risk: false }
+      fees_limits_question: { label: "Fees & limits question", label_ar: "سؤال عن الرسوم والحدود", hint: "asks about, or disputes, an app fee or a limit (not an agent fee)", default_priority: P3, required_fields: [], high_risk: false }
+      complaint: { label: "Complaint", label_ar: "شكوى", default_priority: P3, required_fields: [], high_risk: false }
+      unclear: { label: "Unclear", label_ar: "غير واضح", default_priority: P3, required_fields: [], high_risk: false }
