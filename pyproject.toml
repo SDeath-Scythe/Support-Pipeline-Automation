@@ -1,0 +1,9 @@
+[project]
+name = "support-pipeline-automation"
+version = "0.1.0"
+description = "Sorts Iraqi-dialect support tickets and pre-drafts replies for human approval"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

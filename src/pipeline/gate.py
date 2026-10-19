@@ -1,0 +1,50 @@
+"""Confidence gate: decides continue / re-check / escalate.
+
+The model's own score is never trusted alone. Rule checks can lower it, and
+high-risk subcategories are always re-checked by a second model.
+"""
+
+from __future__ import annotations
+
+from .config import taxonomy, thresholds
+from .schemas import Extraction, GateResult
+
+
+def check(extraction: Extraction, cleaned_text: str) -> GateResult:
+    tax = taxonomy()
+    t = thresholds()["confidence"]
+    score = extraction.confidence
+    flags: list[str] = []
+    reasons: list[str] = []
+
+    sub = tax.subcategories.get(extraction.subcategory)
+    if sub is None or sub.category != extraction.category:
+        return GateResult(
+            confidence=0.0, needs_recheck=False, escalate=True,
+            flags=["invalid_category"], reasons=["Category and subcategory do not match the taxonomy"],
+        )
+
+    if sub.always_escalate:
+        return GateResult(
+            confidence=score, needs_recheck=False, escalate=True,
+            flags=["fraud"], reasons=["Fraud and security tickets are always handled by a person"],
+        )
+
+    # A reference the model "found" must actually appear in the ticket text.
+    if extraction.reference and extraction.reference not in cleaned_text:
+        flags.append("ref_not_in_text")
+        reasons.append("Extracted reference does not appear in the ticket")
+        score = min(score, t["missing_field_cap"])
+
+    for field in sub.required_fields:
+        value = {"reference": extraction.reference, "amount": extraction.amount_iqd}.get(field)
+        if value in (None, ""):
+            flags.append(f"missing:{field}")
+            score = min(score, t["missing_field_cap"])
+
+    if score < t["recheck_from"]:
+        reasons.append(f"Low confidence ({score:.2f})")
+        return GateResult(confidence=score, needs_recheck=False, escalate=True, flags=flags, reasons=reasons)
+
+    needs_recheck = score < t["pass_above"] or sub.high_risk
+    return GateResult(confidence=score, needs_recheck=needs_recheck, escalate=False, flags=flags, reasons=reasons)

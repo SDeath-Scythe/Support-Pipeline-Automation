@@ -1,0 +1,96 @@
+# Ticket taxonomy: 8 categories, 23 subcategories.
+# Each subcategory routes to exactly one team. Routing is a rule, not a model decision.
+#
+# default_priority: P1 (urgent) .. P3 (normal). The router can raise it
+#   (large amount, repeat contact, urgent wording) but never lower it.
+# high_risk: always sent to the Sonnet re-check, whatever the confidence score.
+# always_escalate: never auto-drafted; a human takes it with a note.
+# required_fields: if the model can't find these in the ticket, the confidence
+#   score is lowered and the draft is flagged.
+
+teams:
+  transfers: { label: "Transfers team", label_ar: "قسم التحويلات" }
+  accounts: { label: "Accounts team", label_ar: "قسم الحسابات" }
+  onboarding: { label: "Onboarding team", label_ar: "قسم التوثيق" }
+  agent_network: { label: "Agent network", label_ar: "قسم الوكلاء" }
+  cards: { label: "Cards team", label_ar: "قسم البطاقات" }
+  bills: { label: "Bills team", label_ar: "قسم الفواتير" }
+  fraud: { label: "Fraud team", label_ar: "قسم الاحتيال" }
+  general: { label: "General queue", label_ar: "الطابور العام" }
+
+categories:
+  transfers:
+    label: "Transfers"
+    team: transfers
+    subcategories:
+      not_received:
+        label: "Not received or deducted"
+        default_priority: P2
+        required_fields: [reference, amount]
+        high_risk: false
+      wrong_recipient:
+        label: "Wrong recipient"
+        default_priority: P2
+        required_fields: [reference, amount]
+        high_risk: false
+      reversal_request:
+        label: "Reversal request"
+        default_priority: P2
+        required_fields: [reference, amount]
+        high_risk: true
+
+  account_access:
+    label: "Account & access"
+    team: accounts
+    subcategories:
+      login_otp: { label: "Login / OTP", default_priority: P2, required_fields: [], high_risk: false }
+      forgot_pin: { label: "Forgot PIN", default_priority: P3, required_fields: [], high_risk: false }
+      blocked_account: { label: "Blocked account", default_priority: P2, required_fields: [], high_risk: false }
+      sim_change: { label: "SIM change", default_priority: P2, required_fields: [], high_risk: true }
+
+  verification:
+    label: "Verification"
+    team: onboarding
+    subcategories:
+      rejected_or_pending: { label: "Rejected or pending", default_priority: P3, required_fields: [], high_risk: false }
+      limit_upgrade: { label: "Limit upgrade", default_priority: P3, required_fields: [], high_risk: false }
+
+  agents_cash:
+    label: "Agents & cash"
+    team: agent_network
+    subcategories:
+      overcharged_fee: { label: "Overcharged fee", default_priority: P3, required_fields: [amount], high_risk: false }
+      cash_in_not_credited: { label: "Cash-in not credited", default_priority: P2, required_fields: [amount], high_risk: false }
+      cash_out_refused: { label: "Cash-out refused", default_priority: P3, required_fields: [], high_risk: false }
+
+  cards:
+    label: "Cards"
+    team: cards
+    subcategories:
+      card_payment_failed: { label: "Card payment failed", default_priority: P3, required_fields: [amount], high_risk: false }
+      delivery_or_activation: { label: "Delivery or activation", default_priority: P3, required_fields: [], high_risk: false }
+
+  bills_topup:
+    label: "Bills & top-up"
+    team: bills
+    subcategories:
+      bill_not_reflected: { label: "Bill paid, not reflected", default_priority: P3, required_fields: [amount], high_risk: false }
+      topup_failed: { label: "Top-up failed", default_priority: P3, required_fields: [amount], high_risk: false }
+      merchant_payment: { label: "Merchant payment", default_priority: P3, required_fields: [amount], high_risk: false }
+
+  fraud_security:
+    label: "Fraud & security"
+    team: fraud
+    always_escalate: true
+    subcategories:
+      suspected_scam: { label: "Suspected scam / OTP shared", default_priority: P1, required_fields: [], high_risk: true }
+      unauthorized_charge: { label: "Unauthorized or unknown charge", default_priority: P1, required_fields: [], high_risk: true }
+
+  general:
+    label: "General"
+    team: general
+    subcategories:
+      app_bug: { label: "App bug", default_priority: P3, required_fields: [], high_risk: false }
+      fees_limits_question: { label: "Fees & limits question", default_priority: P3, required_fields: [], high_risk: false }
+      complaint: { label: "Complaint", default_priority: P3, required_fields: [], high_risk: false }
+      unclear: { label: "Unclear", default_priority: P3, required_fields: [], high_risk: false }

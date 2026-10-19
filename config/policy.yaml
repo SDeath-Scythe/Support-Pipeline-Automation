@@ -1,0 +1,75 @@
+# Grounding: the ONLY facts a draft reply may state.
+# If a fact is not here, the draft must not promise it (no invented timelines,
+# fees or outcomes). All values are fictional, for a synthetic company.
+#
+# TODO(Salih): fill in the values marked null before drafts are built.
+
+company:
+  name_ar: null            # fictional company name shown in replies
+  support_hours_ar: null   # e.g. "من السبت للخميس، ٩ الصبح لـ ٩ بالليل"
+
+subcategories:
+  not_received:
+    response_time_ar: null   # e.g. "خلال ٢٤ ساعة"
+    customer_should_send: [reference, amount, date]
+  wrong_recipient:
+    response_time_ar: null
+    customer_should_send: [reference, amount, recipient_number]
+  reversal_request:
+    response_time_ar: null
+    customer_should_send: [reference, amount]
+  login_otp:
+    response_time_ar: null
+    customer_should_send: []
+  forgot_pin:
+    response_time_ar: null
+    customer_should_send: []
+  blocked_account:
+    response_time_ar: null
+    customer_should_send: []
+  sim_change:
+    response_time_ar: null
+    customer_should_send: []
+  rejected_or_pending:
+    response_time_ar: null
+    customer_should_send: []
+  limit_upgrade:
+    response_time_ar: null
+    customer_should_send: []
+  overcharged_fee:
+    response_time_ar: null
+    customer_should_send: [amount, agent_location]
+  cash_in_not_credited:
+    response_time_ar: null
+    customer_should_send: [amount, agent_location, date]
+  cash_out_refused:
+    response_time_ar: null
+    customer_should_send: [agent_location]
+  card_payment_failed:
+    response_time_ar: null
+    customer_should_send: [amount, merchant]
+  delivery_or_activation:
+    response_time_ar: null
+    customer_should_send: []
+  bill_not_reflected:
+    response_time_ar: null
+    customer_should_send: [amount, bill_type]
+  topup_failed:
+    response_time_ar: null
+    customer_should_send: [amount, phone_number]
+  merchant_payment:
+    response_time_ar: null
+    customer_should_send: [amount, merchant]
+  app_bug:
+    response_time_ar: null
+    customer_should_send: [screenshot]
+  fees_limits_question:
+    response_time_ar: null
+    customer_should_send: []
+  complaint:
+    response_time_ar: null
+    customer_should_send: []
+  unclear:
+    response_time_ar: null
+    customer_should_send: []
+  # Fraud subcategories are always escalated, so they have no draft policy.

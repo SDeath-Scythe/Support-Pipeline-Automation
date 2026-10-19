@@ -1,0 +1,25 @@
+# One model per role. To swap a model, change one line here; no code changes.
+# The live pipeline only uses `classifier` and `drafter`.
+# `generator` and `evaluator` are development-only (synthetic data and grading).
+
+roles:
+  classifier:
+    model: claude-haiku-5-5
+    max_tokens: 1024
+    temperature: 0.0
+  drafter:
+    model: claude-sonnet-5-5
+    max_tokens: 1024
+    temperature: 0.3
+  rechecker:
+    model: claude-sonnet-5-5
+    max_tokens: 1024
+    temperature: 0.0
+  generator:      # dev only
+    model: claude-opus-5-5
+    max_tokens: 4096
+    temperature: 1.0
+  evaluator:      # dev only
+    model: claude-opus-5-5
+    max_tokens: 2048
+    temperature: 0.0
