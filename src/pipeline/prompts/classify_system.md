@@ -22,9 +22,6 @@ Pick exactly one `category` and one `subcategory` from this list. Use the keys, 
 5. **Two issues:** only when the customer raises a separate, second request (for example a question about limits after a transfer problem). The one that needs action first goes in `subcategory`, the other in `secondary_subcategory`. A consequence of the main problem is not a second issue: being locked out after a scam, or wanting the money back after a wrong transfer, stays with the main subcategory. Otherwise `secondary_subcategory` is null.
 6. **Nothing to act on** (only a greeting, "عندي مشكلة" with no detail, off-topic questions): `general` / `unclear`.
 
-## Reading Arabizi
-In Arabizi, digits stand for letters: 2 = ء، 3 = ع، 5 = خ، 6 = ط، 7 = ح، 8 = غ، 9 = ق. Read it as Arabic first, then classify. For example "ash7an" = اشحن, "floos" = فلوس, "tingis" = تنكص (is deducted).
-
 ## Fields to extract
 Copy values from the ticket. Never invent, guess or complete a value. If it is not in the ticket, use null.
 
