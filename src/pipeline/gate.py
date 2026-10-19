@@ -6,8 +6,33 @@ high-risk subcategories are always re-checked by a second model.
 
 from __future__ import annotations
 
+import re
+
+from .clean import clean
 from .config import taxonomy, thresholds
 from .schemas import Extraction, GateResult
+
+
+_ALNUM = re.compile(r"[^0-9A-Za-z]")
+# A reference as customers type it: chunks of letters/digits joined by - space / _ .
+_REF_RUN = re.compile(r"[0-9A-Za-z]+(?:[\s\-/_.]+[0-9A-Za-z]+)*")
+
+
+def _key(s: str) -> str:
+    return _ALNUM.sub("", clean(s)).lower()
+
+
+def reference_in_text(reference: str, cleaned_text: str) -> bool:
+    """True if the reference appears in the ticket, ignoring separators and digit script.
+
+    "44719032" matches "4471-٩٠٣٢" and "4471 9032"; an invented number does not.
+    """
+    if reference in cleaned_text:
+        return True
+    key = _key(reference)
+    if not key:
+        return False
+    return any(key in _key(run) for run in _REF_RUN.findall(clean(cleaned_text)))
 
 
 def check(extraction: Extraction, cleaned_text: str) -> GateResult:
@@ -31,7 +56,7 @@ def check(extraction: Extraction, cleaned_text: str) -> GateResult:
         )
 
     # A reference the model "found" must actually appear in the ticket text.
-    if extraction.reference and extraction.reference not in cleaned_text:
+    if extraction.reference and not reference_in_text(extraction.reference, cleaned_text):
         flags.append("ref_not_in_text")
         reasons.append("Extracted reference does not appear in the ticket")
         score = min(score, t["missing_field_cap"])

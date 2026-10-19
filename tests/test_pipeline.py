@@ -143,3 +143,31 @@ def test_cli_backend_uses_plan_not_api_key(monkeypatch):
     assert cmd[cmd.index("--tools") + 1] == ""
     assert seen["kw"]["input"] == "تكت"
     assert "ANTHROPIC_API_KEY" not in seen["kw"]["env"]
+
+
+# --- edge-case tickets ---
+
+T1 = clean("اخوية حولت خمسين لابن عمي البارحة بالليل، انقصت من رصيدي بس هو يكول ما وصلته. "
+           "رقم العملية 4471-٩٠٣٢. وبعد سؤال، شكد حد التحويل اليومي؟")
+T1_NO_REF = clean("اخوية حولت خمسين لابن عمي البارحة بالليل، انقصت من رصيدي بس هو يكول ما وصلته. "
+                  "وبعد سؤال، شكد حد التحويل اليومي؟")
+
+
+def test_reference_matches_despite_separators_and_digit_script():
+    from pipeline.gate import reference_in_text
+
+    for ref in ["44719032", "4471-9032", "4471 9032", "٤٤٧١٩٠٣٢"]:
+        assert reference_in_text(ref, T1), ref
+    assert not reference_in_text("44719033", T1)   # invented
+    assert not reference_in_text("9032", "") 
+
+
+def test_ticket1_normalized_reference_passes_gate():
+    g = check(ex(reference="44719032", amount_iqd=50000, confidence=0.9), T1)
+    assert not g.escalate and not g.needs_recheck and "ref_not_in_text" not in g.flags
+
+
+def test_ticket1_without_reference_is_flagged_not_escalated():
+    g = check(ex(reference=None, amount_iqd=50000, confidence=0.9), T1_NO_REF)
+    assert "missing:reference" in g.flags
+    assert g.confidence == 0.60 and g.needs_recheck and not g.escalate
