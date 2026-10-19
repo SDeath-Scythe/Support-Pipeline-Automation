@@ -39,6 +39,17 @@ Each role reads its model from [`config/models.yaml`](config/models.yaml), so an
 | drafter, rechecker | Claude Sonnet 5.5 | Live pipeline |
 | generator, evaluator | Claude Opus 5.5 | Development only (synthetic data, grading) |
 
+### Two backends: free in development, API for every number
+
+`config/models.yaml` has a `backend:` switch (override per run with `LLM_BACKEND=api|cli`). Prompts and code are identical on both.
+
+| Backend | Runs on | Use it for |
+|---|---|---|
+| `cli` | Claude Code headless (`claude -p`) on the developer's own Claude plan | Wiring, smoke tests on 5–20 tickets, reading outputs while writing prompts |
+| `api` | Anthropic API key | **Every number**: accuracy, calibration, threshold tuning, the MVP run and the demo |
+
+Claude Code adds its own context and ignores temperature and max_tokens, so confidence scores from `cli` are not comparable with the API. Evaluation and calibration scripts call `require_api()` and refuse to run on `cli`. The `cli` backend also strips `ANTHROPIC_API_KEY` from its environment so it can never spend API credits by accident.
+
 ## Repo layout
 
 ```
@@ -53,8 +64,11 @@ docs/         design brief
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # add your ANTHROPIC_API_KEY
+cp .env.example .env        # add your ANTHROPIC_API_KEY (needed for the api backend)
 pytest
+
+LLM_BACKEND=cli python ...   # development on your Claude plan (needs `claude` logged in)
+LLM_BACKEND=api python ...   # measured runs, MVP and demo
 ```
 
 ## Status

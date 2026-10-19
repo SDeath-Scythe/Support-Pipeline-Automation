@@ -88,3 +88,58 @@ def test_large_amount_raises_priority():
 
 def test_urgent_words_raise_priority():
     assert route(ex(subcategory="topup_failed", category="bills_topup"), "ضروري الرصيد ما وصل") == ("bills", "P2")
+
+
+# --- LLM backend switch ---
+
+def test_backend_env_override(monkeypatch):
+    from pipeline import llm
+
+    monkeypatch.setenv("LLM_BACKEND", "api")
+    assert llm.backend() == "api"
+    monkeypatch.setenv("LLM_BACKEND", "CLI")
+    assert llm.backend() == "cli"
+    monkeypatch.setenv("LLM_BACKEND", "nope")
+    try:
+        llm.backend()
+        assert False, "unknown backend should raise"
+    except llm.BackendError:
+        pass
+
+
+def test_require_api_blocks_cli(monkeypatch):
+    from pipeline import llm
+
+    monkeypatch.setenv("LLM_BACKEND", "cli")
+    try:
+        llm.require_api("Calibration")
+        assert False, "should refuse to calibrate on cli"
+    except llm.BackendError as e:
+        assert "Calibration" in str(e)
+    monkeypatch.setenv("LLM_BACKEND", "api")
+    llm.require_api("Calibration")
+
+
+def test_cli_backend_uses_plan_not_api_key(monkeypatch):
+    import json
+    import subprocess
+
+    from pipeline import llm
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"], seen["kw"] = cmd, kw
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"is_error": False, "result": "ok"}), stderr="")
+
+    monkeypatch.setenv("LLM_BACKEND", "cli")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert llm.call("classifier", "SYS", "تكت") == "ok"
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--model") + 1] == models()["classifier"]["model"]
+    assert cmd[cmd.index("--system-prompt") + 1] == "SYS"
+    assert cmd[cmd.index("--tools") + 1] == ""
+    assert seen["kw"]["input"] == "تكت"
+    assert "ANTHROPIC_API_KEY" not in seen["kw"]["env"]

@@ -68,5 +68,11 @@ def models() -> dict[str, dict[str, Any]]:
 
 
 @lru_cache(maxsize=1)
+def llm_backend() -> str:
+    """Default backend from models.yaml; the LLM_BACKEND env var overrides it."""
+    return str(load_yaml("models.yaml").get("backend", "api"))
+
+
+@lru_cache(maxsize=1)
 def thresholds() -> dict[str, Any]:
     return load_yaml("thresholds.yaml")

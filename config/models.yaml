@@ -1,6 +1,13 @@
 # One model per role. To swap a model, change one line here; no code changes.
-# The live pipeline only uses `classifier` and `drafter`.
+# The live pipeline uses `classifier`, `rechecker` and `drafter`.
 # `generator` and `evaluator` are development-only (synthetic data and grading).
+
+# Which backend sends the calls. Override per run with LLM_BACKEND=api|cli.
+#   cli  Claude Code headless (`claude -p`) on your Claude plan. Free; for wiring,
+#        smoke tests and reading outputs. Scores are NOT comparable with the API.
+#   api  Anthropic API key. Required for every number: accuracy, calibration,
+#        thresholds, the MVP run and the demo.
+backend: cli
 
 roles:
   classifier:
