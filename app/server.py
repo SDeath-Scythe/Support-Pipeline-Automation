@@ -28,13 +28,26 @@ from pipeline.llm import backend  # noqa: E402
 from pipeline.run import process  # noqa: E402
 
 STATIC = Path(__file__).parent / "static"
-PROBES = ROOT / "data" / "probes" / "edge_cases.jsonl"
+PROBES = ROOT / "data" / "probes"
+RUNS = ROOT / "runs"
 
 
-def load_tickets() -> list[dict]:
-    if not PROBES.exists():
+def load_tickets(name: str) -> list[dict]:
+    path = PROBES / f"{Path(name).name}.jsonl"
+    if not path.exists():
         return []
-    return [json.loads(line) for line in PROBES.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def list_runs() -> list[dict]:
+    out = []
+    for f in sorted(RUNS.glob("*.json"), reverse=True):
+        try:
+            meta = json.loads(f.read_text(encoding="utf-8"))["meta"]
+        except (ValueError, KeyError):
+            continue
+        out.append({"name": f.stem, **meta})
+    return out
 
 
 def meta() -> dict:
@@ -69,8 +82,17 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(url.query)
         if url.path in ("/", "/index.html"):
             return self._send((STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
+        if url.path == "/api/sets":
+            return self._json(sorted(p.stem for p in PROBES.glob("*.jsonl")))
         if url.path == "/api/tickets":
-            return self._json(load_tickets())
+            return self._json(load_tickets((q.get("set") or ["edge_cases"])[0]))
+        if url.path == "/api/runs":
+            return self._json(list_runs())
+        if url.path == "/api/run":
+            f = RUNS / f"{Path((q.get('name') or [''])[0]).name}.json"
+            if not f.exists():
+                return self._json({"error": "No such run"}, 404)
+            return self._send(f.read_bytes(), "application/json; charset=utf-8")
         if url.path == "/api/meta":
             return self._json(meta())
         if url.path == "/api/prompts":

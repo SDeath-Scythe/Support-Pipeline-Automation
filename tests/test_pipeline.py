@@ -140,7 +140,7 @@ def test_cli_backend_uses_plan_not_api_key(monkeypatch):
     cmd = seen["cmd"]
     assert cmd[cmd.index("--model") + 1] == models()["classifier"]["model"]
     assert cmd[cmd.index("--system-prompt") + 1] == "SYS"
-    assert cmd[cmd.index("--tools") + 1] == ""
+    assert cmd[cmd.index("--disallowedTools") + 1] == "*"
     assert seen["kw"]["input"] == "تكت"
     assert "ANTHROPIC_API_KEY" not in seen["kw"]["env"]
 

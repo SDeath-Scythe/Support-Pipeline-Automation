@@ -151,6 +151,34 @@ textarea.edit { width: 100%; max-width: 640px; min-height: 120px; padding: 12px 
 .gold td { padding: 4px 8px; border-bottom: 1px solid var(--line); }
 .gold td:first-child { color: var(--muted); width: 150px; }
 .gold .y { color: var(--ok); font-weight: 600; } .gold .n { color: var(--bad); font-weight: 600; }
+
+select.source { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font: inherit; color: inherit; }
+.mark-ok { color: var(--ok); font-weight: 700; } .mark-no { color: var(--bad); font-weight: 700; }
+
+/* Run overview */
+.overview h2 { font-size: 22px; margin: 0 0 4px; }
+.overview .lede { color: var(--muted); margin: 0 0 20px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 22px; }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.stat b { display: block; font-size: 24px; line-height: 1.2; }
+.stat span { font-size: 13px; color: var(--muted); }
+.section-title { font-size: 16px; font-weight: 600; margin: 26px 0 8px; }
+.bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden; }
+.bar div { display: grid; place-items: center; font-size: 12.5px; font-weight: 600; min-width: 0; white-space: nowrap; }
+.bar .drafted { background: var(--ok-tint); color: var(--ok); }
+.bar .flagged { background: var(--warn-tint); color: var(--warn); }
+.bar .escalated { background: var(--bad-tint); color: var(--bad); }
+table.grid { border-collapse: collapse; width: 100%; font-size: 13.5px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+table.grid th { text-align: start; font-weight: 600; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--paper); }
+table.grid td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.grid tr:last-child td { border-bottom: 0; }
+table.grid tbody tr.click { cursor: pointer; }
+table.grid tbody tr.click:hover td { background: var(--paper); }
+.acc { display: flex; align-items: center; gap: 8px; }
+.acc i { display: block; height: 8px; border-radius: 4px; background: var(--ink); }
+.pill { font-size: 12px; padding: 1px 8px; border-radius: 999px; }
+.pill.drafted { background: var(--ok-tint); color: var(--ok); } .pill.flagged { background: var(--warn-tint); color: var(--warn); } .pill.escalated { background: var(--bad-tint); color: var(--bad); }
+.table-wrap { overflow-x: auto; }
 </style>
 </head>
 <body>
@@ -169,6 +197,8 @@ textarea.edit { width: 100%; max-width: 640px; min-height: 120px; padding: 12px 
       <button class="btn ghost" id="runAll">شغّل كل القائمة</button>
     </div>
     <h2>القائمة</h2>
+    <select class="source" id="source" aria-label="مصدر التذاكر"></select>
+    <button class="btn ghost" id="showOverview" hidden>ملخص التشغيل</button>
     <ul class="queue" id="queue"></ul>
   </aside>
 
@@ -193,7 +223,7 @@ const FIELD_AR = { reference: "رقم العملية", amount: "المبلغ", d
   agent_location: "اسم الوكيل ومكانه", merchant: "اسم المتجر", bill_type: "نوع الفاتورة", phone_number: "الرقم المشحون", screenshot: "صورة من الشاشة" };
 const CHANGE_AR = { arabic_digits: "رقم عربي تحوّل", tatweel: "تطويل انشال", extra_spaces: "مسافة زايدة" };
 
-let META = null, TICKETS = [], current = null, busy = false;
+let META = null, TICKETS = [], current = null, busy = false, RUN = null;
 const status = {}; // ticket key -> outcome
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -210,10 +240,37 @@ const subLabel = (k) => META.subcategories[k] ? `${META.subcategories[k].categor
 const norm = (s) => s ? String(s).replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[^0-9A-Za-z]/g, "").toLowerCase() : null;
 
 async function init() {
-  [META, TICKETS] = await Promise.all([fetch("/api/meta").then(r => r.json()), fetch("/api/tickets").then(r => r.json())]);
+  const [meta, sets, runs] = await Promise.all(["/api/meta", "/api/sets", "/api/runs"].map(u => fetch(u).then(r => r.json())));
+  META = meta;
+  const src = $("#source");
+  const g1 = el("optgroup", { label: "تشغيل مباشر" });
+  sets.forEach(n => g1.append(el("option", { value: `set:${n}`, text: `${n} (مباشر)` })));
+  const g2 = el("optgroup", { label: "تشغيلات محفوظة" });
+  runs.forEach(r => g2.append(el("option", { value: `run:${r.name}`, text: `${r.set} · ${r.started.replace("T", " ").slice(0, 16)} · ${r.backend}` })));
+  src.append(g1); if (runs.length) src.append(g2);
+  src.value = runs.length ? `run:${runs[0].name}` : `set:${sets.includes("edge_cases") ? "edge_cases" : sets[0]}`;
+  src.onchange = () => loadSource(src.value);
+  await loadSource(src.value);
   $("#backend").innerHTML = "";
   $("#backend").append("يشتغل على: ", el("b", { text: META.backend === "cli" ? "خطة Claude (تطوير)" : "API" }),
     `  ·  ${META.models.classifier} / ${META.models.drafter}`);
+}
+
+async function loadSource(v) {
+  if (busy) return;
+  const [kind, name] = [v.slice(0, 3), v.slice(4)];
+  current = null; for (const k in status) delete status[k];
+  if (kind === "set") {
+    RUN = null; TICKETS = await fetch(`/api/tickets?set=${encodeURIComponent(name)}`).then(r => r.json());
+    $("#showOverview").hidden = true;
+    $("#main").replaceChildren(el("p", { class: "empty", text: "اختار تذكرة من القائمة أو الصق وحدة جديدة، وراح تشوف شلون تمر بكل مرحلة." }));
+  } else {
+    RUN = await fetch(`/api/run?name=${encodeURIComponent(name)}`).then(r => r.json());
+    TICKETS = RUN.tickets.map(r => r.ticket);
+    RUN.tickets.forEach(r => (status[r.ticket.id] = r.result.outcome));
+    $("#showOverview").hidden = false;
+    renderOverview();
+  }
   renderQueue();
 }
 
@@ -221,10 +278,12 @@ function renderQueue() {
   const q = $("#queue"); q.innerHTML = "";
   TICKETS.forEach((t, i) => {
     const key = t.id || `custom-${i}`;
+    const row = RUN?.tickets[i];
+    const verdict = row ? (scoreRow(row).sub ? el("span", { class: "mark-ok", text: " ✓" }) : el("span", { class: "mark-no", text: " ✗" })) : null;
     const b = el("button", { "aria-current": String(current === key) },
       el("span", { class: `dot ${status[key] || ""}` }),
-      el("span", {}, el("span", { class: "q-text", text: t.text }), el("span", { class: "q-meta", text: `${t.id}${t.trap ? " · " + t.trap : ""}` })));
-    b.onclick = () => !busy && run(t, key);
+      el("span", {}, el("span", { class: "q-text", text: t.text }), el("span", { class: "q-meta" }, `${t.id}${t.difficulty ? " · " + t.difficulty : ""}${t.trap ? " · " + t.trap : ""}`, verdict)));
+    b.onclick = () => !busy && (RUN ? replay(i) : run(t, key));
     q.append(el("li", {}, b));
   });
 }
@@ -348,20 +407,22 @@ function renderResult(d) {
     take.onclick = () => { actions.replaceChildren(el("span", { class: "chip", text: "صارت عندك، المسودة ما تنرسل" })); };
     actions.append(approve, edit, take); box.append(actions);
   }
-  if (current && TICKETS.find(t => t.id === current)?.subcategory) box.append(goldTable(TICKETS.find(t => t.id === current), d));
+  const g = current && TICKETS.find(t => t.id === current);
+  if (g?.subcategory) box.append(goldTable(g, d));
   $("#result").replaceChildren(box);
 }
 
 function goldTable(g, d) {
   const ex = d.extraction || {};
+  // Only score fields the ticket was labelled with.
   const rows = [
-    ["النوع", g.subcategory, ex.subcategory, subLabel],
-    ["رقم العملية", g.reference, ex.reference, x => x ?? "—", true],
-    ["المبلغ (دينار)", g.amount_iqd, ex.amount_iqd, x => x?.toLocaleString("en") ?? "—"],
-    ["المبلغ (دولار)", g.amount_usd, ex.amount_usd, x => x ?? "—"],
-    ["الأولوية", g.priority, d.priority, x => x ?? "—"],
-    ["النتيجة", g.outcome, d.outcome, x => OUTCOME_AR[x] ?? "—"],
-  ];
+    ["subcategory", "النوع", g.subcategory, ex.subcategory, subLabel],
+    ["reference", "رقم العملية", g.reference, ex.reference, x => x ?? "—", true],
+    ["amount_iqd", "المبلغ (دينار)", g.amount_iqd, ex.amount_iqd, x => x?.toLocaleString("en") ?? "—"],
+    ["amount_usd", "المبلغ (دولار)", g.amount_usd, ex.amount_usd, x => x ?? "—"],
+    ["priority", "الأولوية", g.priority, d.priority, x => x ?? "—"],
+    ["outcome", "النتيجة", g.outcome, d.outcome, x => OUTCOME_AR[x] ?? "—"],
+  ].filter(r => r[0] in g).map(r => r.slice(1));
   const tb = el("tbody");
   for (const [k, want, got, f, isRef] of rows) {
     const ok = isRef ? norm(want) === norm(got) : (want ?? null) === (got ?? null);
@@ -388,12 +449,117 @@ function run(ticket, key) {
   });
 }
 
+function replay(i) {
+  const row = RUN.tickets[i];
+  current = row.ticket.id; renderQueue(); buildView(row.ticket);
+  $("#main").prepend(el("div", { class: "note", text: `إعادة عرض من تشغيل محفوظ · ${RUN.meta.backend} · ${row.seconds}s` }));
+  const evs = row.events.filter(e => e.status !== "running");
+  const quick = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  evs.forEach((e, k) => quick ? render(e) : setTimeout(() => render(e), k * 160));
+  if (!evs.some(e => e.stage === "result")) render({ stage: "result", status: "done", data: row.result, ms: 0 });
+  if (window.innerWidth <= 900) $("#main").scrollIntoView();
+}
+
+function ev(row, stage) { return row.events.find(e => e.stage === stage && e.status !== "running"); }
+
+function scoreRow(row) {
+  const g = row.ticket, r = row.result;
+  const cl = ev(row, "classify"), gate = ev(row, "gate"), rc = ev(row, "recheck"), dr = ev(row, "draft");
+  const ex = cl?.status === "done" ? cl.data.extraction : null;
+  return {
+    sub: !!ex && ex.subcategory === g.subcategory,
+    got: ex?.subcategory, conf: ex?.confidence, gateConf: gate?.data.confidence,
+    outcome: r.outcome === g.outcome, priority: r.priority === g.priority,
+    recheck: rc?.status === "done", agree: rc?.data?.agree,
+    calls: (cl ? 1 : 0) + (rc?.status === "done" ? 1 : 0) + (dr?.status === "done" ? 1 : 0),
+  };
+}
+
+function renderOverview() {
+  current = null; renderQueue();
+  const rows = RUN.tickets, n = rows.length, sc = rows.map(scoreRow);
+  const count = f => sc.filter(f).length;
+  const pct = (a, b) => b ? Math.round((100 * a) / b) : 0;
+  const outc = { drafted: 0, flagged: 0, escalated: 0 };
+  rows.forEach(r => outc[r.result.outcome]++);
+  const calls = sc.reduce((a, s) => a + s.calls, 0);
+  const avg = rows.reduce((a, r) => a + r.seconds, 0) / n;
+
+  const stats = el("div", { class: "stats" },
+    [[`${count(s => s.sub)}/${n}`, "نوع المشكلة صحيح"], [`${count(s => s.outcome)}/${n}`, "النتيجة صحيحة"],
+     [`${count(s => s.priority)}/${n}`, "الأولوية صحيحة"], [`${pct(outc.escalated, n)}%`, "نسبة التصعيد"],
+     [`${count(s => s.recheck)}`, "راحت للمراجعة الثانية"], [`${(calls / n).toFixed(1)}`, "استدعاء نموذج لكل تذكرة"],
+     [`${avg.toFixed(1)}s`, "معدل وقت التذكرة"]].map(([b, t]) => el("div", { class: "stat" }, el("b", { class: "ltr", text: b }), el("span", { text: t }))));
+
+  const bar = el("div", { class: "bar" }, ["drafted", "flagged", "escalated"].filter(k => outc[k]).map(k =>
+    el("div", { class: k, style: `width:${(100 * outc[k]) / n}%`, text: `${OUTCOME_AR[k].split(":")[0].split("،")[0]} ${outc[k]}` })));
+
+  // accuracy by difficulty
+  const diffs = ["easy", "medium", "hard"].filter(d => rows.some(r => r.ticket.difficulty === d));
+  const DIFF_AR = { easy: "سهلة", medium: "متوسطة", hard: "صعبة" };
+  const diffTable = el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ["المستوى", "التذاكر", "النوع صحيح", "النتيجة صحيحة"].map(h => el("th", { text: h })))),
+    el("tbody", {}, diffs.map(d => { const idx = rows.map((r, i) => i).filter(i => rows[i].ticket.difficulty === d);
+      const a = idx.filter(i => sc[i].sub).length, o = idx.filter(i => sc[i].outcome).length;
+      return el("tr", {}, el("td", { text: DIFF_AR[d] }), el("td", { text: idx.length }), el("td", {}, accCell(a, idx.length)), el("td", {}, accCell(o, idx.length))); })));
+
+  // calibration: model's own confidence vs how often it was right
+  const bins = [[0.9, 1.01, "0.90 فما فوق"], [0.75, 0.9, "0.75 – 0.90"], [0.6, 0.75, "0.60 – 0.75"], [0, 0.6, "أقل من 0.60"]];
+  const calib = el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ["ثقة النموذج بنفسه", "التذاكر", "كم وحدة صحيحة"].map(h => el("th", { text: h })))),
+    el("tbody", {}, bins.map(([lo, hi, label]) => { const idx = sc.filter(s => s.conf != null && s.conf >= lo && s.conf < hi);
+      return el("tr", {}, el("td", { class: "ltr", text: label }), el("td", { text: idx.length }), el("td", {}, idx.length ? accCell(idx.filter(s => s.sub).length, idx.length) : "—")); })));
+
+  // all tickets
+  const body = el("tbody");
+  rows.forEach((r, i) => {
+    const s = sc[i], g = r.ticket;
+    const tr = el("tr", { class: "click", tabindex: "0" },
+      el("td", { class: "ltr", text: g.id }),
+      el("td", { text: DIFF_AR[g.difficulty] || "" }),
+      el("td", {}, subLabel(g.subcategory)),
+      el("td", {}, s.sub ? el("span", { class: "mark-ok", text: "✓" }) : el("span", {}, el("span", { class: "mark-no", text: "✗ " }), subLabel(s.got))),
+      el("td", { class: "ltr", text: s.conf == null ? "—" : (Math.abs(s.conf - s.gateConf) > 0.005 ? `${s.conf.toFixed(2)} → ${s.gateConf.toFixed(2)}` : s.conf.toFixed(2)) }),
+      el("td", {}, s.recheck ? (s.agree ? "اتفق" : el("span", { class: "mark-no", text: "اختلف" })) : "—"),
+      el("td", {}, el("span", { class: `pill ${r.result.outcome}`, text: OUTCOME_AR[r.result.outcome].split(":")[0].split("،")[0] }), s.outcome ? "" : el("span", { class: "mark-no", text: " ✗" })),
+      el("td", { class: "ltr" }, r.result.priority || "—", s.priority ? "" : el("span", { class: "mark-no", text: ` ✗ (${g.priority})` })),
+      el("td", { class: "ltr", text: `${r.seconds}s` }));
+    tr.onclick = () => replay(i); tr.onkeydown = e => e.key === "Enter" && replay(i);
+    body.append(tr);
+  });
+  const all = el("div", { class: "table-wrap" }, el("table", { class: "grid" },
+    el("thead", {}, el("tr", {}, ["#", "المستوى", "المتوقع", "النموذج", "الثقة", "المراجعة", "النتيجة", "الأولوية", "الوقت"].map(h => el("th", { text: h })))), body));
+
+  const m = RUN.meta;
+  $("#main").replaceChildren(el("section", { class: "overview" },
+    el("h2", { text: `ملخص تشغيل ${n} تذكرة` }),
+    el("p", { class: "lede", text: `${m.set} · ${m.started.replace("T", " ")} · ${m.backend === "cli" ? "خطة Claude (تطوير)" : "API"} · ${m.models.classifier} / ${m.models.drafter} · استغرق ${Math.round(m.wall_seconds)} ثانية بالمجموع` }),
+    stats,
+    el("div", { class: "section-title", text: "شنو صار بالتذاكر" }), bar,
+    el("div", { class: "section-title", text: "حسب الصعوبة" }), diffTable,
+    el("div", { class: "section-title", text: "هل ثقة النموذج بمحلها؟" }),
+    el("p", { class: "note", text: "كل صف يجمع التذاكر حسب الثقة اللي عطاها النموذج لنفسه، ويقارنها بكم وحدة طلعت صحيحة فعلاً. هذا أساس المعايرة." }), calib,
+    el("div", { class: "section-title", text: "كل التذاكر" }),
+    el("p", { class: "note", text: "اضغط على أي تذكرة حتى تشوفها مرحلة بمرحلة." }), all));
+  window.scrollTo(0, 0);
+}
+
+function accCell(a, b) {
+  const p = b ? a / b : 0;
+  return el("span", { class: "acc" }, el("i", { style: `width:${Math.round(p * 60)}px` }), el("span", { class: "ltr", text: `${a}/${b}` }));
+}
+
+$("#showOverview").onclick = () => RUN && renderOverview();
+
 $("#runNew").onclick = () => {
   const text = $("#newText").value.trim(); if (!text || busy) return;
+  if (RUN) { RUN = null; $("#showOverview").hidden = true; TICKETS = []; }
   const t = { id: `n${TICKETS.filter(x => x.id?.startsWith("n")).length + 1}`, text };
   TICKETS.unshift(t); $("#newText").value = ""; run(t, t.id);
 };
-$("#runAll").onclick = async () => { if (busy) return; for (const t of [...TICKETS]) await run(t, t.id); };
+$("#runAll").onclick = async () => {
+  if (busy) return;
+  if (RUN) { $("#source").value = `set:${RUN.meta.set}`; await loadSource($("#source").value); }
+  for (const t of [...TICKETS]) await run(t, t.id);
+};
 
 init();
 </script>

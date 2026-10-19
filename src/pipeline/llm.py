@@ -9,8 +9,9 @@ Two backends, same prompts and same code path:
          a number (accuracy, calibration, thresholds, the MVP and demo runs).
 - `cli`  Claude Code in headless mode (`claude -p`) on your own Claude plan.
          Free for development: wiring, smoke tests, reading outputs by eye.
-         Claude Code adds its own context and ignores temperature/max_tokens, so
-         confidence scores are not comparable with the API. Never tune on it.
+         Claude Code still adds ~2.9k tokens of its own context and ignores
+         temperature/max_tokens, so confidence scores are close to, but not the
+         same as, the API. Never tune thresholds on it.
 
 Pick one with `backend:` in config/models.yaml, or override per run with the
 LLM_BACKEND environment variable.
@@ -90,7 +91,8 @@ def _cli_command(model: str, system: str) -> list[str]:
         exe, "-p",
         "--model", model,
         "--system-prompt", system,      # replaces Claude Code's default prompt
-        "--tools", "",                  # no tools: plain text in, text out
+        "--disallowedTools", "*",       # no tools at all. (--tools "" still sent ~14k tokens of
+                                        # tool definitions; this brings the extra context to ~2.9k)
         "--output-format", "json",
         "--no-session-persistence",
         "--strict-mcp-config",          # no MCP servers

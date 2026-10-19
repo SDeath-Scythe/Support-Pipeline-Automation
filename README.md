@@ -56,6 +56,8 @@ Claude Code adds its own context and ignores temperature and max_tokens, so conf
 python app/server.py        # then open http://localhost:8000
 ```
 
+To run a whole set and record it: `python scripts/run_batch.py data/probes/mixed_30.jsonl`. Saved runs appear in the viewer with an overview (accuracy, outcomes, confidence vs. accuracy) and a stage-by-stage replay of every ticket.
+
 A local viewer (standard library only, no extra install). Pick a probe ticket or paste your own, and watch it go through every stage live: received, cleaned, classified, confidence gate, re-check, routed, drafted. Each model step shows exactly what was sent and what came back. Probe tickets also show the expected answer next to the result. Uses whichever backend is set (`cli` by default).
 
 ## Repo layout
