@@ -171,3 +171,28 @@ def test_ticket1_without_reference_is_flagged_not_escalated():
     g = check(ex(reference=None, amount_iqd=50000, confidence=0.9), T1_NO_REF)
     assert "missing:reference" in g.flags
     assert g.confidence == 0.60 and g.needs_recheck and not g.escalate
+
+
+# --- classifier prompt and parsing ---
+
+def test_prompt_lists_every_subcategory():
+    from pipeline.classify import system_prompt
+
+    prompt = system_prompt()
+    assert "{taxonomy}" not in prompt
+    for key in taxonomy().subcategories:
+        assert f"`{key}`" in prompt
+
+
+def test_parse_tolerates_code_fences():
+    from pipeline.classify import parse
+
+    ex_ = parse('```json\n{"category": "general", "subcategory": "unclear", "confidence": 0.9}\n```')
+    assert ex_.subcategory == "unclear" and ex_.amount_usd is None
+
+
+def test_usd_amount_counts_as_present():
+    t = clean("انطيت الوكيل ١٠٠ دولار يشحنلي الحساب وما نزل")
+    g = check(ex(category="agents_cash", subcategory="cash_in_not_credited", reference=None,
+                 amount_iqd=None, amount_usd=100, confidence=0.9), t)
+    assert "missing:amount" not in g.flags

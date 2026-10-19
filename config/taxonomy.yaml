@@ -59,8 +59,8 @@ categories:
     label: "Agents & cash"
     team: agent_network
     subcategories:
-      overcharged_fee: { label: "Overcharged fee", default_priority: P3, required_fields: [amount], high_risk: false }
-      cash_in_not_credited: { label: "Cash-in not credited", default_priority: P2, required_fields: [amount], high_risk: false }
+      overcharged_fee: { label: "Overcharged fee", hint: "an agent took a bigger fee than allowed for cash-in or cash-out", default_priority: P3, required_fields: [amount], high_risk: false }
+      cash_in_not_credited: { label: "Cash-in not credited", hint: "gave cash to an agent to load the account (شحن الحساب) and it did not arrive", default_priority: P2, required_fields: [amount], high_risk: false }
       cash_out_refused: { label: "Cash-out refused", default_priority: P3, required_fields: [], high_risk: false }
 
   cards:
@@ -75,7 +75,7 @@ categories:
     team: bills
     subcategories:
       bill_not_reflected: { label: "Bill paid, not reflected", default_priority: P3, required_fields: [amount], high_risk: false }
-      topup_failed: { label: "Top-up failed", default_priority: P3, required_fields: [amount], high_risk: false }
+      topup_failed: { label: "Top-up failed", hint: "buying phone credit or a data bundle (شحن رصيد، شحن خط، كارت) failed or was deducted without arriving", default_priority: P3, required_fields: [amount], high_risk: false }
       merchant_payment: { label: "Merchant payment", default_priority: P3, required_fields: [amount], high_risk: false }
 
   fraud_security:
@@ -91,6 +91,6 @@ categories:
     team: general
     subcategories:
       app_bug: { label: "App bug", default_priority: P3, required_fields: [], high_risk: false }
-      fees_limits_question: { label: "Fees & limits question", default_priority: P3, required_fields: [], high_risk: false }
+      fees_limits_question: { label: "Fees & limits question", hint: "asks about, or disputes, an app fee or a limit (not an agent fee)", default_priority: P3, required_fields: [], high_risk: false }
       complaint: { label: "Complaint", default_priority: P3, required_fields: [], high_risk: false }
       unclear: { label: "Unclear", default_priority: P3, required_fields: [], high_risk: false }

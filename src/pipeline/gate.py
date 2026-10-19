@@ -62,7 +62,8 @@ def check(extraction: Extraction, cleaned_text: str) -> GateResult:
         score = min(score, t["missing_field_cap"])
 
     for field in sub.required_fields:
-        value = {"reference": extraction.reference, "amount": extraction.amount_iqd}.get(field)
+        amount = extraction.amount_iqd if extraction.amount_iqd is not None else extraction.amount_usd
+        value = {"reference": extraction.reference, "amount": amount}.get(field)
         if value in (None, ""):
             flags.append(f"missing:{field}")
             score = min(score, t["missing_field_cap"])

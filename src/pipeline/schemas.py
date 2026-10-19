@@ -25,7 +25,9 @@ class Extraction(BaseModel):
     subcategory: str
     secondary_subcategory: str | None = None
     reference: str | None = None
+    recipient_phone: str | None = None
     amount_iqd: int | None = None
+    amount_usd: int | None = None        # never converted; the agent sees the original currency
     date: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     rationale: str = ""
