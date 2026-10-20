@@ -279,7 +279,7 @@ def cmd_report(args) -> None:
         else:
             lines.append(f"| {name} | {fmt(m[key])} |")
 
-    if base and "+" in label:
+    if base and "+" in label and label == args.config:   # replicate labels (…-d1) skip this
         lines += interaction(set_name, label, m, base[0])
 
     if base:
