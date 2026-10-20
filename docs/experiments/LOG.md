@@ -15,6 +15,8 @@ All numbers come from the `cli` backend: good for comparing configs with each ot
 | **F8** unclear template | Saves the drafter call on unclear tickets (4/30 here; 63 → 59 calls). Draft scores on those 4 tickets: model drafts 5 5 3 4; template v1 4 5 2 4; v2 4 4 3 4. | Slightly lower quality: a fixed text can't answer an off-topic question (f09) and can't fit every opening (greeting vs "I have a problem"). | **Your call.** It saves about 6% of calls at a small quality cost. If you want it, v2 is the safer text. |
 | **F5** policy facts (isolated) | Mean score 4.50 → 4.61, inside the noise floor (4.50–4.65 between identical baseline runs). Drafts now state response times and support hours. | One draft had a stray Latin letter (F2 v2 catches it). The judge rewards safety and editing effort, not added information, so the benefit is under-measured. | **Fill `config/policy.yaml` with your real values,** then re-test on the API. The values used here are placeholders (`config/experiments/policy_filled.yaml`). |
 
+**Follow-up for F3 (not tested yet):** under F3 the draft and priority follow the *first* model's answer. In m02 that was wrong (login/OTP, P2), while the re-check had it right (forgot PIN, P3); see `screenshots/f3-m02-same-team-flagged.png`. Across all baseline runs, the re-check model was right in 7 of the 8 disagreements. A variant F3b that drafts from the re-check's answer is worth testing next.
+
 ## Combinations
 
 All 10 pairs of {F2, F3, F6, F7, F8} and the full set were run in both rounds. **Every combination scored exactly the sum of its single fixes: zero interaction on every metric.** That fits the design: each fix acts on a different stage (F6 classify, F3 gate, F7 route, F8 and F2 draft), and F2's checks pass the F8 template. So the fixes can be adopted or dropped independently.
@@ -30,6 +32,8 @@ All five together (round 2) vs baseline on fixes_30:
 | Escalated | 2 | 1 |
 | Model calls | 63 | 58 |
 | Bad drafts / mean score | 2 / 4.50 | 3 / 4.38 (within noise) |
+
+A fresh uncached replicate of all five (`fixes_30/all5-rep1.md`) confirms the robust gains: priority 29/30, fee 4/4, 59 model calls. f14 was wrong again, as in the F6 replicate, so the outcome/escalation gain in the table above is noise, not a fix.
 
 ## Noise floor and judge
 
@@ -67,3 +71,10 @@ Recommended, cheapest first:
 3. **Calibrate on the API dev set** (the repo's `require_api` path) and set the thresholds from the calibration table in the viewer. The cli numbers above are a direction, not thresholds.
 
 These can be tested with this same harness, as F9 (confusable pairs) and F10 (runner-up).
+
+## Monitoring additions (after the experiments)
+
+These don't change what the agent sees; they help us watch the pipeline.
+
+- **Cost logging:** every model step records its tokens (and, on cli, the cost Claude Code reports) in the run events, marked when the reply came from the cache; `run_batch.py` prints and stores run totals in `meta.usage`. The fresh all-five run used 59 calls, about 174k input and 12k output tokens, reported $0.06 for 30 tickets (about 6,200 tokens and $0.002 per ticket, including the cli's own context).
+- **Viewer:** experiment runs appear under their own group in the source list; the queue can be sorted by priority (P1 and escalated first) or grouped by team; the overview shows tokens and cost per ticket; each model step shows its tokens. Screenshots are in `screenshots/`.
