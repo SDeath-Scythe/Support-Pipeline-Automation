@@ -72,6 +72,19 @@ def parse(reply: str) -> Extraction:
     return Extraction.model_validate(json.loads(match.group()))
 
 
+_FEE_PROMPT = Path(__file__).parent / "prompts" / "fee_system.md"
+
+
+def fee_prompt() -> str:
+    return _FEE_PROMPT.read_text(encoding="utf-8")
+
+
+def parse_fee(reply: str) -> int | None:
+    match = _JSON_OBJECT.search(reply)
+    value = json.loads(match.group()).get("fee_iqd") if match else None
+    return int(value) if isinstance(value, (int, float)) and value > 0 else None
+
+
 def user_prompt(cleaned_text: str) -> str:
     return f"<ticket>\n{cleaned_text}\n</ticket>"
 

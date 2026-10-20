@@ -514,3 +514,32 @@ def test_f13_lookalike_hints_only_under_flag(monkeypatch):
     p = system_prompt()
     assert "`not_received`: Not received or deducted (money left the account" in p
     assert p.count("\n") == base.count("\n")     # hints only, no new lines or rules
+
+
+# --- F6b: fee follow-up call only for fee tickets ---
+
+def test_f6b_extracts_fee_with_a_separate_call(monkeypatch):
+    from pipeline import draft as drf
+    from pipeline import run
+
+    seen = []
+
+    def fake_call(role, system, user):
+        seen.append(system[:40])
+        if "Return the disputed fee" in system:
+            return '{"fee_iqd": 7000}'
+        return '{"category": "agents_cash", "subcategory": "overcharged_fee", "amount_iqd": 50000, "confidence": 0.92}'
+
+    monkeypatch.setattr(run, "call", fake_call)
+    monkeypatch.setattr(drf, "call", lambda *a: "هلا بيك")
+    monkeypatch.setenv("PIPELINE_FIXES", "fee_followup")
+    result = run.process("الوكيل اخذ ٧ الاف عمولة على سحب ٥٠ الف")
+    assert result["extraction"]["fee_iqd"] == 7000 and result["fee_followup"] is True
+    assert len(seen) == 2 and "fee_iqd" not in run.cls.system_prompt()     # classifier prompt untouched
+
+
+def test_parse_fee_rejects_junk():
+    from pipeline.classify import parse_fee
+
+    assert parse_fee('{"fee_iqd": 2500}') == 2500
+    assert parse_fee('{"fee_iqd": null}') is None and parse_fee("no json") is None and parse_fee('{"fee_iqd": "x"}') is None

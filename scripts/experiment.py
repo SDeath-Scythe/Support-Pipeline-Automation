@@ -44,6 +44,7 @@ CODES = {
     "F11": "ask_if_missing",
     "F12": "no_specific_followup",
     "F13": "lookalike_hints",
+    "F6b": "fee_followup",
 }
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"
@@ -182,12 +183,14 @@ def score(run: dict, judged: dict[str, dict]) -> tuple[dict, list[dict]]:
             "draft_avail_ok": has_draft == (g["outcome"] != "escalated"),
             "gold_priority": g["priority"], "priority": r.get("priority"), "priority_ok": r.get("priority") == g["priority"],
             "amount_ok": None if "amount_iqd" not in g else ex.get("amount_iqd") == g["amount_iqd"],
-            "fee_ok": None if g.get("fee_iqd") is None else ex.get("fee_iqd") == g["fee_iqd"],
+            "fee_ok": None if g.get("fee_iqd") is None else
+                      (r.get("extraction") or ex).get("fee_iqd") == g["fee_iqd"],   # the fee used (F6b adds it late)
             "ref_ok": None if "reference" not in g else
                       (_key(ex["reference"]) if ex.get("reference") else None) == (_key(g["reference"]) if g["reference"] else None),
             "flags": r.get("flags", []),
             "calls": (cl is not None and cl["status"] == "done") + (rc is not None and rc["status"] == "done")
-                     + (dr is not None and dr["status"] == "done" and not dr["data"].get("template")),
+                     + (dr is not None and dr["status"] == "done" and not dr["data"].get("template"))
+                     + bool(r.get("fee_followup")),
             "draft": r.get("draft_ar"), "judge": j, "bad": bad(j),
             "bad_ready": r["outcome"] == "drafted" and bad(j),
         })

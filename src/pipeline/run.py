@@ -26,6 +26,8 @@ from .schemas import Extraction, Outcome
 
 Emit = Callable[[dict[str, Any]], None]
 
+FEE_SUBCATEGORIES = ("overcharged_fee", "fees_limits_question")
+
 STAGES = ["received", "clean", "classify", "gate", "recheck", "route", "draft", "result"]
 
 FLAG_AR = {
@@ -157,9 +159,21 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     else:
         send("recheck", "skipped", {"why": f"الثقة {gate.confidence:.2f} عالية والنوع مو حساس"})
 
+    # F6b (fee_followup): fee tickets get a small extra call for the disputed fee, so the
+    # classifier prompt (and its accuracy) stays as it is. Round 3 showed F6's prompt change
+    # shifted some classifications.
+    fee_call: dict[str, Any] = {}
+    if enabled("fee_followup") and ex.subcategory in FEE_SUBCATEGORIES and ex.fee_iqd is None:
+        try:
+            fee_reply = call("classifier", cls.fee_prompt(), cls.user_prompt(text))
+            ex = ex.model_copy(update={"fee_iqd": cls.parse_fee(fee_reply)})
+            fee_call = {"fee_call": {"reply": fee_reply, "fee_iqd": ex.fee_iqd}, "usage": last_usage()}
+        except Exception:  # noqa: BLE001 - the fee is a nice-to-have; carry on without it
+            pass
+
     # 5. Route + priority (rules)
     team, priority = route(ex, text)
-    send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority})
+    send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority, **fee_call})
 
     # 6. Draft. F8 (unclear_template): an unclear ticket gets the fixed reply, no model call.
     if enabled("unclear_template") and ex.subcategory == "unclear":
@@ -189,4 +203,6 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
 
     outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
     extra = {"recheck_alternative": alternative} if alternative else {}
+    if fee_call:
+        extra["fee_followup"] = True
     return finish(outcome, flags, team=team, priority=priority, draft_ar=reply, extraction=ex.model_dump(), **extra)
