@@ -67,9 +67,9 @@ config/       taxonomy (8 categories, 23 subcategories), models, thresholds, pol
 src/pipeline/ clean, classify, gate, route, draft, run (one ticket end to end), llm wrapper
 app/          local viewer: watch each ticket move through the stages
 tests/        unit tests (rules, prompts, full run with mocked models)
-scripts/      run_probes.py: score the edge-case probes
+scripts/      run_probes.py: score the edge-case probes; experiment.py: test fixes with and without
 data/         synthetic tickets and the dev / MVP test / held-out split
-docs/         design brief
+docs/         design brief; experiments/ has the with/without tests of candidate fixes (start at LOG.md)
 ```
 
 ## Run
