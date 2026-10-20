@@ -479,3 +479,26 @@ def test_f10_runner_up_prompt_and_gate(monkeypatch):
     assert '"runner_up": null, "confidence": 0.0' in system_prompt() and "## Runner-up" in system_prompt()
     assert check(ex(confidence=0.85, runner_up="fees_limits_question"), TICKET).needs_recheck
     assert not check(ex(confidence=0.85, runner_up=None), TICKET).needs_recheck
+
+
+# --- F11 / F12: drafter prompt fixes ---
+
+def test_f11_splits_checkable_and_unverifiable_asks(monkeypatch):
+    from pipeline.draft import user_prompt
+
+    card = ex(category="cards", subcategory="card_payment_failed", reference=None, amount_iqd=None)
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert "Ask the customer for: المبلغ, اسم المتجر" in user_prompt("…", card, "cards")
+    monkeypatch.setenv("PIPELINE_FIXES", "ask_if_missing")
+    p = user_prompt("…", card, "cards")
+    assert "Ask the customer for: المبلغ" in p
+    assert "only if the ticket does not already give them: اسم المتجر" in p
+
+
+def test_f12_adds_rule_to_drafter_prompt(monkeypatch):
+    from pipeline.draft import system_prompt
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert "a specific answer" not in system_prompt()
+    monkeypatch.setenv("PIPELINE_FIXES", "no_specific_followup")
+    assert "Do not say the team will send, confirm or tell the customer a specific answer" in system_prompt()

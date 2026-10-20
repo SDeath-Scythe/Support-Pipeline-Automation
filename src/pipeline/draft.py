@@ -34,9 +34,28 @@ def policy() -> dict:
     return load_yaml("experiments/policy_filled.yaml" if enabled("policy_facts") else "policy.yaml")
 
 
-@lru_cache(maxsize=1)
+# F12 (no_specific_followup): the judge's worst drafts promised to send a specific answer
+# (a branch address, a refund date) the team may not have.
+_NO_SPECIFIC = (
+    "- Do not say the team will send, confirm or tell the customer a specific answer (an address, a date, "
+    "a fee, how long something takes, a refund). Say only that the team will check and follow up.\n"
+)
+
+
 def system_prompt() -> str:
-    return _PROMPT.read_text(encoding="utf-8")
+    return _system_prompt(enabled("no_specific_followup"))
+
+
+@lru_cache(maxsize=2)
+def _system_prompt(no_specific: bool) -> str:
+    prompt = _PROMPT.read_text(encoding="utf-8")
+    if no_specific:
+        anchor = "- Never promise a refund, a reversal, a time, or an outcome. You can say the team will check.\n"
+        prompt = prompt.replace(anchor, anchor + _NO_SPECIFIC)
+    return prompt
+
+
+_CHECKED = {"reference", "amount", "date", "recipient_number", "phone_number"}   # fields _have() can see
 
 
 def _have(ex: Extraction, field: str) -> bool:
@@ -82,7 +101,17 @@ def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:
     if ex.fee_iqd is not None:
         lines.append(f"Disputed fee: {ex.fee_iqd:,} IQD")
     missing = ask_for(ex)
-    lines.append("Ask the customer for: " + (", ".join(FIELD_AR.get(f, f) for f in missing) if missing else "nothing"))
+    if enabled("ask_if_missing"):
+        # F11: the classifier can't see a shop name, agent location or bill type, so those are only
+        # asked for when the ticket doesn't already give them.
+        sure = [f for f in missing if f in _CHECKED]
+        maybe = [f for f in missing if f not in _CHECKED]
+        lines.append("Ask the customer for: " + (", ".join(FIELD_AR.get(f, f) for f in sure) if sure else "nothing"))
+        if maybe:
+            lines.append("Also ask for these, but only if the ticket does not already give them: "
+                         + ", ".join(FIELD_AR.get(f, f) for f in maybe))
+    else:
+        lines.append("Ask the customer for: " + (", ".join(FIELD_AR.get(f, f) for f in missing) if missing else "nothing"))
     lines.append("Known facts: " + ("; ".join(facts) if facts else "none (do not state any timeline, fee or limit)"))
     return "\n".join(lines)
 
