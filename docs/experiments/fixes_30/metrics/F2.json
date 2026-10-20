@@ -2,8 +2,8 @@
  "meta": {
   "set": "fixes_30",
   "backend": "cli",
-  "started": "2026-10-20T11:57:29",
-  "wall_seconds": 3.1,
+  "started": "2026-10-20T12:04:43",
+  "wall_seconds": 4.7,
   "workers": 3,
   "models": {
    "classifier": "claude-haiku-5-5",
@@ -28,7 +28,7 @@
    30
   ],
   "outcome": [
-   28,
+   29,
    30
   ],
   "draft_available": [
@@ -52,8 +52,8 @@
    30
   ],
   "escalated": 2,
-  "flagged": 1,
-  "drafted": 27,
+  "flagged": 0,
+  "drafted": 28,
   "drafts": 28,
   "bad_drafts": 2,
   "bad_ready": 2,
@@ -459,8 +459,8 @@
    "sub": "blocked_account",
    "sub_ok": true,
    "gold_outcome": "drafted",
-   "outcome": "flagged",
-   "outcome_ok": false,
+   "outcome": "drafted",
+   "outcome_ok": true,
    "draft_avail_ok": true,
    "gold_priority": "P2",
    "priority": "P2",
@@ -468,9 +468,7 @@
    "amount_ok": true,
    "fee_ok": null,
    "ref_ok": true,
-   "flags": [
-    "draft:promise"
-   ],
+   "flags": [],
    "calls": 2,
    "draft": "هلا بيك، آسفين على الإزعاج اللي صار وياك. فهمت إنه كل ما تحاول تدخل يطلعلك إن حسابك موقوف مؤقتاً وتريد تعرف السبب. رفعنا الموضوع لقسم الحسابات حتى يراجعون حالة حسابك ويوضحون لك السبب، وراح نرجع نخبرك بعد المراجعة.",
    "judge": {
