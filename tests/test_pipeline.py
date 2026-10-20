@@ -455,3 +455,27 @@ def test_f3c_never_overrides_into_or_out_of_fraud(monkeypatch):
     run = _fake_classifier_by_role(monkeypatch, fraud)
     result = run.process(T_WRONG)
     assert result["outcome"] == "escalated" and "fraud" in result["flags"]
+
+
+# --- F9 / F10: re-check close calls without a second model on every ticket ---
+
+def test_f9_rechecks_lookalike_answers_under_090(monkeypatch):
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert not check(ex(confidence=0.85), TICKET).needs_recheck          # not_received, 0.85 passes
+    monkeypatch.setenv("PIPELINE_FIXES", "confusable_recheck")
+    assert check(ex(confidence=0.85), TICKET).needs_recheck              # look-alike, so re-check
+    assert not check(ex(confidence=0.95), TICKET).needs_recheck          # very sure: no re-check
+    app = ex(category="general", subcategory="app_bug", reference=None, amount_iqd=None, confidence=0.85)
+    assert not check(app, TICKET).needs_recheck                          # not in a pair
+
+
+def test_f10_runner_up_prompt_and_gate(monkeypatch):
+    from pipeline.classify import system_prompt
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert "runner_up" not in system_prompt()
+    assert not check(ex(confidence=0.85, runner_up="fees_limits_question"), TICKET).needs_recheck
+    monkeypatch.setenv("PIPELINE_FIXES", "runner_up")
+    assert '"runner_up": null, "confidence": 0.0' in system_prompt() and "## Runner-up" in system_prompt()
+    assert check(ex(confidence=0.85, runner_up="fees_limits_question"), TICKET).needs_recheck
+    assert not check(ex(confidence=0.85, runner_up=None), TICKET).needs_recheck

@@ -105,3 +105,13 @@ categories:
       fees_limits_question: { label: "Fees & limits question", label_ar: "سؤال عن الرسوم والحدود", hint: "asks about, or disputes, an app fee or a limit (not an agent fee)", default_priority: P3, required_fields: [], high_risk: false }
       complaint: { label: "Complaint", label_ar: "شكوى", default_priority: P3, required_fields: [], high_risk: false }
       unclear: { label: "Unclear", label_ar: "غير واضح", default_priority: P3, required_fields: [], high_risk: false }
+
+# Look-alike pairs (F9, confusable_recheck): when the answer is in one of these pairs and
+# the model is under confidence.confusable_below, the re-check runs. Taken from the
+# re-check disagreements on the dev sets (docs/experiments/LOG.md); extend from new failures.
+confusable:
+  - [not_received, fees_limits_question]    # "arrived short" read as not received
+  - [not_received, merchant_payment]        # paying a shop read as a transfer
+  - [reversal_request, wrong_recipient]
+  - [cash_in_not_credited, topup_failed]    # paying an agent for phone credit
+  - [login_otp, forgot_pin]

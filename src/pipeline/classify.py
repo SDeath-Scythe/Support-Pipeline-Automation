@@ -25,12 +25,21 @@ _FEE_FIELD = (
 )
 
 
+# F10 (runner_up): the model names its second choice in the same call, so a close call can be
+# re-checked without asking a second model on every ticket.
+_RUNNER_UP = (
+    "\n## Runner-up\n"
+    "`runner_up`: if another subcategory is also plausible for this ticket, its key; otherwise null. "
+    "Name one whenever you hesitated between two.\n"
+)
+
+
 def system_prompt() -> str:
-    return _system_prompt(enabled("fee_amount"))
+    return _system_prompt(enabled("fee_amount"), enabled("runner_up"))
 
 
-@lru_cache(maxsize=2)
-def _system_prompt(fee_field: bool) -> str:
+@lru_cache(maxsize=4)
+def _system_prompt(fee_field: bool, runner_up: bool = False) -> str:
     """The classifier prompt, with the taxonomy filled in from config/taxonomy.yaml."""
     raw = load_yaml("taxonomy.yaml")
     lines = []
@@ -43,6 +52,9 @@ def _system_prompt(fee_field: bool) -> str:
     if fee_field:
         usd = next(line for line in prompt.splitlines(keepends=True) if line.startswith("- `amount_usd`"))
         prompt = prompt.replace(usd, usd + _FEE_FIELD).replace('"amount_usd": null, ', '"amount_usd": null, "fee_iqd": null, ')
+    if runner_up:
+        prompt = prompt.replace("\n## Output", _RUNNER_UP + "\n## Output").replace(
+            '"confidence": 0.0', '"runner_up": null, "confidence": 0.0')
     return prompt
 
 

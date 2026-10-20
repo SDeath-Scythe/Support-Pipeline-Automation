@@ -9,7 +9,8 @@ from __future__ import annotations
 import re
 
 from .clean import clean
-from .config import taxonomy, thresholds
+from .config import load_yaml, taxonomy, thresholds
+from .fixes import enabled
 from .schemas import Extraction, GateResult
 
 
@@ -73,4 +74,14 @@ def check(extraction: Extraction, cleaned_text: str) -> GateResult:
         return GateResult(confidence=score, needs_recheck=False, escalate=True, flags=flags, reasons=reasons)
 
     needs_recheck = score < t["pass_above"] or sub.high_risk
+    # F9 (confusable_recheck): look-alike answers are re-checked unless the model is very sure.
+    if enabled("confusable_recheck") and score < t.get("confusable_below", 0.90) and \
+            any(sub.key in pair for pair in load_yaml("taxonomy.yaml").get("confusable", [])):
+        needs_recheck = True
+        reasons.append(f"Look-alike answer ({sub.key}) under {t.get('confusable_below', 0.90):.2f}")
+    # F10 (runner_up): the model named a second plausible answer and is not very sure.
+    if enabled("runner_up") and extraction.runner_up and extraction.runner_up != sub.key \
+            and extraction.runner_up in tax.subcategories and score < t.get("confusable_below", 0.90):
+        needs_recheck = True
+        reasons.append(f"Runner-up {extraction.runner_up} under {t.get('confusable_below', 0.90):.2f}")
     return GateResult(confidence=score, needs_recheck=needs_recheck, escalate=False, flags=flags, reasons=reasons)
