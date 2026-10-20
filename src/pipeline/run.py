@@ -17,6 +17,7 @@ from . import classify as cls
 from . import draft as drf
 from .clean import _DIGITS, _TATWEEL, clean
 from .config import models, taxonomy
+from .fixes import enabled
 from .gate import check
 from .llm import backend, call
 from .route import route
@@ -33,6 +34,7 @@ FLAG_AR = {
     "missing:reference": "رقم العملية ناقص",
     "missing:amount": "المبلغ ناقص",
     "recheck_disagreed": "النموذج الثاني صنّفها بشكل مختلف",
+    "recheck_same_team": "النموذجين اختلفوا بالنوع بس نفس القسم: تأكد من نوع المشكلة قبل الاعتماد",
     "model_error": "صار خطأ بالنموذج، تحتاج مراجعة يدوية",
 }
 
@@ -111,6 +113,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
         return finish(Outcome.ESCALATED, flags, team=team, priority=priority, extraction=ex.model_dump())
 
     # 4. Re-check (second model, classifies blind)
+    alternative = None
     if gate.needs_recheck:
         send("recheck", "running", {"model": models()["rechecker"]["model"], "backend": backend()})
         try:
@@ -118,7 +121,14 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
             agree = ex2.subcategory == ex.subcategory
             info2.update(agree=agree, first=ex.subcategory, second=ex2.subcategory)
             send("recheck", "done", info2)
-            if not agree or ex2.category == "fraud_security":
+            # F3 (recheck_same_team): a disagreement inside one team still gets a draft, flagged.
+            sub2 = tax.subcategories.get(ex2.subcategory)
+            same_team = (not agree and sub is not None and sub2 is not None and sub2.team == sub.team
+                         and not sub2.always_escalate)
+            if same_team and enabled("recheck_same_team"):
+                flags.append("recheck_same_team")
+                alternative = ex2.subcategory
+            elif not agree or ex2.category == "fraud_security":
                 flags.append("fraud" if ex2.category == "fraud_security" else "recheck_disagreed")
                 team, priority = route(ex2 if ex2.category == "fraud_security" else ex, text)
                 send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority})
@@ -151,4 +161,5 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
                            "ask_for": drf.ask_for(ex)})
 
     outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
-    return finish(outcome, flags, team=team, priority=priority, draft_ar=reply, extraction=ex.model_dump())
+    extra = {"recheck_alternative": alternative} if alternative else {}
+    return finish(outcome, flags, team=team, priority=priority, draft_ar=reply, extraction=ex.model_dump(), **extra)

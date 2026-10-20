@@ -271,3 +271,44 @@ def test_now_raises_priority_without_f7_but_not_with_it(monkeypatch):
     monkeypatch.setenv("PIPELINE_FIXES", "no_now_urgency")
     assert route(forgot, "نسيت الرمز السري، هسه شلون ارجعه؟")[1] == "P3"
     assert route(forgot, "ضروري نسيت الرمز السري")[1] == "P2"   # real urgency still counts
+
+
+# --- F3: re-check disagreement inside one team ---
+
+def _fake_classifier_by_role(monkeypatch, replies: dict[str, str], draft_reply: str = "هلا بيك"):
+    from pipeline import draft as drf
+    from pipeline import run
+
+    monkeypatch.setattr(run, "call", lambda role, system, user: replies[role])
+    monkeypatch.setattr(drf, "call", lambda role, system, user: draft_reply)
+    return run
+
+
+SAME_TEAM = {
+    "classifier": '{"category": "transfers", "subcategory": "reversal_request", "reference": "55128830", "amount_iqd": 300000, "confidence": 0.9}',
+    "rechecker": '{"category": "transfers", "subcategory": "wrong_recipient", "reference": "55128830", "amount_iqd": 300000, "confidence": 0.9}',
+}
+T_WRONG = "دزيت ٣٠٠ الف لرقم غلط بالخطأ، رقم العملية 55128830، رجعولي ياها"
+
+
+def test_same_team_disagreement_escalates_without_f3(monkeypatch):
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    run = _fake_classifier_by_role(monkeypatch, SAME_TEAM)
+    result = run.process(T_WRONG)
+    assert result["outcome"] == "escalated" and "recheck_disagreed" in result["flags"]
+
+
+def test_same_team_disagreement_is_flagged_with_draft_under_f3(monkeypatch):
+    monkeypatch.setenv("PIPELINE_FIXES", "recheck_same_team")
+    run = _fake_classifier_by_role(monkeypatch, SAME_TEAM)
+    result = run.process(T_WRONG)
+    assert result["outcome"] == "flagged" and result["draft_ar"]
+    assert result["flags"] == ["recheck_same_team"] and result["recheck_alternative"] == "wrong_recipient"
+
+
+def test_f3_still_escalates_other_team_or_fraud(monkeypatch):
+    monkeypatch.setenv("PIPELINE_FIXES", "recheck_same_team")
+    for second in ['{"category": "general", "subcategory": "fees_limits_question", "confidence": 0.9}',
+                   '{"category": "fraud_security", "subcategory": "unauthorized_charge", "confidence": 0.9}']:
+        run = _fake_classifier_by_role(monkeypatch, {**SAME_TEAM, "rechecker": second})
+        assert run.process(T_WRONG)["outcome"] == "escalated"
