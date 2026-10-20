@@ -260,3 +260,14 @@ def test_cache_reuses_identical_calls_only(monkeypatch, tmp_path):
     assert llm._cached({"model": "n"}, "S", "a", fake_send) == "reply 3"  # different model
     monkeypatch.delenv("LLM_CACHE_DIR")
     assert llm._cached(cfg, "S", "a", fake_send) == "reply 4"      # cache off
+
+
+# --- F7: "هسه" does not raise priority ---
+
+def test_now_raises_priority_without_f7_but_not_with_it(monkeypatch):
+    forgot = ex(category="account_access", subcategory="forgot_pin", reference=None, amount_iqd=None)
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert route(forgot, "نسيت الرمز السري، هسه شلون ارجعه؟")[1] == "P2"
+    monkeypatch.setenv("PIPELINE_FIXES", "no_now_urgency")
+    assert route(forgot, "نسيت الرمز السري، هسه شلون ارجعه؟")[1] == "P3"
+    assert route(forgot, "ضروري نسيت الرمز السري")[1] == "P2"   # real urgency still counts
