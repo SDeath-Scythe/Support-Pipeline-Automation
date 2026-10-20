@@ -1,0 +1,137 @@
+# baseline-c1 on dev_95
+
+Fixes on: none · backend `cli` · 2026-10-20T13:26:30 · compared with `baseline`
+
+| Metric | baseline | baseline-c1 | Change |
+|---|---|---|---|
+| Subcategory correct (first model) | 90/95 | 88/95 | -2 worse |
+| Subcategory used correct | 90/95 | 88/95 | -2 worse |
+| Wrong type, not escalated | 0 | 0 |  |
+| Outcome matches gold | 90/95 | 88/95 | -2 worse |
+| Draft given iff it should be | 90/95 | 88/95 | -2 worse |
+| Priority correct | 86/95 | 85/95 | -1 worse |
+| Amount correct | 77/79 | 78/79 | +1 better |
+| Fee correct (fee tickets) | 0/4 | 0/4 |  |
+| Escalated | 13 | 15 | +2 |
+| Flagged | 6 | 6 |  |
+| Drafted (ready) | 76 | 74 | -2 |
+| Drafts judged | 82 | 80 | -2 |
+| Bad drafts (judge) | 6 | 5 | -1 better |
+| Bad drafts marked ready | 6 | 5 | -1 better |
+| Mean draft score (1-5) | 4.52 | 4.53 | +0.01 better |
+| Model calls (pipeline) | 199 | 196 | -3 better |
+| Judge: understood | 82/82 | 80/80 | -2 worse |
+| Judge: grounded | 79/82 | 78/80 | -1 worse |
+| Judge: no_promise | 79/82 | 77/80 | -2 worse |
+| Judge: asks_right | 68/82 | 66/80 | -2 worse |
+| Judge: safe | 82/82 | 80/80 | -2 worse |
+| Judge: tone | 81/82 | 79/80 | -2 worse |
+| Judge: clean | 81/82 | 79/80 | -2 worse |
+
+## Tickets that changed (3)
+
+| Ticket | Targets | What changed |
+|---|---|---|
+| f15 | F3 | subcategory topup_failed → cash_in_not_credited; outcome drafted → escalated; priority P3 → P2; flags [] → ['recheck_disagreed']; draft changed (score 5 → —) |
+| m26 |  | draft changed (score 3 → 4) |
+| e06 |  | subcategory app_bug → unclear; outcome drafted → escalated; flags [] → ['recheck_disagreed']; draft changed (score 5 → —) |
+
+## Every ticket
+
+| Ticket | Gold | Got | Outcome | Priority | Flags | Draft score | Judge notes |
+|---|---|---|---|---|---|---|---|
+| f01 | rejected_or_pending | ✓ | drafted | P2 ✗ (P3) |  | 5 |  |
+| f02 | forgot_pin | ✓ | drafted | P2 ✗ (P3) |  | 5 |  |
+| f03 | app_bug | ✓ | drafted | P2 ✗ (P3) |  | 5 |  |
+| f04 | sim_change | ✓ | drafted | P1 ✗ (P2) |  | 5 |  |
+| f05 | fees_limits_question | ✓ | drafted | P2 ✗ (P3) |  | 4 | The closing 'إن شاء الله ما يتأخرون عليك' loosely hints at a quick reply with no listed response time and could be softened. |
+| f06 | not_received | ✓ | drafted | P1 |  | 4 | Minor: the draft assumes the currency is dinar and says 'حتى نسرّع الفحص', which slightly implies faster handling. |
+| f07 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| f08 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| f09 | unclear | ✓ | drafted | P3 |  | 3 ⚠ | The draft assumes a Basra branch exists and promises to send its address, which is not in Known facts; it also asks for the customer's area although nothing is needed. |
+| f10 | unclear | ✓ | drafted | P3 |  | 4 | The phrase "نوصل لك للجواب" is a bit awkward and reads better as "نوصلك للجواب". |
+| f11 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| f12 | blocked_account | ✓ | drafted | P2 |  | 5 |  |
+| f13 | rejected_or_pending | ✓ | drafted | P3 |  | 4 | The limit question is only vaguely deferred; the agent might tighten the last sentence. |
+| f14 | fees_limits_question | ✗ not_received | escalated ✗ (drafted) | P2 ✗ (P3) | missing:reference, recheck_disagreed | — |  |
+| f15 | topup_failed | ✗ cash_in_not_credited | escalated ✗ (drafted) | P2 ✗ (P3) | recheck_disagreed | — |  |
+| f16 | card_payment_failed | ✓ | drafted | P3 |  | 4 | Minor wording fix: 'دفعت بي' reads better as 'دفعت بيه', and the draft adds 'دينار' to the customer's amount without the ticket stating it. |
+| f17 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| f18 | fees_limits_question | ✓ | drafted | P3 |  | 4 | The draft adds 'دينار' to the amounts, which the customer didn't say, though it is a reasonable assumption. |
+| f19 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| f20 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| f21 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
+| f22 | login_otp | ✓ | drafted | P2 |  | 5 |  |
+| f23 | card_payment_failed | ✓ | drafted | P3 |  | 3 ⚠ | The draft asks for the store name although the ticket already says Amazon, and saying the department will confirm the refund date implies a refund is coming. |
+| f24 | complaint | ✓ | drafted | P3 |  | 4 | The draft does not acknowledge the compensation demand or say the team will review the complaint, which would reassure an angry repeat complainant. |
+| f25 | not_received | ✓ | drafted | P2 |  | 4 | The draft does not ask for the approximate time of the transfer; the ticket only says 'yesterday'. |
+| f26 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| f27 | delivery_or_activation | ✓ | drafted | P3 |  | 4 | Asks for the exact error message even though no information is needed for this issue; the optional ask could be dropped. |
+| f28 | bill_not_reflected | ✓ | drafted | P3 |  | 4 | The draft asks for the bill type, but the customer already said it is the internet bill, so the closing question should be removed. |
+| f29 | merchant_payment | ✓ | drafted | P3 |  | 5 |  |
+| f30 | cash_out_refused | ✓ | drafted | P3 |  | 5 |  |
+| s01 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| s02 | login_otp | ✓ | drafted | P2 |  | 4 | The first sentence restating the issue is clunky and needs a small rephrase. |
+| s03 | blocked_account | ✓ | drafted | P2 |  | 4 | Saying the accounts team will explain the reason slightly overcommits; softening it to a general follow-up would be safer. |
+| s04 | sim_change | ✓ | drafted | P2 |  | 5 |  |
+| s05 | limit_upgrade | ✓ | drafted | P3 |  | 4 | The optional request for extra details about the customer's work or needed limit isn't required and could be trimmed. |
+| s06 | cash_in_not_credited | ✓ | drafted | P1 |  | 4 | The draft asks for the agent's location again even though the ticket gives it (Palestine Street), and it does not ask for the exact date and time of the transaction. |
+| s07 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| s08 | cash_out_refused | ✓ | drafted | P3 |  | 5 |  |
+| s09 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
+| s10 | bill_not_reflected | ✓ | drafted | P3 |  | 4 | The draft asks for the bill type, but the customer already said it is the electricity bill, and the amount is also given, so nothing further needs to be asked. |
+| s11 | merchant_payment | ✓ | drafted | P3 |  | 5 |  |
+| s12 | app_bug | ✓ | drafted | P3 |  | 5 |  |
+| s13 | not_received | ✓ | flagged | P2 | missing:reference, missing:amount | 5 |  |
+| s14 | unauthorized_charge | ✓ | escalated | P1 | fraud | — |  |
+| s15 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
+| s16 | fees_limits_question | ✓ | drafted | P3 |  | 4 | The restating sentence is a bit robotic, and 'نسبة الرسوم بالضبط' implies a percentage-based fee and an exact answer, so it should be softened. |
+| s17 | unclear | ✓ | drafted | P3 |  | 4 | Saying the team will reply about the dollar rate slightly implies a rate answer is coming; it could be softened. |
+| s18 | wrong_recipient | ✗ reversal_request | escalated ✗ (drafted) | P1 | recheck_disagreed | — |  |
+| s19 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| s20 | complaint | ✓ | drafted | P2 |  | 4 ⚠ | Typo 'وياانا' should be 'ويانا'; otherwise fine. |
+| m01 | not_received | ✓ | drafted | P2 |  | 5 |  |
+| m02 | forgot_pin | ✗ login_otp | escalated ✗ (drafted) | P2 ✗ (P3) | recheck_disagreed | — |  |
+| m03 | card_payment_failed | ✓ | drafted | P3 |  | 5 |  |
+| m04 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
+| m05 | rejected_or_pending | ✓ | drafted | P3 |  | 5 |  |
+| m06 | cash_out_refused | ✓ | drafted | P3 |  | 5 |  |
+| m07 | app_bug | ✓ | drafted | P3 |  | 5 |  |
+| m08 | limit_upgrade | ✓ | drafted | P3 |  | 4 | The word "للحين" in the last sentence reads awkwardly and should be removed or rephrased. |
+| m09 | merchant_payment | ✗ not_received | escalated ✗ (drafted) | P2 ✗ (P3) | missing:reference, recheck_disagreed | — |  |
+| m10 | blocked_account | ✓ | drafted | P2 |  | 5 |  |
+| m11 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| m12 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| m13 | bill_not_reflected | ✓ | drafted | P3 |  | 4 | The draft asks for the bill type, but the customer already said it was the internet bill, and both needed details are already in the ticket. |
+| m14 | login_otp | ✓ | drafted | P2 |  | 5 |  |
+| m15 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
+| m16 | fees_limits_question | ✓ | drafted | P3 |  | 5 |  |
+| m17 | complaint | ✓ | drafted | P3 |  | 5 |  |
+| m18 | cash_in_not_credited | ✓ | drafted | P1 |  | 4 | The draft could also ask for the approximate time of the deposit, since the ticket only says 'the morning'. |
+| m19 | reversal_request | ✓ | drafted | P2 |  | 4 | The phrase 'اللي ألغيتوا البيعة' reads awkwardly and could be smoothed to 'واللي ألغيتوا بيها البيعة'. |
+| m20 | not_received | ✓ | flagged | P1 | missing:reference | 4 | The draft asks only for the transaction number and should also ask for the exact date and time of the transfer, since the ticket only says it has been about two days. |
+| m21 | unauthorized_charge | ✓ | escalated | P1 | fraud | — |  |
+| m22 | sim_change | ✓ | drafted | P2 |  | 4 | The phrase 'ما تنطيك العافية على الخط المسروق' is awkward and can read as negative; it should be removed or replaced with a normal sympathy line. |
+| m23 | fees_limits_question | ✗ not_received | escalated ✗ (drafted) | P2 ✗ (P3) | missing:reference, recheck_disagreed | — |  |
+| m24 | wrong_recipient | ✓ | flagged | P1 | missing:reference | 5 |  |
+| m25 | card_payment_failed | ✓ | drafted | P3 |  | 4 ⚠ | The phrase 'ويأكدلك الإمكانية' implies the card limit can be raised, so it should become something neutral like 'يوضحلك إذا ممكن'. |
+| m26 | not_received | ✓ | drafted | P2 |  | 4 | The draft does not ask for the time of the transfer; the ticket only says 'yesterday'. |
+| m27 | cash_in_not_credited | ✓ | drafted | P1 |  | 4 | "وللحين" is Gulf dialect, not Iraqi; "لهسه" would sound more natural. |
+| m28 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| m29 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| m30 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| e01 | not_received | ✓ | drafted | P2 |  | 3 ⚠ | The draft turns the customer's 'خمسين' into '50,000 دينار', an amount the ticket never states, and it asks for nothing when it should confirm the amount and get the exact time of last night's transfer. |
+| e02 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| e03 | topup_failed | ✓ | flagged | P3 | missing:amount | 5 |  |
+| e04 | wrong_recipient | ✓ | flagged | P2 | missing:reference | 5 |  |
+| e05 | not_received | ✓ | drafted | P1 |  | 3 | The draft doesn't ask for the date and time of the transfer, and the phrasing 'حالياً نفهم' and 'رحنا نحول' is awkward. |
+| e06 | app_bug | ✗ unclear | escalated ✗ (drafted) | P3 | recheck_disagreed | — |  |
+| e07 | unauthorized_charge | ✓ | escalated | P1 | fraud | — |  |
+| e08 | cash_in_not_credited | ✓ | drafted | P2 |  | 4 | The draft asks for the agent's name and location but not the time of the transaction; the ticket gives only the day (Thursday). |
+| e09 | fees_limits_question | ✓ | drafted | P3 |  | 4 | The phrase "مكتوب بي" reads awkwardly and should be "مكتوب بيه" or "مكتوب بيه مجاني". |
+| e10 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
+| e11 | sim_change | ✓ | drafted | P1 |  | 5 |  |
+| e12 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| e13 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| e14 | reversal_request | ✓ | flagged | P1 | missing:reference | 5 |  |
+| e15 | bill_not_reflected | ✓ | drafted | P3 |  | 4 | The draft asks for the bill type even though the customer already said it is the electricity bill. |
