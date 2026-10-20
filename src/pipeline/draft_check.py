@@ -19,8 +19,14 @@ _LATIN_WORD = re.compile(r"[A-Za-z]+")
 _LATIN_OK = {"otp", "pin", "qr", "sms", "iqd", "usd", "app"}
 
 # Promises of an outcome or a time. "خلال" + a time unit is only allowed if it is a known fact.
+# "راح نرجع نخبرك" (we'll get back to you) is not a promise, so a return verb only counts
+# with money near it.
+_MONEY = r"(فلوس|المبلغ|مبلغ|الرصيد|المصاري)"
 _PROMISES = [
-    r"راح (ت|ن|ي)رجع", r"(ن|ت)رجعل(ك|ج)", r"نعوض", r"نضمن", r"مضمون", r"اكيد راح", r"أكيد راح",
+    rf"{_MONEY}\S*\s+(\S+\s+){{0,2}}?راح\s+(ت|ي)رجع",
+    rf"راح\s+(ن|ت|ي)رجع\S*\s+(\S+\s+){{0,2}}?{_MONEY}",
+    rf"(ن|ت)رجعل\S*\s+(\S+\s+)?{_MONEY}",
+    r"نعوض", r"نضمن", r"مضمون", r"اكيد راح", r"أكيد راح",
     r"راح (ت|ي)وصل(ك|ج|ه|ها)? خلال",
 ]
 _TIME = re.compile(r"خلال\s+(\S+\s+)?(دقيق|دقايق|ساع|يوم|أيام|ايام|اسبوع|أسبوع|شهر)")
@@ -51,8 +57,8 @@ def problems(draft: str, allowed_text: str) -> list[str]:
     if any(w.lower() not in allowed_words for w in _LATIN_WORD.findall(draft)) and "stray_latin" not in found:
         found.append("stray_latin")
 
-    time_ok = {m.group() for m in _TIME.finditer(allowed_text)}
-    if any(re.search(p, draft) for p in _PROMISES) or any(m.group() not in time_ok for m in _TIME.finditer(draft)):
+    time_ok = {m.group() for m in _TIME.finditer(clean(allowed_text))}   # "٢٤" and "24" compare equal
+    if any(re.search(p, draft) for p in _PROMISES) or any(m.group() not in time_ok for m in _TIME.finditer(clean(draft))):
         found.append("promise")
 
     for m in _SECRET.finditer(draft):
@@ -63,6 +69,8 @@ def problems(draft: str, allowed_text: str) -> list[str]:
 
     allowed_numbers = _numbers(allowed_text)
     thousands = {str(int(n) * 1000) for n in allowed_numbers if n.isdigit() and len(n) <= 4}
+    if re.search(r"(^|\s)(ال|أل)ف(\s|$)", allowed_text):   # "الف وحدة" = 1,000 written as a word
+        thousands.add("1000")
     if _numbers(draft) - allowed_numbers - thousands:
         found.append("unknown_number")
     return found

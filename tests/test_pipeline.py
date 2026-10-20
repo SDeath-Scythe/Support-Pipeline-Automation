@@ -380,3 +380,15 @@ def test_policy_facts_reach_the_drafter_only_under_f5(monkeypatch):
     monkeypatch.setenv("PIPELINE_FIXES", "policy_facts")
     p = user_prompt("…", ex(), "transfers")
     assert "Support hours:" in p and "Expected response time for this issue: خلال ٢٤ ساعة" in p
+
+
+def test_draft_check_v2_avoids_round1_false_alarms():
+    from pipeline.draft_check import problems
+
+    # "we'll get back to you" is not a refund promise; money coming back is
+    assert problems("رفعنا الموضوع للقسم، وراح نرجع نخبرك بعد المراجعة.", "…") == []
+    assert problems("فلوسك راح ترجع لحسابك.", "…") == ["promise"]
+    # a known response time written with other digits is still the known fact
+    assert problems("يكون عدنا رد خلال 24 ساعة.", "Known facts: Expected response time: خلال ٢٤ ساعة") == []
+    # "الف وحدة" in the ticket allows 1,000 in the draft
+    assert problems("وتتوقع تكون العمولة 1,000.", "المفروض الف وحدة") == []
