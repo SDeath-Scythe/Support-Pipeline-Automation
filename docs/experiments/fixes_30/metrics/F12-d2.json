@@ -2,8 +2,8 @@
  "meta": {
   "set": "fixes_30",
   "backend": "cli",
-  "started": "2026-10-20T13:37:58",
-  "wall_seconds": 64.9,
+  "started": "2026-10-20T13:43:04",
+  "wall_seconds": 60.4,
   "workers": 3,
   "models": {
    "classifier": "claude-haiku-5-5",
@@ -24,9 +24,9 @@
   "usage": {
    "model_calls": 63,
    "cached_calls": 35,
-   "input_tokens": 56250,
-   "output_tokens": 4164,
-   "cost_usd": 0.0474
+   "input_tokens": 56306,
+   "output_tokens": 4094,
+   "cost_usd": 0.1353
   }
  },
  "metrics": {
@@ -68,16 +68,16 @@
   "flagged": 0,
   "drafted": 28,
   "drafts": 28,
-  "bad_drafts": 4,
-  "bad_ready": 4,
-  "mean_score": 4.61,
+  "bad_drafts": 0,
+  "bad_ready": 0,
+  "mean_score": 4.54,
   "model_calls": 63,
   "judge_understood": [
    28,
    28
   ],
   "judge_grounded": [
-   27,
+   28,
    28
   ],
   "judge_no_promise": [
@@ -97,7 +97,7 @@
    28
   ],
   "judge_clean": [
-   25,
+   28,
    28
   ]
  },
@@ -123,7 +123,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، آسفين على التأخير، وأكيد أسبوعين مدة طويلة وتستاهل توضيح. راح يراجع قسم التوثيق طلبك ويتابعون وياك بخصوصه.",
+   "draft": "هلا بيك، آسفين على التأخير، وفهمت إن التوثيق بحسابك بعده معلق من أسبوعين. رحنا نحول الموضوع لقسم التوثيق حتى يراجعون طلبك ويتأكدون من حالته.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -132,8 +132,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The phrase 'رحنا نحول' is slightly awkward and would read more naturally as 'راح نحوّل'."
    },
    "bad": false,
    "bad_ready": false
@@ -159,7 +159,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، نفهم إنك نسيت الرمز السري وتريد ترجعه. راح يتابع قسم الحسابات طلبك ويراجعه، ويرجعون لك بالخطوات المناسبة. وحرصاً على أمان حسابك، لا تشارك الرمز السري أو أي رموز تحقق وياي أو ويا أي أحد.",
+   "draft": "هلا بيك، وصلتني مشكلتك بخصوص نسيان الرمز السري. راح يتابع قسم الحسابات طلبك ويشوفون الطريقة المناسبة لاسترجاعه. وللأمان، لا تشارك ويانا أي رمز سري أو رمز تحقق بالمحادثة.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -195,7 +195,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، آسفين على الإزعاج بخصوص التطبيق اللي يطلعلك شاشة بيضة ولا يشتغل. فريقنا راح يتابع المشكلة ويفحصها. إذا تكدر ترسلنا صورة من الشاشة اللي تطلعلك حتى تساعدنا نفهم المشكلة أكثر.",
+   "draft": "هلا بيك، آسف على الإزعاج، فهمت إن التطبيق يطلعلك شاشة بيضة وما يشتغل كل ما تفتحه. إذا تكدر ترسللنا صورة من الشاشة حتى نفهم المشكلة أكثر، وراح يراجعها الفريق المختص ويتأكد منها.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -204,8 +204,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 4,
-    "problems": "The first sentence awkwardly repeats the ticket wording, and the closing request is slightly clunky."
+    "score": 5,
+    "problems": ""
    },
    "bad": false,
    "bad_ready": false
@@ -231,7 +231,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 3,
-   "draft": "هلا بيك، آسف على اللي صار وما تنشغل بالك. فهمت إن موبايلك ضاع وطلعت خط جديد بنفس الرقم، وهسه ما تكدر تدخل على حسابك. راح يراجع قسم الحسابات الموضوع ويتواصلون وياك بعد ما يتأكدون.",
+   "draft": "هلا بيك، آسف على اللي صار وإن شاء الله يرجع كل شي مثل ما كان. فهمت إن موبايلك ضاع وطلعت خط جديد بنفس الرقم، وهسه ما تكدر تدخل على حسابك. رفعنا الموضوع لقسم الحسابات حتى يتأكدون منه ويراجعون وضع الحساب.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -240,8 +240,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The phrase 'إن شاء الله يرجع كل شي مثل ما كان' hints that access will be restored; it is better removed or softened."
    },
    "bad": false,
    "bad_ready": false
@@ -267,7 +267,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، نفهم سؤالك عن الحد الأعلى للتحويل اليومي وكلش نقدر استعجالك. هسه ما عدنا معلومة مؤكدة نكدر نكولها لك، بس فريق الدعم المختص راح يراجع سؤالك ويرجعلك بالجواب. نرجو منك تمهلنا شوية، وإن شاء الله نخدمك بأقرب وقت.",
+   "draft": "هلا بيك، نفهم استفسارك عن الحد الأعلى للتحويل اليومي، ونقدّر انتظارك. حوّلنا سؤالك للفريق المختص حتى يتحققون منه ويوضحون لك الحد المطلوب، وما نريد نخسرك كعميل.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -277,7 +277,7 @@
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "Saying 'we have no confirmed information right now' sounds weak to an angry customer and is worth rephrasing; 'نقدر' and 'نكدر' are also mixed."
+    "problems": "Slightly stiff phrasing ('نقدّر انتظارك', 'ما نريد نخسرك كعميل') could be smoothed to sound more natural and reassuring to an angry customer."
    },
    "bad": false,
    "bad_ready": false
@@ -303,20 +303,20 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، أدري الموضوع ضروري وإن شاء الله خير. استلمنا طلبك بخصوص تحويل مبلغ 100,000 دينار برقم العملية 99031274 اللي ما وصل للمستشفى، وقسم التحويلات راح يتحقق منه ويتابع وياك. ممكن تكتبلي تاريخ ووقت العملية حتى نكدر نتحقق بشكل أدق؟",
+   "draft": "شلونك، نعتذر عن الإزعاج، وفهمنا إنك حولت 100,000 دينار لأخوك بالمستشفى وما وصلت، برقم العملية 99031274. راح يراجعها قسم التحويلات ويتحقق منها. تكدر تكتبلنا تاريخ ووقت العملية حتى نوصلها للقسم بشكل كامل؟",
    "judge": {
     "understood": true,
-    "grounded": false,
+    "grounded": true,
     "no_promise": true,
     "asks_right": true,
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 4,
-    "problems": "The draft says the money didn't reach the hospital, but the customer sent it to his brother for the hospital, so this phrase needs a fix."
+    "score": 5,
+    "problems": ""
    },
-   "bad": true,
-   "bad_ready": true
+   "bad": false,
+   "bad_ready": false
   },
   {
    "id": "f07",
@@ -339,7 +339,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "وعليكم السلام ورحمة الله، أهلاً بيك. بس حتى نكدر نساعدك، ممكن توضحلي شنو المشكلة أو الشي اللي تحتاج مساعدة بي؟",
+   "draft": "وعليكم السلام ورحمة الله، أهلاً بيك. تفضل شلون نكدر نساعدك؟ اكتبلنا شنو المشكلة أو الاستفسار اللي عندك حتى نشوفه وياك.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -375,7 +375,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، حاضرين نساعدك. بس تكرم تكتب لنا شنو المشكلة اللي واجهتك بالتفصيل حتى نگدر نفهمها ونساعدك بالشكل الصحيح.",
+   "draft": "هلا بيك، حاضرين نساعدك. تكدر تكتبلي شنو المشكلة اللي تواجهك بالتفصيل حتى نفهمها صح ونوصلها للفريق المختص؟",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -411,7 +411,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، وصلني سؤالك عن أقرب فرع لنا بالبصرة. هسه ما عندي معلومة مؤكدة أكدر أعطيك إياها، فحولت طلبك للفريق المختص حتى يتابعه ويرجعلك.",
+   "draft": "هلا بيك، شكراً لتواصلك ويانا. وصلنا استفسارك عن أقرب فرع إلنا بالبصرة، والفريق المختص راح يتابعه ويراجعه. نعتذر عن أي تأخير ونتمنى لك يوم طيب.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -420,8 +420,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The apology for delay doesn't fit since no delay occurred and could be removed."
    },
    "bad": false,
    "bad_ready": false
@@ -447,7 +447,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا وغلا بيك، تفضل اسأل شنو سؤالك؟ اكتب لنا التفاصيل وإن شاء الله نساعدك.",
+   "draft": "هلا وغلا بيك، تفضل اسأل شنو سؤالك وإحنا نساعدك. اكتب لنا تفاصيل السؤال أو المشكلة بشكل واضح حتى نگدر نوجهها للفريق المختص.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -483,7 +483,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، وصلتنا مشكلتك بخصوص تحويل مبلغ 300,000 دينار لرقم غلط برقم العملية 55128830. راح يراجع قسم التحويلات الحالة ويتابعون وياك. ممكن تدزلنا رقم المستلم اللي حولت له المبلغ؟",
+   "draft": "هلا بيك، وصلتني مشكلتك بخصوص تحويل مبلغ 300,000 دينار برقم العملية 55128830 للرقم الغلط. قسم التحويلات راح يراجع الطلب ويدقق بالموضوع. ممكن تكتبلنا رقم المستلم اللي حولت إله المبلغ؟",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -519,7 +519,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، آسفين على الإزعاج اللي صار وياك. شفنا إن حسابك يطلعلك موقوف مؤقتاً كل ما تحاول تدخل، وراح يراجع قسم الحسابات وضع الحساب ويتابعون وياك بالسبب. ما نگدر نحدد السبب أو نعطيك أي وقت هسه، بس بمجرد ما يراجعونه راح نرجعلك.",
+   "draft": "هلا بيك، آسف على الإزعاج اللي صار وياك. فهمت إنه كل ما تحاول تدخل يطلعلك إن حسابك موقوف مؤقتاً. راح يراجع قسم الحسابات وضع حسابك ويشوف سبب الإيقاف، وإذا عندك أي تفاصيل ثانية عن المشكلة تگدر تكتبها لنا.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -528,8 +528,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 4,
-    "problems": "\"شفنا إن حسابك\" wrongly suggests the team already looked at the account; it should just acknowledge the customer's report."
+    "score": 5,
+    "problems": ""
    },
    "bad": false,
    "bad_ready": false
@@ -555,7 +555,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "أهلاً بيك، نعتذر على الإزعاج، ونفهم إنك تحتاج ترفع الحد حتى تكمل شغلك. راح نحول طلبك لقسم التوثيق حتى يراجعون سبب رفض توثيق حسابك، ونرجع نتواصل وياك بعد ما يتم الفحص.",
+   "draft": "أهلاً بيك، أكيد أتفهم إن رفض توثيق الحساب وضعك بموقف صعب وأنت محتاج ترفع الحد لشغلك. راح نحوّل طلبك لقسم التوثيق حتى يراجعون سبب الرفض ويشوفون وضع حسابك. نعتذر على الإزعاج.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -564,8 +564,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "Minor wording inconsistency (singular 'أتفهم' vs plural 'نحوّل'), and the limit-upgrade question is only acknowledged, not addressed."
    },
    "bad": false,
    "bad_ready": false
@@ -620,7 +620,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 3,
-   "draft": "هلا بيك، وصلت مشكلتك: انطيت الوكيل 25,000 دينار حتى يشحن رصيد للخط وما وصل الرصيد. قسم الفواتير راح يراجع الموضوع ويتابعه wياك، وحتى نكدر نتحقق أكثر، تكدر تكتبلنا الرقم اللي انشحن عليه؟",
+   "draft": "هلا بيك، وصلتني مشكلتك إنك دفعت للوكيل 25,000 دينار حتى يشحنلك رصيد للخط وما وصل الرصيد. راح يراجع الموضوع قسم الفواتير، وحتى نكدر نتابعه ياك، ممكن تكتبلي الرقم اللي انشحن؟",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -628,12 +628,12 @@
     "asks_right": true,
     "safe": true,
     "tone": true,
-    "clean": false,
+    "clean": true,
     "score": 4,
-    "problems": "A stray Latin 'w' is glued to the Arabic word in 'wياك' and should read 'وياك'."
+    "problems": "Asking for 'الرقم اللي انشحن' reads oddly since the top-up never arrived; 'الرقم اللي ردت تشحنه' would be clearer."
    },
-   "bad": true,
-   "bad_ready": true
+   "bad": false,
+   "bad_ready": false
   },
   {
    "id": "f16",
@@ -656,7 +656,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، وصلتني مشكلتك، دفعت 60,000 دينار بالبطاقة وطلعت العملية مرفوضة بس المبلغ انخصم منك. قسم البطاقات راح يراجع الموضوع ويتابع وياك. ممكن تكتبلي اسم المتجر اللي دفعت بي حتى نكدر نتحقق بشكل أدق؟",
+   "draft": "هلا بيك، آسف على الإزعاج، أدري كلش مزعج تنخصم الفلوس وتطلع العملية مرفوضة. استلمنا مشكلتك بخصوص الدفع بمبلغ 60,000 دينار بمحل الملابس، وراح يراجعها قسم البطاقات. ممكن تكتبلنا اسم المتجر بالضبط حتى نكدر نتابع الموضوع؟",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -665,8 +665,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 4,
-    "problems": "Minor wording slip 'دفعت بي' should be 'دفعت بيه', and 'دينار' adds a currency the customer did not state."
+    "score": 5,
+    "problems": ""
    },
    "bad": false,
    "bad_ready": false
@@ -692,7 +692,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "مرحباً بيك، نعتذر على اللي صار وفهمنا مشكلتك: الوكيل بالمنصور اخذ منك 7,000 دينار عمولة على سحب 50,000 دينار. راح يراجع قسم الوكلاء الموضوع ويتابعون وياك. تكدر تكتبلنا اسم الوكيل ومكانه بالضبط حتى نكدر نتحقق؟",
+   "draft": "هلا بيك، وآسفين على الإزعاج. وصلتني مشكلتك بخصوص العمولة اللي أخذها الوكيل بالمنصور على سحب 50,000 دينار، وقسم الوكلاء راح يراجع الموضوع. ممكن تكتبلنا اسم الوكيل ومكانه بالضبط حتى نكدر نتابع؟",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -728,7 +728,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، وصلني استفسارك عن الـ 2500 دينار اللي انخصمت منك على تحويل الـ 100,000 دينار. راح يراجع الفريق المختص العملية ويتابعويّاك بخصوص سبب الخصم.",
+   "draft": "هلا بيك، وصلني استفسارك عن الـ2,500 دينار اللي انخصمت منك على تحويل الـ100,000 دينار. راح يراجع الفريق المختص العملية ويتأكد من سبب الخصم.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -736,12 +736,12 @@
     "asks_right": true,
     "safe": true,
     "tone": true,
-    "clean": false,
-    "score": 4,
-    "problems": "The words 'ويتابعويّاك' are glued together and need a space ('ويتابع ويّاك')."
+    "clean": true,
+    "score": 5,
+    "problems": ""
    },
-   "bad": true,
-   "bad_ready": true
+   "bad": false,
+   "bad_ready": false
   },
   {
    "id": "f19",
@@ -764,7 +764,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 3,
-   "draft": "هلا بيك، وصلتني ملاحظتك بخصوص شحن حسابك بمبلغ 200,000 دينار عند الوكيل وأخذ عمولة 5,000 دينار. راح يراجع قسم الوكلاء الموضوع ويتابعون وياك. تكدر تكتبلي اسم الوكيل ومكانه حتى نكدر نتحقق بالشكل الصحيح؟",
+   "draft": "هلا بيك، وصلتني مشكلتك بخصوص شحن 200 ألف دينار عند الوكيل وأخذ 5 آلاف عمولة. قسم الوكلاء راح يراجع الموضوع ويتأكد منه. تكدر تكتبلنا اسم الوكيل ومكانه حتى نكمل المراجعة؟",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -800,7 +800,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، أفهم كلامك وآسف على الإزعاج، بخصوص تحويل الـ 50,000 دينار اللي رقم عمليته 77120934 وانرسل لرقم غلط. راح يراجع قسم التحويلات الحالة ويتابعون وياك، بس ما أكدر أحدد وقت أو أضمن النتيجة هسه. ممكن تكتبلي رقم المستلم اللي حولت إله؟",
+   "draft": "هلا بيك، نعتذر على اللي صار وفهمت مشكلتك بخصوص تحويل 50,000 دينار لرقم غلط، رقم العملية 77120934. قسم التحويلات راح يراجع الحالة. تكدر ترسللنا رقم المستلم اللي حولت إله حتى تتم المراجعة؟",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -809,8 +809,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The draft skips the customer's direct question about an exact date and should briefly say no date can be confirmed yet."
    },
    "bad": false,
    "bad_ready": false
@@ -836,7 +836,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، وصلتني مشكلتك بخصوص شحن الرصيد بمبلغ 15,000 دينار للرقم 07801112233 وما وصل، ونعتذر عن الإزعاج. راح يراجع قسم الفواتير العملية ويتابعون وياك بأقرب وقت، وما أگدر أحدد وقت أو أوعد بنتيجة معينة قبل ما يتأكدون.",
+   "draft": "هلا بيك، وآسف على الإزعاج. وصلتني مشكلة شحن الرصيد بمبلغ 15,000 دينار للرقم 07801112233 وما وصل. راح يراجعها قسم الفواتير ويتحققون منها، وما أكدر أحدد وقت أو أوعد بإرجاع المبلغ قبل ما يخلصون التدقيق.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -872,7 +872,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، آسف على المشكلة اللي واجهتك بتسجيل الدخول، يعني الكود يوصلك بس يطلع غلط. قسم الحسابات راح يفحص الموضوع ويتابع وياك. وبالنسبة للكود، لا تدزه لأي أحد حتى لنا، لأنه سري وما نحتاجه منك.",
+   "draft": "هلا بيك، آسف على المشكلة اللي واجهتك بتسجيل الدخول، وفهمت إن الكود يوصلك بس يطلع لك أنه غلط. قسم الحسابات راح يتحقق من الموضوع. وبالنسبة للكود، لا تدزه لأي أحد حتى لو طلبوه منك، لأنه سري ولا نحتاجه منك أبداً.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -908,7 +908,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، وآسف على الإزعاج اللي صار وياك. فهمت إن عمليتين بمبلغ 45 دولار على أمازون فشلت، وراح يراجعها قسم البطاقات ويتابعون وياك. تكدر تكتبلي اسم المتجر اللي صارت عليه العمليتين حتى نكمل التدقيق؟",
+   "draft": "هلا بيك، وآسفين على اللي صار وياك. شفنا إن عملية الدفع بالبطاقة فشلت مرتين بمبلغ 45 دولار، وقسم البطاقات راح يتحقق من الموضوع. ممكن تكتبلنا اسم المتجر اللي حاولت تدفع بيه؟ وبخصوص الاسترداد، القسم المختص هو اللي يتأكد منه.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -918,7 +918,7 @@
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "The draft asks for the store name, but the ticket already says Amazon, so the closing question should be dropped."
+    "problems": "The draft asks for the store name, but the customer already said it was Amazon."
    },
    "bad": false,
    "bad_ready": false
@@ -944,7 +944,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 3,
-   "draft": "هلا وغلا بيك، نعتذر منك كلش لأنك اشتكيت أكثر من مرة وما وصلك رد، ونتفهم انزعاجك. وصلتنا شكواك وطلب التعويض، وراح يراجعها الفريق المختص ويتابعها وياك. ما نكدر نحدد نتيجة الطلب هسه، بس الموضوع صار عندنا قيد المتابعة.",
+   "draft": "أهلاً بيك، ونعتذر منك على التأخير وعدم الرد على شكاواك السابقة، حقك علينا. وصلت شكواك لفريقنا وراح يتم مراجعتها من الفريق المختص. بخصوص طلب التعويض، الفريق هو اللي يبحث بالموضوع ويراجعه.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -953,8 +953,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The draft is solid, but the last sentence about compensation repeats the earlier review point and could be smoother."
    },
    "bad": false,
    "bad_ready": false
@@ -980,7 +980,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، وصلتني مشكلتك بخصوص حوالة الـ 120 ألف دينار اللي دزيتها لابن خالك وما وصلته، رقم الحوالة 31846620. رجعنا الطلب لقسم التحويلات حتى يتأكدون منه ويتابعون وياك.",
+   "draft": "هلا بيك، وصلني إنك حولت 120,000 دينار لابن خالك من البارحة وما وصلته، ورقم الحوالة 31846620. حولنا الموضوع لقسم التحويلات حتى يتحققون من الحوالة. نعتذر عن الإزعاج.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -990,7 +990,7 @@
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "The draft does not ask for the approximate time of the transfer; the ticket only says it was yesterday."
+    "problems": "The draft does not ask for the approximate time of the transfer; the ticket only says 'yesterday'."
    },
    "bad": false,
    "bad_ready": false
@@ -1044,7 +1044,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا وغلا بيك، آسفين على الإزعاج اللي صار وياك بتفعيل البطاقة. فهمت إن البطاقة وصلتك بس كل ما تحاول تفعلها يطلع لك خطأ، وراح يراجع قسم البطاقات الموضوع ويتابعون وياك.",
+   "draft": "هلا بيك، آسف على المشكلة اللي واجهتك وياه تفعيل البطاقة. فهمت إن البطاقة وصلتك بس كل ما تحاول تفعلها يطلع خطأ. راح نحول الموضوع لقسم البطاقات حتى يتحققون منه.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -1080,7 +1080,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، وآسف على الإزعاج. وصلتني مشكلتك بخصوص تسديد فاتورة الإنترنت بمبلغ 35,000 دينار وبعدها الخط مقطوع، وراح يراجعها قسم الفواتير ويتابعون وياك. ممكن تكتبلي نوع الفاتورة حتى نكمل الفحص؟",
+   "draft": "هلا بيك، آسف على الإزعاج، وفاهم إنك سددت فاتورة الإنترنت بمبلغ 35,000 دينار وبعدهم الخط مقطوع. حتى نكدر نساعدك، شنو نوع الفاتورة اللي سددتها؟ وبعدها قسم الفواتير راح يتحقق من الموضوع.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -1089,8 +1089,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 4,
-    "problems": "The draft asks for the bill type even though the customer already said it is the internet bill, so the last sentence should be removed."
+    "score": 3,
+    "problems": "The draft asks for the bill type even though the customer already said it was an internet bill, and both needed details (amount and type) are already in the ticket."
    },
    "bad": false,
    "bad_ready": false
@@ -1116,7 +1116,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، آسف على اللي صار وياك. فهمت إنك دفعت 18,000 دينار للسوبرماركت بالتطبيق وطلعت العملية فاشلة بس المبلغ انخصم، وراح يراجعها قسم الفواتير ويتابعون وياك. تكدر تكتبلي اسم المتجر اللي دفعت له؟",
+   "draft": "هلا بيك، أكو مبلغ 18,000 دينار انخصم من حسابك بالتطبيق عند الدفع للسوبرماركت وطلعت العملية فاشلة، وأنا آسف على هالإزعاج. قسم الفواتير راح يراجع الموضوع ويتحقق منه. تكدر تكتبلي اسم المتجر اللي دفعت إله حتى نكمل المراجعة؟",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -1125,8 +1125,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The opening restatement ('أكو مبلغ ... انخصم') is a bit awkward and reads like a confirmation of the deduction rather than an acknowledgement; a light rephrase would help."
    },
    "bad": false,
    "bad_ready": false
@@ -1152,7 +1152,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 2,
-   "draft": "هلا بيك، آسف على اللي صار وياك وياه الوكيل بالكرادة. حتى نكدر نتابع الموضوع، ممكن تكتبلي اسم الوكيل ومكانه بالضبط؟ وبعدها قسم الوكلاء راح يتحقق من الموضوع ويتواصلويّاك.",
+   "draft": "أهلاً بيك، آسفين على الإزعاج اللي صار وياك. فهمت إن الوكيل اللي بالكرادة كل مرة يكلك ماكو كاش وما يسحبلك، وراح يراجع الموضوع قسم الوكلاء. تكدر تكتبلنا اسم الوكيل ومكانه بالضبط حتى نكدر نتابع الموضوع؟",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -1160,12 +1160,12 @@
     "asks_right": true,
     "safe": true,
     "tone": true,
-    "clean": false,
-    "score": 4,
-    "problems": "The draft has two typos: the garbled phrase 'وياك وياه الوكيل' and the missing space in 'يتواصلويّاك'."
+    "clean": true,
+    "score": 5,
+    "problems": ""
    },
-   "bad": true,
-   "bad_ready": true
+   "bad": false,
+   "bad_ready": false
   }
  ]
 }
