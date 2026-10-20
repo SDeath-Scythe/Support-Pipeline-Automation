@@ -148,7 +148,14 @@ def _call_cli(cfg: dict, system: str, user: str) -> str:
     return data["result"]
 
 
-def _cached(cfg: dict, system: str, user: str, send) -> str:
+def _salt(role: str | None) -> str:
+    """LLM_CACHE_SALT="drafter=r1" gives that role fresh replies (a new cache slot) while
+    other roles keep theirs: used to replicate drafts with the classification held fixed."""
+    pairs = dict(p.split("=", 1) for p in os.getenv("LLM_CACHE_SALT", "").split(",") if "=" in p)
+    return pairs.get(role or "", "")
+
+
+def _cached(cfg: dict, system: str, user: str, send, role: str | None = None) -> str:
     """Return the stored reply for this exact call, or make it once and store it.
 
     A lock directory per key stops two parallel runs paying for the same call twice.
@@ -156,7 +163,8 @@ def _cached(cfg: dict, system: str, user: str, send) -> str:
     cache_dir = os.getenv("LLM_CACHE_DIR")
     if not cache_dir:
         return send(cfg, system, user)
-    key = hashlib.sha256(json.dumps([cfg["model"], system, user]).encode("utf-8")).hexdigest()
+    parts = [cfg["model"], system, user] + ([_salt(role)] if _salt(role) else [])
+    key = hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
     path = Path(cache_dir) / f"{key}.json"
     lock = path.with_suffix(".lock")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -194,7 +202,7 @@ def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
     last_error: Exception | None = None
     for _ in range(retries + 1):
         try:
-            return _cached(cfg, system, user, send)
+            return _cached(cfg, system, user, send, role)
         except Exception as e:  # noqa: BLE001 - surfaced to caller after retry
             last_error = e
     raise RuntimeError(f"Model call failed for role '{role}' on the {backend()} backend") from last_error

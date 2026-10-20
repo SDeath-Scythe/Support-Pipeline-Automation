@@ -411,3 +411,17 @@ def test_usage_recorded_from_cli_and_cache(monkeypatch, tmp_path):
     assert llm.last_usage() == {"input_tokens": 100, "output_tokens": 7, "cost_usd": 0.002}
     llm.call("classifier", "S", "u")
     assert llm.last_usage()["cached"] is True and llm.last_usage()["output_tokens"] == 7
+
+
+def test_cache_salt_refreshes_only_the_named_role(monkeypatch, tmp_path):
+    from pipeline import llm
+
+    n = []
+    send = lambda cfg, s, u: n.append(1) or f"r{len(n)}"   # noqa: E731
+    monkeypatch.setenv("LLM_CACHE_DIR", str(tmp_path))
+    cfg = {"model": "m"}
+    assert llm._cached(cfg, "S", "a", send, "drafter") == "r1"
+    assert llm._cached(cfg, "S", "a", send, "classifier") == "r1"   # same key without a salt
+    monkeypatch.setenv("LLM_CACHE_SALT", "drafter=d1")
+    assert llm._cached(cfg, "S", "a", send, "drafter") == "r2"      # fresh slot for the drafter
+    assert llm._cached(cfg, "S", "a", send, "classifier") == "r1"   # classifier unchanged
