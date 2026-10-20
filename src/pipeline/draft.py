@@ -73,6 +73,8 @@ def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:
         lines.append(f"Amount: {ex.amount_iqd:,} IQD")
     elif ex.amount_usd is not None:
         lines.append(f"Amount: {ex.amount_usd} USD")
+    if ex.fee_iqd is not None:
+        lines.append(f"Disputed fee: {ex.fee_iqd:,} IQD")
     missing = ask_for(ex)
     lines.append("Ask the customer for: " + (", ".join(FIELD_AR.get(f, f) for f in missing) if missing else "nothing"))
     lines.append("Known facts: " + ("; ".join(facts) if facts else "none (do not state any timeline, fee or limit)"))

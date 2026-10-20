@@ -8,14 +8,29 @@ from functools import lru_cache
 from pathlib import Path
 
 from .config import load_yaml
+from .fixes import enabled
 from .llm import call
 from .schemas import Extraction
 
 _PROMPT = Path(__file__).parent / "prompts" / "classify_system.md"
 
 
-@lru_cache(maxsize=1)
+# F6 (fee_amount): when a customer disputes a fee, keep the fee apart from the transaction
+# amount, so the agent and the draft talk about the right number.
+_FEE_FIELD = (
+    "- `fee_iqd`: only when the customer disputes or asks about a fee, commission or deduction "
+    "(عمولة، رسوم، استقطاع): the fee amount in IQD as an integer. "
+    "`amount_iqd` stays the amount of the transaction itself. If the fee is not stated but the "
+    "customer gives what they sent and what arrived, the fee is the difference. Otherwise null.\n"
+)
+
+
 def system_prompt() -> str:
+    return _system_prompt(enabled("fee_amount"))
+
+
+@lru_cache(maxsize=2)
+def _system_prompt(fee_field: bool) -> str:
     """The classifier prompt, with the taxonomy filled in from config/taxonomy.yaml."""
     raw = load_yaml("taxonomy.yaml")
     lines = []
@@ -24,7 +39,11 @@ def system_prompt() -> str:
         for sub_key, sub in cat["subcategories"].items():
             hint = f" ({sub['hint']})" if sub.get("hint") else ""
             lines.append(f"  - `{sub_key}`: {sub['label']}{hint}")
-    return _PROMPT.read_text(encoding="utf-8").replace("{taxonomy}", "\n".join(lines))
+    prompt = _PROMPT.read_text(encoding="utf-8").replace("{taxonomy}", "\n".join(lines))
+    if fee_field:
+        usd = next(line for line in prompt.splitlines(keepends=True) if line.startswith("- `amount_usd`"))
+        prompt = prompt.replace(usd, usd + _FEE_FIELD).replace('"amount_usd": null, ', '"amount_usd": null, "fee_iqd": null, ')
+    return prompt
 
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)

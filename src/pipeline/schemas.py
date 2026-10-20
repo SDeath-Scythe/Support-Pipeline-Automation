@@ -28,6 +28,7 @@ class Extraction(BaseModel):
     recipient_phone: str | None = None
     amount_iqd: int | None = None
     amount_usd: int | None = None        # never converted; the agent sees the original currency
+    fee_iqd: int | None = None           # F6: the disputed fee, only filled when fee_amount is on
     date: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     rationale: str = ""

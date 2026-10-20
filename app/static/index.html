@@ -327,6 +327,7 @@ function fieldsList(ex) {
     ["رقم العملية", ex.reference], ["رقم المستلم", ex.recipient_phone],
     ["المبلغ", fmtAmount(ex)], ["الوقت", ex.date],
   ];
+  if (ex.fee_iqd != null) rows.splice(4, 0, ["العمولة المعترض عليها", `${ex.fee_iqd.toLocaleString("en-US")} دينار`]);
   const dl = el("dl", { class: "kv" });
   for (const [k, v] of rows) dl.append(el("dt", { text: k }), el("dd", { class: /^[0-9 -]+$/.test(v || "") ? "ltr" : "", text: v ?? "—" }));
   return dl;

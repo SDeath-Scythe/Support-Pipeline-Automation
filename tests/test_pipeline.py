@@ -353,3 +353,18 @@ def test_unclear_gets_template_without_drafter_under_f8(monkeypatch):
     assert result["outcome"] == "drafted" and "رقم العملية" in result["draft_ar"]
     draft_ev = [e for e in events if e["stage"] == "draft"][-1]
     assert draft_ev["data"]["template"] is True
+
+
+# --- F6: the disputed fee is extracted separately ---
+
+def test_fee_field_only_in_prompt_under_f6(monkeypatch):
+    from pipeline.classify import system_prompt
+    from pipeline.draft import user_prompt
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert "fee_iqd" not in system_prompt()
+    monkeypatch.setenv("PIPELINE_FIXES", "fee_amount")
+    p = system_prompt()
+    assert "- `fee_iqd`" in p and '"amount_usd": null, "fee_iqd": null' in p
+    fee = ex(category="agents_cash", subcategory="overcharged_fee", reference=None, amount_iqd=50000, fee_iqd=7000)
+    assert "Disputed fee: 7,000 IQD" in user_prompt("…", fee, "agent_network")
