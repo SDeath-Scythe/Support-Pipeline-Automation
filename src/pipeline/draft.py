@@ -36,9 +36,11 @@ def policy() -> dict:
 
 # F12 (no_specific_followup): the judge's worst drafts promised to send a specific answer
 # (a branch address, a refund date) the team may not have.
+# v2: v1 ended "...will check and follow up", and the drafter's follow-up phrase kept coming out
+# broken ("wياك", "يتابعونويا"); v2 drops that wording.
 _NO_SPECIFIC = (
     "- Do not say the team will send, confirm or tell the customer a specific answer (an address, a date, "
-    "a fee, how long something takes, a refund). Say only that the team will check and follow up.\n"
+    "a fee, how long something takes, a refund). It is enough to say the relevant team will check it.\n"
 )
 
 
