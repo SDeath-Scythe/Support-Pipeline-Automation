@@ -15,15 +15,22 @@ Two backends, same prompts and same code path:
 
 Pick one with `backend:` in config/models.yaml, or override per run with the
 LLM_BACKEND environment variable.
+
+Experiments only: set LLM_CACHE_DIR to reuse the reply to an identical call (same
+model, system and user prompt). Runs with and without a fix then differ only where the
+fix changes a model's input, not because the model answered differently a second time.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import time
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -122,6 +129,38 @@ def _call_cli(cfg: dict, system: str, user: str) -> str:
     return data["result"]
 
 
+def _cached(cfg: dict, system: str, user: str, send) -> str:
+    """Return the stored reply for this exact call, or make it once and store it.
+
+    A lock directory per key stops two parallel runs paying for the same call twice.
+    """
+    cache_dir = os.getenv("LLM_CACHE_DIR")
+    if not cache_dir:
+        return send(cfg, system, user)
+    key = hashlib.sha256(json.dumps([cfg["model"], system, user]).encode("utf-8")).hexdigest()
+    path = Path(cache_dir) / f"{key}.json"
+    lock = path.with_suffix(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            lock.mkdir()
+            break
+        except FileExistsError:
+            if time.time() - lock.stat().st_mtime > 600:   # left behind by a crashed run
+                shutil.rmtree(lock, ignore_errors=True)
+            time.sleep(0.5)
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))["reply"]
+        reply = send(cfg, system, user)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"model": cfg["model"], "reply": reply}, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+        return reply
+    finally:
+        shutil.rmtree(lock, ignore_errors=True)
+
+
 def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
     """Send one message for `role` and return the text reply.
 
@@ -132,7 +171,7 @@ def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
     last_error: Exception | None = None
     for _ in range(retries + 1):
         try:
-            return send(cfg, system, user)
+            return _cached(cfg, system, user, send)
         except Exception as e:  # noqa: BLE001 - surfaced to caller after retry
             last_error = e
     raise RuntimeError(f"Model call failed for role '{role}' on the {backend()} backend") from last_error

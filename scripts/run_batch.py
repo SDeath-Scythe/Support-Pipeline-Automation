@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pipeline.config import models  # noqa: E402
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
+from pipeline.fixes import active as active_fixes  # noqa: E402
 from pipeline.llm import backend  # noqa: E402
 from pipeline.run import process  # noqa: E402
 
@@ -42,29 +43,32 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("file", nargs="?", default=str(ROOT / "data/probes/mixed_30.jsonl"))
     ap.add_argument("--workers", type=int, default=5)
+    ap.add_argument("--out", help="output file (default runs/<timestamp>-<set>-<backend>.json)")
     args = ap.parse_args()
 
     src = Path(args.file)
     tickets = [json.loads(line) for line in src.read_text(encoding="utf-8").splitlines() if line.strip()]
-    print(f"Running {len(tickets)} tickets from {src.name} on the {backend()} backend, {args.workers} at a time")
+    fixes = sorted(active_fixes())
+    print(f"Running {len(tickets)} tickets from {src.name} on the {backend()} backend, {args.workers} at a time"
+          f"{', fixes: ' + ', '.join(fixes) if fixes else ''}")
     started = datetime.now()
     t0 = time.time()
     with ThreadPoolExecutor(args.workers) as pool:
         rows = list(pool.map(run_one, tickets))
 
-    out_dir = ROOT / "runs"
-    out_dir.mkdir(exist_ok=True)
-    out = out_dir / f"{started:%Y%m%d-%H%M%S}-{src.stem}-{backend()}.json"
+    out = Path(args.out) if args.out else ROOT / "runs" / f"{started:%Y%m%d-%H%M%S}-{src.stem}-{backend()}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({
         "meta": {
             "set": src.stem, "backend": backend(), "started": started.isoformat(timespec="seconds"),
             "wall_seconds": round(time.time() - t0, 1), "workers": args.workers,
             "models": {r: c["model"] for r, c in models().items()},
             "thresholds": load_thresholds()["confidence"],
+            "fixes": fixes,
         },
         "tickets": rows,
     }, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"Saved {out.relative_to(ROOT)}")
+    print(f"Saved {out}")
 
 
 if __name__ == "__main__":

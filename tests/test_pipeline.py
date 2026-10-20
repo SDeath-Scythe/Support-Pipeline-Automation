@@ -224,3 +224,39 @@ def test_run_confident_ticket_is_drafted(monkeypatch):
     result = run.process("التطبيق يفتح شاشة بيضاء", events.append)
     assert result["outcome"] == "drafted" and result["draft_ar"] == "هلا بيك، راح نشيك"
     assert [e["stage"] for e in events if e["status"] != "running"] == run.STAGES
+
+
+# --- experiment harness: fix flags and the response cache ---
+
+def test_fix_flags_off_by_default_and_reject_unknown(monkeypatch):
+    from pipeline import fixes
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert fixes.active() == frozenset()
+    monkeypatch.setenv("PIPELINE_FIXES", "draft_check, no_now_urgency")
+    assert fixes.enabled("draft_check") and not fixes.enabled("fee_amount")
+    monkeypatch.setenv("PIPELINE_FIXES", "nope")
+    try:
+        fixes.active()
+        assert False, "unknown fix should raise"
+    except ValueError:
+        pass
+
+
+def test_cache_reuses_identical_calls_only(monkeypatch, tmp_path):
+    from pipeline import llm
+
+    sent = []
+
+    def fake_send(cfg, system, user):
+        sent.append(user)
+        return f"reply {len(sent)}"
+
+    monkeypatch.setenv("LLM_CACHE_DIR", str(tmp_path))
+    cfg = {"model": "m"}
+    assert llm._cached(cfg, "S", "a", fake_send) == "reply 1"
+    assert llm._cached(cfg, "S", "a", fake_send) == "reply 1"      # cached
+    assert llm._cached(cfg, "S", "b", fake_send) == "reply 2"      # different input
+    assert llm._cached({"model": "n"}, "S", "a", fake_send) == "reply 3"  # different model
+    monkeypatch.delenv("LLM_CACHE_DIR")
+    assert llm._cached(cfg, "S", "a", fake_send) == "reply 4"      # cache off
