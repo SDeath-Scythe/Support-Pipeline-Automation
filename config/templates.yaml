@@ -1,0 +1,6 @@
+# Fixed replies used instead of a drafter call (F8, unclear_template).
+# The agent still reviews them like any draft. Edit the text here, not in code.
+
+unclear_ar: >-
+  هلا بيك، شكراً لتواصلك ويانا. ممكن توضحلنا شنو المشكلة اللي صادفتك بالضبط؟
+  وإذا تخص عملية معينة، اكتبلنا رقم العملية والمبلغ ووقتها حتى نكدر نساعدك.

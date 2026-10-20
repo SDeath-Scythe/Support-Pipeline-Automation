@@ -17,7 +17,7 @@ from . import classify as cls
 from . import draft as drf
 from . import draft_check
 from .clean import _DIGITS, _TATWEEL, clean
-from .config import models, taxonomy
+from .config import load_yaml, models, taxonomy
 from .fixes import enabled
 from .gate import check
 from .llm import backend, call
@@ -151,7 +151,17 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     team, priority = route(ex, text)
     send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority})
 
-    # 6. Draft (drafter model)
+    # 6. Draft. F8 (unclear_template): an unclear ticket gets the fixed reply, no model call.
+    if enabled("unclear_template") and ex.subcategory == "unclear":
+        reply = load_yaml("templates.yaml")["unclear_ar"].strip()
+        checks = draft_check.problems(reply, text) if enabled("draft_check") else []
+        flags += [f"draft:{p}" for p in checks]
+        send("draft", "done", {"model": "قالب ثابت", "template": True, "seconds": 0, "reply": reply,
+                               "user_prompt": "(قالب من config/templates.yaml، بدون نموذج)", "ask_for": [],
+                               "checks": checks})
+        outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
+        return finish(outcome, flags, team=team, priority=priority, draft_ar=reply, extraction=ex.model_dump())
+
     send("draft", "running", {"model": models()["drafter"]["model"], "backend": backend(),
                               "ask_for": drf.ask_for(ex)})
     t0 = time.time()

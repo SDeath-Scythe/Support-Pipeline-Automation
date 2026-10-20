@@ -337,3 +337,19 @@ def test_draft_problems_flag_the_ticket_only_under_f2(monkeypatch):
     monkeypatch.setenv("PIPELINE_FIXES", "draft_check")
     result = run.process("التطبيق يفتح شاشة بيضاء")
     assert result["outcome"] == "flagged" and result["flags"] == ["draft:stray_latin"]
+
+
+# --- F8: fixed reply for unclear tickets ---
+
+def test_unclear_gets_template_without_drafter_under_f8(monkeypatch):
+    from pipeline import draft as drf
+
+    clf = '{"category": "general", "subcategory": "unclear", "confidence": 0.9}'
+    run = _fake_models(monkeypatch, clf, "من النموذج")
+    monkeypatch.setenv("PIPELINE_FIXES", "unclear_template")
+    monkeypatch.setattr(drf, "call", lambda *a: (_ for _ in ()).throw(AssertionError("drafter must not be called")))
+    events = []
+    result = run.process("السلام عليكم", events.append)
+    assert result["outcome"] == "drafted" and "رقم العملية" in result["draft_ar"]
+    draft_ev = [e for e in events if e["stage"] == "draft"][-1]
+    assert draft_ev["data"]["template"] is True
