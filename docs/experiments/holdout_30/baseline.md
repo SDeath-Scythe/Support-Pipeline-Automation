@@ -1,0 +1,64 @@
+# baseline on holdout_30
+
+Fixes on: none · backend `cli` · 2026-10-20T14:08:46 · compared with `baseline`
+
+| Metric | baseline |
+|---|---|
+| Subcategory correct (first model) | 28/30 |
+| Subcategory used correct | 28/30 |
+| Wrong type, not escalated | 1 |
+| Outcome matches gold | 29/30 |
+| Draft given iff it should be | 29/30 |
+| Priority correct | 28/30 |
+| Amount correct | 30/30 |
+| Fee correct (fee tickets) | 0/2 |
+| Escalated | 3 |
+| Flagged | 0 |
+| Drafted (ready) | 27 |
+| Drafts judged | 27 |
+| Bad drafts (judge) | 1 |
+| Bad drafts marked ready | 1 |
+| Mean draft score (1-5) | 4.41 |
+| Model calls (pipeline) | 63 |
+| Judge: understood | 27/27 |
+| Judge: grounded | 27/27 |
+| Judge: no_promise | 27/27 |
+| Judge: asks_right | 21/27 |
+| Judge: safe | 27/27 |
+| Judge: tone | 27/27 |
+| Judge: clean | 26/27 |
+
+## Every ticket
+
+| Ticket | Gold | Got | Outcome | Priority | Flags | Draft score | Judge notes |
+|---|---|---|---|---|---|---|---|
+| h01 | fees_limits_question | ✓ | drafted | P3 |  | 4 | Minor grammar slip: 'إن حولت' should be 'إنك حولت'. |
+| h02 | topup_failed | ✓ | drafted | P3 |  | 4 | Saying the money was 'withdrawn' (انسحبت) is slightly off, because the customer paid the agent cash; 'the agent took the money' would match the ticket better. |
+| h03 | card_payment_failed | ✓ | drafted | P3 |  | 5 |  |
+| h04 | forgot_pin | ✓ | drafted | P3 |  | 5 |  |
+| h05 | blocked_account | ✓ | drafted | P2 |  | 4 | The draft doesn't directly answer the customer's 'what should I do' question, so the agent may want to add a clear next step. |
+| h06 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| h07 | merchant_payment | ✓ | drafted | P3 |  | 5 |  |
+| h08 | cash_in_not_credited | ✓ | drafted | P2 |  | 5 |  |
+| h09 | bill_not_reflected | ✓ | drafted | P3 |  | 4 | The draft asks for the bill type even though the customer already said it is the monthly mobile bill, so the last sentence should be removed. |
+| h10 | not_received | ✓ | drafted | P2 |  | 4 | The draft does not ask for the exact time of the transfer; the customer only said 'since the morning'. |
+| h11 | card_payment_failed | ✓ | drafted | P3 |  | 3 | The draft asks for the merchant name, but the customer already said Noon (نون), and they also gave the amount, so nothing needed to be asked. |
+| h12 | overcharged_fee | ✓ | drafted | P3 |  | 3 | The draft asks for the agent's name and location, but the ticket already gives them (Al-Sharqawi agent on Al-Rubaie Street). |
+| h13 | bill_not_reflected | ✓ | drafted | P3 |  | 3 | The draft asks for the bill type even though the customer already said it is the water bill. |
+| h14 | topup_failed | ✓ | drafted | P3 |  | 4 | Typo 'رحنحوّل' should be 'راح نحوّل'. |
+| h15 | cash_out_refused | ✓ | drafted | P3 |  | 4 | The draft repeats the agent's location from the ticket and then asks for it again; it should ask only for the agent's name. |
+| h16 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
+| h17 | wrong_recipient | ✗ reversal_request | escalated ✗ (drafted) | P2 | recheck_disagreed | — |  |
+| h18 | fees_limits_question | ✓ | drafted | P3 |  | 5 |  |
+| h19 | limit_upgrade | ✗ fees_limits_question | drafted | P3 |  | 5 |  |
+| h20 | app_bug | ✓ | drafted | P2 ✗ (P3) |  | 5 |  |
+| h21 | topup_failed | ✓ | drafted | P2 |  | 5 |  |
+| h22 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| h23 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| h24 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| h25 | unauthorized_charge | ✓ | escalated | P1 | fraud | — |  |
+| h26 | rejected_or_pending | ✓ | drafted | P3 |  | 5 |  |
+| h27 | sim_change | ✓ | drafted | P1 ✗ (P2) |  | 4 ⚠ | Missing space in 'نتواصلويّاك' (should be 'نتواصل ويّاك'). |
+| h28 | complaint | ✓ | drafted | P3 |  | 4 | The phrase 'وياي موظف خدمة العملاء' wrongly says 'with me' and should be 'ويا موظف خدمة العملاء'. |
+| h29 | not_received | ✓ | drafted | P1 |  | 4 | The draft adds 'دينار' as the currency, but the ticket only says 'مليونين'. |
+| h30 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
