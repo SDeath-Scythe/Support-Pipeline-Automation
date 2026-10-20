@@ -36,6 +36,7 @@ FLAG_AR = {
     "missing:amount": "المبلغ ناقص",
     "recheck_disagreed": "النموذج الثاني صنّفها بشكل مختلف",
     "recheck_same_team": "النموذجين اختلفوا بالنوع بس نفس القسم: تأكد من نوع المشكلة قبل الاعتماد",
+    "recheck_used_second": "النموذجين اختلفوا: اعتمدنا جواب المراجعة الثانية، تأكد من نوع المشكلة",
     "model_error": "صار خطأ بالنموذج، تحتاج مراجعة يدوية",
     "draft:stray_latin": "المسودة بيها حروف إنكليزية بغير مكانها",
     "draft:promise": "المسودة توعد بنتيجة أو وقت: تأكد قبل الاعتماد",
@@ -131,7 +132,15 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
             sub2 = tax.subcategories.get(ex2.subcategory)
             same_team = (not agree and sub is not None and sub2 is not None and sub2.team == sub.team
                          and not sub2.always_escalate)
-            if same_team and enabled("recheck_same_team"):
+            # F3b / F3c: the re-check model was right in most disagreements, so draft from its answer
+            # (same team only for F3b, any team for F3c). Never for fraud.
+            use_second = (not agree and sub2 is not None and not sub2.always_escalate
+                          and (enabled("recheck_cross_team") or (same_team and enabled("recheck_use_second"))))
+            gate2 = check(ex2, text) if use_second else None
+            if use_second and not gate2.escalate:
+                alternative, ex, sub = ex.subcategory, ex2, sub2
+                flags = list(gate2.flags) + ["recheck_used_second"]
+            elif same_team and enabled("recheck_same_team"):
                 flags.append("recheck_same_team")
                 alternative = ex2.subcategory
             elif not agree or ex2.category == "fraud_security":

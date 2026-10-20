@@ -425,3 +425,33 @@ def test_cache_salt_refreshes_only_the_named_role(monkeypatch, tmp_path):
     monkeypatch.setenv("LLM_CACHE_SALT", "drafter=d1")
     assert llm._cached(cfg, "S", "a", send, "drafter") == "r2"      # fresh slot for the drafter
     assert llm._cached(cfg, "S", "a", send, "classifier") == "r1"   # classifier unchanged
+
+
+# --- F3b / F3c: draft from the re-check's answer ---
+
+def test_f3b_uses_second_answer_for_same_team(monkeypatch):
+    monkeypatch.setenv("PIPELINE_FIXES", "recheck_use_second")
+    run = _fake_classifier_by_role(monkeypatch, SAME_TEAM)
+    result = run.process(T_WRONG)
+    assert result["outcome"] == "flagged" and result["draft_ar"]
+    assert result["extraction"]["subcategory"] == "wrong_recipient"
+    assert result["recheck_alternative"] == "reversal_request" and "recheck_used_second" in result["flags"]
+
+
+def test_f3b_still_escalates_cross_team_but_f3c_does_not(monkeypatch):
+    cross = {**SAME_TEAM, "rechecker": '{"category": "general", "subcategory": "fees_limits_question", "confidence": 0.9}'}
+    monkeypatch.setenv("PIPELINE_FIXES", "recheck_use_second")
+    run = _fake_classifier_by_role(monkeypatch, cross)
+    assert run.process(T_WRONG)["outcome"] == "escalated"
+    monkeypatch.setenv("PIPELINE_FIXES", "recheck_cross_team")
+    result = run.process(T_WRONG)
+    assert result["outcome"] == "flagged" and result["team"] == "general"
+    assert result["extraction"]["subcategory"] == "fees_limits_question"
+
+
+def test_f3c_never_overrides_into_or_out_of_fraud(monkeypatch):
+    monkeypatch.setenv("PIPELINE_FIXES", "recheck_cross_team")
+    fraud = {**SAME_TEAM, "rechecker": '{"category": "fraud_security", "subcategory": "unauthorized_charge", "confidence": 0.9}'}
+    run = _fake_classifier_by_role(monkeypatch, fraud)
+    result = run.process(T_WRONG)
+    assert result["outcome"] == "escalated" and "fraud" in result["flags"]
