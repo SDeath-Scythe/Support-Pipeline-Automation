@@ -360,7 +360,7 @@ def write_summary(set_name: str) -> None:
              "(see the per-config pages for details).", "",
              "| Config | " + " | ".join(names[k] for k in keys) + " |", "|---" * (len(keys) + 1) + "|"]
     for c in order:
-        lines.append(f"| [{c}]({c}.md) | " + " | ".join(fmt(found[c][k]) for k in keys) + " |")
+        lines.append(f"| [{c}]({c}.md) | " + " | ".join(fmt(found[c].get(k)) for k in keys) + " |")
     (docs_dir(set_name) / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
