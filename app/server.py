@@ -40,14 +40,26 @@ def load_tickets(name: str) -> list[dict]:
 
 
 def list_runs() -> list[dict]:
+    """Saved batch runs (runs/*.json) and experiment runs (runs/exp/<set>/<config>.json)."""
     out = []
-    for f in sorted(RUNS.glob("*.json"), reverse=True):
+    files = sorted(RUNS.glob("*.json"), reverse=True) + sorted(RUNS.glob("exp/*/*.json"))
+    for f in files:
         try:
             meta = json.loads(f.read_text(encoding="utf-8"))["meta"]
         except (ValueError, KeyError):
             continue
-        out.append({"name": f.stem, **meta})
+        name = f.relative_to(RUNS).with_suffix("").as_posix()
+        out.append({"name": name, "experiment": name.startswith("exp/"), **meta})
     return out
+
+
+def run_file(name: str) -> Path | None:
+    """The run file for a name from list_runs(), refusing anything outside runs/ or in the cache."""
+    f = (RUNS / f"{name}.json").resolve()
+    runs = RUNS.resolve()
+    if runs not in f.parents or (runs / "cache") in f.parents or not f.is_file():
+        return None
+    return f
 
 
 def meta() -> dict:
@@ -89,8 +101,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/runs":
             return self._json(list_runs())
         if url.path == "/api/run":
-            f = RUNS / f"{Path((q.get('name') or [''])[0]).name}.json"
-            if not f.exists():
+            f = run_file((q.get("name") or [""])[0])
+            if f is None:
                 return self._json({"error": "No such run"}, 404)
             return self._send(f.read_bytes(), "application/json; charset=utf-8")
         if url.path == "/api/meta":

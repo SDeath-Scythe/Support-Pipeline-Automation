@@ -152,6 +152,7 @@ textarea.edit { width: 100%; max-width: 640px; min-height: 120px; padding: 12px 
 .gold td:first-child { color: var(--muted); width: 150px; }
 .gold .y { color: var(--ok); font-weight: 600; } .gold .n { color: var(--bad); font-weight: 600; }
 
+#sortBy { margin-top: 6px; }
 select.source { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font: inherit; color: inherit; }
 .mark-ok { color: var(--ok); font-weight: 700; } .mark-no { color: var(--bad); font-weight: 700; }
 
@@ -198,6 +199,11 @@ table.grid tbody tr.click:hover td { background: var(--paper); }
     </div>
     <h2>القائمة</h2>
     <select class="source" id="source" aria-label="مصدر التذاكر"></select>
+    <select class="source" id="sortBy" aria-label="ترتيب القائمة">
+      <option value="received">بترتيب الوصول</option>
+      <option value="priority">حسب الأولوية (P1 والمتصعّدة أول)</option>
+      <option value="team">حسب القسم</option>
+    </select>
     <button class="btn ghost" id="showOverview" hidden>ملخص التشغيل</button>
     <ul class="queue" id="queue"></ul>
   </aside>
@@ -246,9 +252,13 @@ async function init() {
   const g1 = el("optgroup", { label: "تشغيل مباشر" });
   sets.forEach(n => g1.append(el("option", { value: `set:${n}`, text: `${n} (مباشر)` })));
   const g2 = el("optgroup", { label: "تشغيلات محفوظة" });
-  runs.forEach(r => g2.append(el("option", { value: `run:${r.name}`, text: `${r.set} · ${r.started.replace("T", " ").slice(0, 16)} · ${r.backend}` })));
-  src.append(g1); if (runs.length) src.append(g2);
-  src.value = runs.length ? `run:${runs[0].name}` : `set:${sets.includes("edge_cases") ? "edge_cases" : sets[0]}`;
+  const g3 = el("optgroup", { label: "تجارب الإصلاحات" });
+  runs.forEach(r => (r.experiment ? g3 : g2).append(el("option", { value: `run:${r.name}`, text: r.experiment
+    ? `${r.set} · ${r.name.split("/").pop()}${r.fixes?.length ? " (" + r.fixes.join("، ") + ")" : ""}`
+    : `${r.set} · ${r.started.replace("T", " ").slice(0, 16)} · ${r.backend}` })));
+  src.append(g1); if (g2.children.length) src.append(g2); if (g3.children.length) src.append(g3);
+  const firstRun = runs.find(r => !r.experiment) || runs[0];
+  src.value = firstRun ? `run:${firstRun.name}` : `set:${sets.includes("edge_cases") ? "edge_cases" : sets[0]}`;
   src.onchange = () => loadSource(src.value);
   await loadSource(src.value);
   $("#backend").innerHTML = "";
@@ -274,15 +284,28 @@ async function loadSource(v) {
   renderQueue();
 }
 
+// Queue order for the agent: as received, by priority (P1 and escalated first), or grouped by team.
+function queueOrder() {
+  const by = $("#sortBy").value, idx = TICKETS.map((_, i) => i);
+  if (by === "received" || !RUN) return idx;
+  const res = i => RUN.tickets[i]?.result || {};
+  const rank = { escalated: 0, flagged: 1, drafted: 2 };
+  const pri = i => ({ P1: 1, P2: 2, P3: 3 })[res(i).priority] ?? 9;
+  const cmp = by === "team"
+    ? (a, b) => (res(a).team || "~").localeCompare(res(b).team || "~") || pri(a) - pri(b) || a - b
+    : (a, b) => pri(a) - pri(b) || (rank[res(a).outcome] ?? 9) - (rank[res(b).outcome] ?? 9) || a - b;
+  return idx.sort(cmp);
+}
+
 function renderQueue() {
   const q = $("#queue"); q.innerHTML = "";
-  TICKETS.forEach((t, i) => {
+  queueOrder().forEach(i => { const t = TICKETS[i];
     const key = t.id || `custom-${i}`;
     const row = RUN?.tickets[i];
     const verdict = row ? (scoreRow(row).sub ? el("span", { class: "mark-ok", text: " ✓" }) : el("span", { class: "mark-no", text: " ✗" })) : null;
     const b = el("button", { "aria-current": String(current === key) },
       el("span", { class: `dot ${status[key] || ""}` }),
-      el("span", {}, el("span", { class: "q-text", text: t.text }), el("span", { class: "q-meta" }, `${t.id}${t.difficulty ? " · " + t.difficulty : ""}${t.trap ? " · " + t.trap : ""}`, verdict)));
+      el("span", {}, el("span", { class: "q-text", text: t.text }), el("span", { class: "q-meta" }, `${t.id}${row?.result.priority ? " · " + row.result.priority : ""}${row?.result.team && $("#sortBy").value === "team" ? " · " + META.teams[row.result.team].label_ar : ""}${t.difficulty ? " · " + t.difficulty : ""}${t.trap ? " · " + t.trap : ""}`, verdict)));
     b.onclick = () => !busy && (RUN ? replay(i) : run(t, key));
     q.append(el("li", {}, b));
   });
@@ -315,8 +338,15 @@ function setStage(id, st, ms) {
   return $(".body", n);
 }
 
+function usageText(u) {
+  if (!u || u.input_tokens == null) return "";
+  return `التوكنز: ${u.input_tokens.toLocaleString("en-US")} داخل / ${u.output_tokens.toLocaleString("en-US")} طالع`
+    + (u.cost_usd ? ` · الكلفة المحسوبة $${u.cost_usd.toFixed(4)}` : "") + (u.cached ? " · من الكاش" : "");
+}
+
 function promptDetails(d) {
   return el("details", {}, el("summary", { text: "شوف اللي انرسل للنموذج وجوابه" }),
+    el("div", { class: "note ltr", text: usageText(d.usage) }),
     el("div", { class: "note", text: "الرسالة:" }), el("pre", { text: d.user_prompt || "" }),
     el("div", { class: "note", text: "الجواب كما هو:" }), el("pre", { text: d.reply || "" }));
 }
@@ -485,12 +515,17 @@ function renderOverview() {
   rows.forEach(r => outc[r.result.outcome]++);
   const calls = sc.reduce((a, s) => a + s.calls, 0);
   const avg = rows.reduce((a, r) => a + r.seconds, 0) / n;
+  const usages = rows.flatMap(r => r.events.filter(e => e.status === "done" && e.data.usage?.input_tokens != null).map(e => e.data.usage));
+  const tokens = usages.reduce((a, u) => a + u.input_tokens + u.output_tokens, 0);
+  const cost = usages.reduce((a, u) => a + (u.cost_usd || 0), 0);
 
   const stats = el("div", { class: "stats" },
     [[`${count(s => s.sub)}/${n}`, "نوع المشكلة صحيح"], [`${count(s => s.outcome)}/${n}`, "النتيجة صحيحة"],
      [`${count(s => s.priority)}/${n}`, "الأولوية صحيحة"], [`${pct(outc.escalated, n)}%`, "نسبة التصعيد"],
      [`${count(s => s.recheck)}`, "راحت للمراجعة الثانية"], [`${(calls / n).toFixed(1)}`, "استدعاء نموذج لكل تذكرة"],
-     [`${avg.toFixed(1)}s`, "معدل وقت التذكرة"]].map(([b, t]) => el("div", { class: "stat" }, el("b", { class: "ltr", text: b }), el("span", { text: t }))));
+     [`${avg.toFixed(1)}s`, "معدل وقت التذكرة"],
+     [usages.length ? Math.round(tokens / n).toLocaleString("en-US") : "—", "توكنز لكل تذكرة"],
+     [cost ? `$${(cost / n).toFixed(4)}` : "—", "الكلفة المحسوبة لكل تذكرة"]].map(([b, t]) => el("div", { class: "stat" }, el("b", { class: "ltr", text: b }), el("span", { text: t }))));
 
   const bar = el("div", { class: "bar" }, ["drafted", "flagged", "escalated"].filter(k => outc[k]).map(k =>
     el("div", { class: k, style: `width:${(100 * outc[k]) / n}%`, text: `${OUTCOME_AR[k].split(":")[0].split("،")[0]} ${outc[k]}` })));
@@ -549,6 +584,7 @@ function accCell(a, b) {
 }
 
 $("#showOverview").onclick = () => RUN && renderOverview();
+$("#sortBy").onchange = () => renderQueue();
 
 $("#runNew").onclick = () => {
   const text = $("#newText").value.trim(); if (!text || busy) return;
