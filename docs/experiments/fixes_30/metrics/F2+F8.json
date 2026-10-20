@@ -2,8 +2,8 @@
  "meta": {
   "set": "fixes_30",
   "backend": "cli",
-  "started": "2026-10-20T12:00:10",
-  "wall_seconds": 2.6,
+  "started": "2026-10-20T12:04:43",
+  "wall_seconds": 5.3,
   "workers": 3,
   "models": {
    "classifier": "claude-haiku-5-5",
@@ -29,7 +29,7 @@
    30
   ],
   "outcome": [
-   28,
+   29,
    30
   ],
   "draft_available": [
@@ -53,8 +53,8 @@
    30
   ],
   "escalated": 2,
-  "flagged": 1,
-  "drafted": 27,
+  "flagged": 0,
+  "drafted": 28,
   "drafts": 28,
   "bad_drafts": 2,
   "bad_ready": 2,
@@ -306,7 +306,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 1,
-   "draft": "هلا بيك، شكراً لتواصلك ويانا. ممكن توضحلنا شنو المشكلة اللي صادفتك بالضبط؟ وإذا تخص عملية معينة، اكتبلنا رقم العملية والمبلغ ووقتها حتى نكدر نساعدك.",
+   "draft": "هلا بيك، شكراً لتواصلك ويانا ووصلتنا رسالتك. إذا عندك سؤال عام، راح يشوفه واحد من فريقنا ويرد عليك. وإذا عندك مشكلة بحسابك أو بعملية معينة، وضحلنا شنو صار بالضبط، ودزلنا رقم العملية والمبلغ ووقتها إذا تخص عملية.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -316,7 +316,7 @@
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "The draft doesn't return the customer's salam (e.g. وعليكم السلام), and the conditional request for transaction details is slightly premature but acceptable."
+    "problems": "The line about a general question is awkward because the customer only sent a greeting; it should simply ask what they need help with."
    },
    "bad": false,
    "bad_ready": false
@@ -339,7 +339,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 1,
-   "draft": "هلا بيك، شكراً لتواصلك ويانا. ممكن توضحلنا شنو المشكلة اللي صادفتك بالضبط؟ وإذا تخص عملية معينة، اكتبلنا رقم العملية والمبلغ ووقتها حتى نكدر نساعدك.",
+   "draft": "هلا بيك، شكراً لتواصلك ويانا ووصلتنا رسالتك. إذا عندك سؤال عام، راح يشوفه واحد من فريقنا ويرد عليك. وإذا عندك مشكلة بحسابك أو بعملية معينة، وضحلنا شنو صار بالضبط، ودزلنا رقم العملية والمبلغ ووقتها إذا تخص عملية.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -348,8 +348,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The 'general question' sentence doesn't fit a customer who said they have a problem and could be cut, leaving the request to explain what happened."
    },
    "bad": false,
    "bad_ready": false
@@ -372,7 +372,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 1,
-   "draft": "هلا بيك، شكراً لتواصلك ويانا. ممكن توضحلنا شنو المشكلة اللي صادفتك بالضبط؟ وإذا تخص عملية معينة، اكتبلنا رقم العملية والمبلغ ووقتها حتى نكدر نساعدك.",
+   "draft": "هلا بيك، شكراً لتواصلك ويانا ووصلتنا رسالتك. إذا عندك سؤال عام، راح يشوفه واحد من فريقنا ويرد عليك. وإذا عندك مشكلة بحسابك أو بعملية معينة، وضحلنا شنو صار بالضبط، ودزلنا رقم العملية والمبلغ ووقتها إذا تخص عملية.",
    "judge": {
     "understood": false,
     "grounded": true,
@@ -381,8 +381,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 2,
-    "problems": "The draft ignores the customer's clear question about the nearest Basra branch and asks for a problem description and transaction details that aren't needed."
+    "score": 3,
+    "problems": "The draft is a generic template that ignores the customer's clear question about the nearest branch in Basra and asks for transaction details that are not needed."
    },
    "bad": true,
    "bad_ready": true
@@ -405,7 +405,7 @@
    "ref_ok": true,
    "flags": [],
    "calls": 1,
-   "draft": "هلا بيك، شكراً لتواصلك ويانا. ممكن توضحلنا شنو المشكلة اللي صادفتك بالضبط؟ وإذا تخص عملية معينة، اكتبلنا رقم العملية والمبلغ ووقتها حتى نكدر نساعدك.",
+   "draft": "هلا بيك، شكراً لتواصلك ويانا ووصلتنا رسالتك. إذا عندك سؤال عام، راح يشوفه واحد من فريقنا ويرد عليك. وإذا عندك مشكلة بحسابك أو بعملية معينة، وضحلنا شنو صار بالضبط، ودزلنا رقم العملية والمبلغ ووقتها إذا تخص عملية.",
    "judge": {
     "understood": true,
     "grounded": true,
@@ -415,7 +415,7 @@
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "The customer said they have a question, but the draft assumes a 'problem' and asks ahead of time for transaction details that aren't needed yet."
+    "problems": "The customer hasn't stated their question yet, so the draft should simply ask them to write it instead of saying the team will review it."
    },
    "bad": false,
    "bad_ready": false
@@ -460,8 +460,8 @@
    "sub": "blocked_account",
    "sub_ok": true,
    "gold_outcome": "drafted",
-   "outcome": "flagged",
-   "outcome_ok": false,
+   "outcome": "drafted",
+   "outcome_ok": true,
    "draft_avail_ok": true,
    "gold_priority": "P2",
    "priority": "P2",
@@ -469,9 +469,7 @@
    "amount_ok": true,
    "fee_ok": null,
    "ref_ok": true,
-   "flags": [
-    "draft:promise"
-   ],
+   "flags": [],
    "calls": 2,
    "draft": "هلا بيك، آسفين على الإزعاج اللي صار وياك. فهمت إنه كل ما تحاول تدخل يطلعلك إن حسابك موقوف مؤقتاً وتريد تعرف السبب. رفعنا الموضوع لقسم الحسابات حتى يراجعون حالة حسابك ويوضحون لك السبب، وراح نرجع نخبرك بعد المراجعة.",
    "judge": {
