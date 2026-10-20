@@ -19,6 +19,7 @@ FIXES = {
     "recheck_cross_team": "F3c: any non-fraud re-check disagreement is drafted from the re-check's answer, flagged",
     "confusable_recheck": "F9: re-check when the answer is in a known look-alike pair and confidence < 0.90",
     "runner_up": "F10: the classifier names a runner-up; re-check when it has one and confidence < 0.90",
+    "lookalike_hints": "F13: sharper classifier hints for the look-alike subcategories",
     "ask_if_missing": "F11: the drafter asks for unverifiable details only if the ticket does not give them",
     "no_specific_followup": "F12: the drafter must not promise to send a specific answer, date or result",
     "fee_amount": "F6: the classifier extracts the disputed fee separately (fee_iqd)",

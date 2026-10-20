@@ -35,18 +35,21 @@ _RUNNER_UP = (
 
 
 def system_prompt() -> str:
-    return _system_prompt(enabled("fee_amount"), enabled("runner_up"))
+    return _system_prompt(enabled("fee_amount"), enabled("runner_up"), enabled("lookalike_hints"))
 
 
-@lru_cache(maxsize=4)
-def _system_prompt(fee_field: bool, runner_up: bool = False) -> str:
+@lru_cache(maxsize=8)
+def _system_prompt(fee_field: bool, runner_up: bool = False, lookalike: bool = False) -> str:
     """The classifier prompt, with the taxonomy filled in from config/taxonomy.yaml."""
     raw = load_yaml("taxonomy.yaml")
+    # F13 (lookalike_hints): sharper one-line definitions for the look-alike subcategories.
+    extra = load_yaml("experiments/lookalike_hints.yaml") if lookalike else {}
     lines = []
     for cat_key, cat in raw["categories"].items():
         lines.append(f"- `{cat_key}` ({cat['label']})")
         for sub_key, sub in cat["subcategories"].items():
-            hint = f" ({sub['hint']})" if sub.get("hint") else ""
+            text = extra.get(sub_key) or sub.get("hint")
+            hint = f" ({text})" if text else ""
             lines.append(f"  - `{sub_key}`: {sub['label']}{hint}")
     prompt = _PROMPT.read_text(encoding="utf-8").replace("{taxonomy}", "\n".join(lines))
     if fee_field:

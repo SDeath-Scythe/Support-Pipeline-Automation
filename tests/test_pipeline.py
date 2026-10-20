@@ -502,3 +502,15 @@ def test_f12_adds_rule_to_drafter_prompt(monkeypatch):
     assert "a specific answer" not in system_prompt()
     monkeypatch.setenv("PIPELINE_FIXES", "no_specific_followup")
     assert "Do not say the team will send, confirm or tell the customer a specific answer" in system_prompt()
+
+
+def test_f13_lookalike_hints_only_under_flag(monkeypatch):
+    from pipeline.classify import system_prompt
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    base = system_prompt()
+    assert "arrived but less than was sent" not in base
+    monkeypatch.setenv("PIPELINE_FIXES", "lookalike_hints")
+    p = system_prompt()
+    assert "`not_received`: Not received or deducted (money left the account" in p
+    assert p.count("\n") == base.count("\n")     # hints only, no new lines or rules

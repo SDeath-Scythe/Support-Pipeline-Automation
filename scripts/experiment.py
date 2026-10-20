@@ -43,6 +43,7 @@ CODES = {
     "F10": "runner_up",
     "F11": "ask_if_missing",
     "F12": "no_specific_followup",
+    "F13": "lookalike_hints",
 }
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"
