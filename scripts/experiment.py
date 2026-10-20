@@ -100,10 +100,14 @@ def judge_prompt(row: dict, salt: str = "") -> str | None:
     if gold.get("secondary_subcategory") in tax.subcategories:
         issue += f" (second question: {tax.get(gold['secondary_subcategory']).label})"
     dr = _ev(row, "draft")
-    facts = "none"
+    facts, team = "none", None
     for line in (dr or {}).get("data", {}).get("user_prompt", "").splitlines():
         if line.startswith("Known facts:"):
             facts = line.removeprefix("Known facts:").strip()
+        elif line.startswith("Handled by:"):
+            team = line.removeprefix("Handled by:").strip()
+    if team:   # the drafter is told the team, so naming it is grounded
+        facts += f"; the issue is handled by {team}"
     needed = needed_info(gold["subcategory"])
     return "\n".join([
         f"<ticket>\n{gold['text']}\n</ticket>",
