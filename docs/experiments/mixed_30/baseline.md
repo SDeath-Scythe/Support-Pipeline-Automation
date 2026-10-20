@@ -1,0 +1,62 @@
+# baseline on mixed_30
+
+Fixes on: none · backend `cli` · 2026-10-20T12:04:43 · compared with `baseline`
+
+| Metric | baseline |
+|---|---|
+| Subcategory correct | 27/30 |
+| Outcome matches gold | 27/30 |
+| Draft given iff it should be | 27/30 |
+| Priority correct | 27/30 |
+| Amount correct | 13/14 |
+| Fee correct (fee tickets) | — |
+| Escalated | 5 |
+| Flagged | 2 |
+| Drafted (ready) | 23 |
+| Drafts judged | 25 |
+| Bad drafts (judge) | 2 |
+| Bad drafts marked ready | 2 |
+| Mean draft score (1-5) | 4.6 |
+| Model calls (pipeline) | 62 |
+| Judge: understood | 25/25 |
+| Judge: grounded | 24/25 |
+| Judge: no_promise | 24/25 |
+| Judge: asks_right | 22/25 |
+| Judge: safe | 25/25 |
+| Judge: tone | 24/25 |
+| Judge: clean | 25/25 |
+
+## Every ticket
+
+| Ticket | Gold | Got | Outcome | Priority | Flags | Draft score | Judge notes |
+|---|---|---|---|---|---|---|---|
+| m01 | not_received | ✓ | drafted | P2 |  | 5 |  |
+| m02 | forgot_pin | ✗ login_otp | escalated ✗ (drafted) | P2 ✗ (P3) | recheck_disagreed | — |  |
+| m03 | card_payment_failed | ✓ | drafted | P3 |  | 5 |  |
+| m04 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
+| m05 | rejected_or_pending | ✓ | drafted | P3 |  | 5 |  |
+| m06 | cash_out_refused | ✓ | drafted | P3 |  | 5 |  |
+| m07 | app_bug | ✓ | drafted | P3 |  | 5 |  |
+| m08 | limit_upgrade | ✓ | drafted | P3 |  | 4 | The word "للحين" in the last sentence reads awkwardly and should be removed or rephrased. |
+| m09 | merchant_payment | ✗ not_received | escalated ✗ (drafted) | P2 ✗ (P3) | missing:reference, recheck_disagreed | — |  |
+| m10 | blocked_account | ✓ | drafted | P2 |  | 5 |  |
+| m11 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| m12 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| m13 | bill_not_reflected | ✓ | drafted | P3 |  | 4 | The draft asks for the bill type, but the customer already said it was the internet bill, and both needed details are already in the ticket. |
+| m14 | login_otp | ✓ | drafted | P2 |  | 5 |  |
+| m15 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
+| m16 | fees_limits_question | ✓ | drafted | P3 |  | 5 |  |
+| m17 | complaint | ✓ | drafted | P3 |  | 5 |  |
+| m18 | cash_in_not_credited | ✓ | drafted | P1 |  | 4 | The draft could also ask for the approximate time of the deposit, since the ticket only says 'the morning'. |
+| m19 | reversal_request | ✓ | drafted | P2 |  | 4 | The phrase 'اللي ألغيتوا البيعة' reads awkwardly and could be smoothed to 'واللي ألغيتوا بيها البيعة'. |
+| m20 | not_received | ✓ | flagged | P1 | missing:reference | 4 | The draft asks only for the transaction number and should also ask for the exact date and time of the transfer, since the ticket only says it has been about two days. |
+| m21 | unauthorized_charge | ✓ | escalated | P1 | fraud | — |  |
+| m22 | sim_change | ✓ | drafted | P2 |  | 4 | The phrase 'ما تنطيك العافية على الخط المسروق' is awkward and can read as negative; it should be removed or replaced with a normal sympathy line. |
+| m23 | fees_limits_question | ✗ not_received | escalated ✗ (drafted) | P2 ✗ (P3) | missing:reference, recheck_disagreed | — |  |
+| m24 | wrong_recipient | ✓ | flagged | P1 | missing:reference | 5 |  |
+| m25 | card_payment_failed | ✓ | drafted | P3 |  | 4 ⚠ | The phrase 'ويأكدلك الإمكانية' implies the card limit can be raised, so it should become something neutral like 'يوضحلك إذا ممكن'. |
+| m26 | not_received | ✓ | drafted | P2 |  | 3 ⚠ | The draft misstates the amount as 100,000 when the customer wrote 200,000, and it does not ask for the time of the transfer. |
+| m27 | cash_in_not_credited | ✓ | drafted | P1 |  | 4 | "وللحين" is Gulf dialect, not Iraqi; "لهسه" would sound more natural. |
+| m28 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| m29 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| m30 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
