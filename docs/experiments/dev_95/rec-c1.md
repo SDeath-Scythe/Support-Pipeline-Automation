@@ -1,0 +1,221 @@
+# rec-c1 on dev_95
+
+Fixes on: ask_if_missing, draft_check, fee_amount, no_now_urgency, no_specific_followup, recheck_cross_team · backend `cli` · 2026-10-20T13:45:58 · compared with `baseline`
+
+| Metric | baseline | rec-c1 | Change |
+|---|---|---|---|
+| Subcategory correct (first model) | 90/95 | 89/95 | -1 worse |
+| Subcategory used correct | 90/95 | 93/95 | +3 better |
+| Wrong type, not escalated | 0 | 1 | +1 worse |
+| Outcome matches gold | 90/95 | 88/95 | -2 worse |
+| Draft given iff it should be | 90/95 | 94/95 | +4 better |
+| Priority correct | 86/95 | 91/95 | +5 better |
+| Amount correct | 77/79 | 74/79 | -3 worse |
+| Fee correct (fee tickets) | 0/4 | 4/4 | +4 better |
+| Escalated | 13 | 9 | -4 |
+| Flagged | 6 | 12 | +6 |
+| Drafted (ready) | 76 | 74 | -2 |
+| Drafts judged | 82 | 86 | +4 |
+| Bad drafts (judge) | 6 | 1 | -5 better |
+| Bad drafts marked ready | 6 | 1 | -5 better |
+| Mean draft score (1-5) | 4.52 | 4.64 | +0.12 better |
+| Model calls (pipeline) | 199 | 199 |  |
+| Judge: understood | 82/82 | 86/86 | +4 better |
+| Judge: grounded | 79/82 | 85/86 | +6 better |
+| Judge: no_promise | 79/82 | 86/86 | +7 better |
+| Judge: asks_right | 68/82 | 77/86 | +9 better |
+| Judge: safe | 82/82 | 86/86 | +4 better |
+| Judge: tone | 81/82 | 86/86 | +5 better |
+| Judge: clean | 81/82 | 86/86 | +5 better |
+
+## Tickets that changed (87)
+
+| Ticket | Targets | What changed |
+|---|---|---|
+| f01 | F7 | priority P2 → P3; draft changed (score 5 → 5) |
+| f02 | F7 | priority P2 → P3; draft changed (score 5 → 5) |
+| f03 | F7 | priority P2 → P3; draft changed (score 5 → 4) |
+| f04 | F7 | priority P1 → P2; draft changed (score 5 → 4) |
+| f05 | F7,F2 | priority P2 → P3; draft changed (score 4 → 3) |
+| f06 | F7 | draft changed (score 4 → 5) |
+| f07 | F8 | draft changed (score 5 → 5) |
+| f08 | F8 | draft changed (score 5 → 5) |
+| f09 | F8 | draft changed (score 3 → 4) |
+| f10 | F8 | draft changed (score 4 → 4) |
+| f11 | F3 | draft changed (score 5 → 5) |
+| f12 | F3 | draft changed (score 5 → 4) |
+| f13 | F3 | draft changed (score 4 → 4) |
+| f14 | F3,F6 | outcome escalated → flagged; priority P2 → P3; flags ['missing:reference', 'recheck_disagreed'] → ['recheck_used_second']; draft changed (score — → 4) |
+| f15 | F3 | subcategory topup_failed → cash_in_not_credited; priority P3 → P2; draft changed (score 5 → 3) |
+| f16 | F3 | draft changed (score 4 → 5) |
+| f17 | F6 | draft changed (score 5 → 5) |
+| f18 | F6 | draft changed (score 4 → 5) |
+| f19 | F6 | draft changed (score 5 → 5) |
+| f20 | F2 | draft changed (score 5 → 5) |
+| f21 | F2 | draft changed (score 5 → 4) |
+| f22 | F2 | draft changed (score 5 → 5) |
+| f23 | F2 | draft changed (score 3 → 5) |
+| f24 | F2 | draft changed (score 4 → 5) |
+| f25 | control | draft changed (score 4 → 4) |
+| f27 | control | draft changed (score 4 → 5) |
+| f28 | control | draft changed (score 4 → 5) |
+| f29 | control | draft changed (score 5 → 5) |
+| f30 | control | draft changed (score 5 → 4) |
+| s01 |  | draft changed (score 5 → 5) |
+| s02 |  | draft changed (score 4 → 5) |
+| s03 |  | draft changed (score 4 → 4) |
+| s04 |  | draft changed (score 5 → 5) |
+| s05 |  | subcategory limit_upgrade → blocked_account; outcome drafted → flagged; flags [] → ['recheck_used_second']; draft changed (score 4 → 5) |
+| s06 |  | draft changed (score 4 → 4) |
+| s07 |  | draft changed (score 5 → 5) |
+| s08 |  | draft changed (score 5 → 4) |
+| s09 |  | draft changed (score 5 → 5) |
+| s10 |  | draft changed (score 4 → 5) |
+| s11 |  | draft changed (score 5 → 5) |
+| s12 |  | draft changed (score 5 → 5) |
+| s13 |  | draft changed (score 5 → 5) |
+| s15 |  | draft changed (score 5 → 5) |
+| s16 |  | subcategory fees_limits_question → not_received; outcome drafted → flagged; flags [] → ['recheck_used_second']; draft changed (score 4 → 5) |
+| s17 |  | draft changed (score 4 → 4) |
+| s18 |  | subcategory reversal_request → wrong_recipient; outcome escalated → drafted; flags ['recheck_disagreed'] → []; draft changed (score — → 4) |
+| s20 |  | draft changed (score 4 → 5) |
+| m01 |  | draft changed (score 5 → 5) |
+| m02 |  | subcategory login_otp → forgot_pin; outcome escalated → drafted; priority P2 → P3; flags ['recheck_disagreed'] → []; draft changed (score — → 5) |
+| m03 |  | outcome drafted → flagged; flags [] → ['missing:amount']; draft changed (score 5 → 4) |
+| m04 |  | draft changed (score 5 → 5) |
+| m05 |  | draft changed (score 5 → 5) |
+| m06 |  | draft changed (score 5 → 5) |
+| m07 |  | draft changed (score 5 → 5) |
+| m08 |  | subcategory limit_upgrade → blocked_account; outcome drafted → escalated; priority P3 → P2; draft changed (score 4 → —) |
+| m09 |  | subcategory not_received → merchant_payment; outcome escalated → drafted; priority P2 → P3; flags ['missing:reference', 'recheck_disagreed'] → []; draft changed (score — → 5) |
+| m10 |  | draft changed (score 5 → 4) |
+| m11 |  | draft changed (score 5 → 5) |
+| m12 |  | outcome drafted → flagged; flags [] → ['missing:amount']; draft changed (score 5 → 5) |
+| m13 |  | draft changed (score 4 → 5) |
+| m14 |  | draft changed (score 5 → 4) |
+| m15 |  | draft changed (score 5 → 5) |
+| m16 |  | draft changed (score 5 → 5) |
+| m17 |  | draft changed (score 5 → 5) |
+| m18 |  | draft changed (score 4 → 4) |
+| m19 |  | draft changed (score 4 → 5) |
+| m20 |  | draft changed (score 4 → 4) |
+| m22 |  | draft changed (score 4 → 5) |
+| m23 |  | outcome escalated → flagged; priority P2 → P3; flags ['missing:reference', 'recheck_disagreed'] → ['recheck_used_second']; draft changed (score — → 5) |
+| m24 |  | draft changed (score 5 → 5) |
+| m25 |  | draft changed (score 4 → 5) |
+| m26 |  | draft changed (score 3 → 4) |
+| m27 |  | priority P1 → P2; draft changed (score 4 → 5) |
+| m28 |  | draft changed (score 5 → 5) |
+| m29 |  | draft changed (score 5 → 4) |
+| e01 |  | draft changed (score 3 → 3) |
+| e03 |  | draft changed (score 5 → 5) |
+| e04 |  | draft changed (score 5 → 4) |
+| e05 |  | draft changed (score 3 → 4) |
+| e06 |  | draft changed (score 5 → 5) |
+| e08 |  | draft changed (score 4 → 4) |
+| e09 |  | draft changed (score 4 → 5) |
+| e10 |  | draft changed (score 5 → 5) |
+| e11 |  | priority P1 → P2; draft changed (score 5 → 5) |
+| e12 |  | draft changed (score 5 → 5) |
+| e14 |  | draft changed (score 5 → 5) |
+| e15 |  | draft changed (score 4 → 5) |
+
+## Every ticket
+
+| Ticket | Gold | Got | Outcome | Priority | Flags | Draft score | Judge notes |
+|---|---|---|---|---|---|---|---|
+| f01 | rejected_or_pending | ✓ | drafted | P3 |  | 5 |  |
+| f02 | forgot_pin | ✓ | drafted | P3 |  | 5 |  |
+| f03 | app_bug | ✓ | drafted | P3 |  | 4 | The draft names the internal queue ('فريق الطابور العام') to the customer, which reads awkwardly and should just say 'the team'. |
+| f04 | sim_change | ✓ | drafted | P2 |  | 4 | The phrase 'ومن هسه' reads awkwardly and should be 'وهسه'; otherwise the draft is fine. |
+| f05 | fees_limits_question | ✓ | drafted | P3 |  | 3 | Saying the company has no confirmed information about its own limit sounds unprofessional, and the phrase 'نتمنى تبقى وياهم' is awkward, so both need rewording. |
+| f06 | not_received | ✓ | drafted | P1 |  | 5 |  |
+| f07 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| f08 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| f09 | unclear | ✓ | drafted | P3 |  | 4 | Saying the team will 'review and verify your request' is awkward for a simple branch-location question and could be reworded. |
+| f10 | unclear | ✓ | drafted | P3 |  | 4 | The phrase 'تفضل اسأل وياك أي شي' is awkward and should be smoothed, e.g. 'تفضل اسأل عن أي شي تحتاجه'. |
+| f11 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| f12 | blocked_account | ✓ | drafted | P2 |  | 4 | The first sentence awkwardly states the customer's problem back to them, and 'you don't need to do anything now' is a mild unsupported assurance. |
+| f13 | rejected_or_pending | ✓ | drafted | P3 |  | 4 | The line about the limit upgrade is a bit awkward and slightly implies the verification team will also handle it, so it could use a small rewording. |
+| f14 | fees_limits_question | ✗ not_received | flagged ✗ (drafted) | P3 | recheck_used_second | 4 | Slightly stiff wording ('وصل لحد الطرف الثاني') and it adds 'دينار' to the amounts, which the ticket never stated. |
+| f15 | topup_failed | ✗ cash_in_not_credited | drafted | P2 ✗ (P3) |  | 3 | The draft never asks for the phone number that was supposed to be topped up, and asks for the date and time instead, which were not required. |
+| f16 | card_payment_failed | ✓ | drafted | P3 |  | 5 |  |
+| f17 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| f18 | fees_limits_question | ✓ | drafted | P3 |  | 5 |  |
+| f19 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| f20 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| f21 | topup_failed | ✓ | drafted | P3 |  | 4 | The line saying it cannot set a time or guarantee a result sounds a bit defensive and could be softened. |
+| f22 | login_otp | ✓ | drafted | P2 |  | 5 |  |
+| f23 | card_payment_failed | ✓ | drafted | P3 |  | 5 |  |
+| f24 | complaint | ✓ | drafted | P3 |  | 5 |  |
+| f25 | not_received | ✓ | drafted | P2 |  | 4 | The draft does not ask for the approximate time of the transfer; the ticket only says 'yesterday'. |
+| f26 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| f27 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
+| f28 | bill_not_reflected | ✓ | drafted | P3 |  | 5 |  |
+| f29 | merchant_payment | ✓ | drafted | P3 |  | 5 |  |
+| f30 | cash_out_refused | ✓ | drafted | P3 |  | 4 | The ticket already names Karrada, so the request for the location could ask only for the exact spot, and the opening phrasing is a little stiff. |
+| s01 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| s02 | login_otp | ✓ | drafted | P2 |  | 5 |  |
+| s03 | blocked_account | ✓ | drafted | P2 |  | 4 | The closing line 'ولا تحتاج تسوي شي هسه' slightly asserts a procedure detail not given in Known facts, so the agent may want to soften it. |
+| s04 | sim_change | ✓ | drafted | P2 |  | 5 |  |
+| s05 | limit_upgrade | ✗ blocked_account | flagged ✗ (drafted) | P3 | recheck_used_second | 5 |  |
+| s06 | cash_in_not_credited | ✓ | drafted | P1 |  | 4 | The draft asks for the agent's name and location but not the date and time of the cash-in, which the ticket only gives as roughly two days ago. |
+| s07 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| s08 | cash_out_refused | ✓ | drafted | P3 |  | 4 | The draft mixes plural 'نعتذر' with singular 'فهمت', a small inconsistency worth smoothing. |
+| s09 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
+| s10 | bill_not_reflected | ✓ | drafted | P3 |  | 5 |  |
+| s11 | merchant_payment | ✓ | drafted | P3 |  | 5 |  |
+| s12 | app_bug | ✓ | drafted | P3 |  | 5 |  |
+| s13 | not_received | ✓ | flagged | P2 | missing:reference, missing:amount | 5 |  |
+| s14 | unauthorized_charge | ✓ | escalated | P1 | fraud | — |  |
+| s15 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
+| s16 | fees_limits_question | ✗ not_received | flagged ✗ (drafted) | P3 | recheck_used_second | 5 |  |
+| s17 | unclear | ✓ | drafted | P3 |  | 4 | The claim that exchange-rate questions are not handled here is not in Known facts, and 'حبيبي' is a bit too familiar; a small edit would fix both. |
+| s18 | wrong_recipient | ✓ | drafted | P1 |  | 4 | The draft adds the currency 'دينار', which the customer never stated; otherwise it correctly asks only for the recipient number and leaves the daily limit to the team. |
+| s19 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| s20 | complaint | ✓ | drafted | P2 |  | 5 |  |
+| m01 | not_received | ✓ | drafted | P2 |  | 5 |  |
+| m02 | forgot_pin | ✓ | drafted | P3 |  | 5 |  |
+| m03 | card_payment_failed | ✓ | flagged ✗ (drafted) | P3 | missing:amount | 4 | The draft asks the customer to confirm the amount, which the ticket already gives as 40 thousand; it should ask only for the store or website name. |
+| m04 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
+| m05 | rejected_or_pending | ✓ | drafted | P3 |  | 5 |  |
+| m06 | cash_out_refused | ✓ | drafted | P3 |  | 5 |  |
+| m07 | app_bug | ✓ | drafted | P3 |  | 5 |  |
+| m08 | limit_upgrade | ✗ blocked_account | escalated ✗ (drafted) | P2 ✗ (P3) |  | — |  |
+| m09 | merchant_payment | ✓ | drafted | P3 |  | 5 |  |
+| m10 | blocked_account | ✓ | drafted | P2 |  | 4 | The phrase 'أكيد أكو مشكلة بحسابك' sounds awkward, as if confirming a fault, and should be reworded to something like 'نفهم إن حسابك انقفل'. |
+| m11 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| m12 | overcharged_fee | ✓ | flagged ✗ (drafted) | P3 | missing:amount | 5 |  |
+| m13 | bill_not_reflected | ✓ | drafted | P3 |  | 5 |  |
+| m14 | login_otp | ✓ | drafted | P2 |  | 4 | The repeated apology in the last sentence is redundant and could be trimmed. |
+| m15 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
+| m16 | fees_limits_question | ✓ | drafted | P3 |  | 5 |  |
+| m17 | complaint | ✓ | drafted | P3 |  | 5 |  |
+| m18 | cash_in_not_credited | ✓ | drafted | P1 |  | 4 | The draft could also ask for the approximate time of the deposit (the ticket only says 'morning'), and 'ولم تنزل' reads slightly formal instead of the Iraqi 'وما نزلت'. |
+| m19 | reversal_request | ✓ | drafted | P2 |  | 5 |  |
+| m20 | not_received | ✓ | flagged | P1 | missing:reference | 4 | The draft asks only for the transaction number and should also ask for the exact date and time of the transfer, since the ticket only says 'two days'. |
+| m21 | unauthorized_charge | ✓ | escalated | P1 | fraud | — |  |
+| m22 | sim_change | ✓ | drafted | P2 |  | 5 |  |
+| m23 | fees_limits_question | ✗ not_received | flagged ✗ (drafted) | P3 | recheck_used_second | 5 |  |
+| m24 | wrong_recipient | ✓ | flagged | P1 | missing:reference | 5 |  |
+| m25 | card_payment_failed | ✓ | drafted | P3 |  | 5 |  |
+| m26 | not_received | ✓ | drafted | P2 |  | 4 | The draft does not ask for the approximate time of the transfer; the ticket gives only the day, as 'yesterday'. |
+| m27 | cash_in_not_credited | ✓ | drafted | P2 ✗ (P1) |  | 5 |  |
+| m28 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| m29 | unclear | ✓ | drafted | P3 |  | 4 | The draft never says that phone repair shops are outside the company's services, so it reads as if it ignored the question. |
+| m30 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| e01 | not_received | ✓ | drafted | P2 |  | 3 ⚠ | The draft turns 'خمسين' into '50,000 دينار', which the ticket does not say, and it does not ask for the exact time of the transfer or for the exact amount. |
+| e02 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| e03 | topup_failed | ✓ | flagged | P3 | missing:amount | 5 |  |
+| e04 | wrong_recipient | ✓ | flagged | P2 | missing:reference | 4 | The phrase 'وأكيد تدري هذا الشي يزعج' reads awkwardly and should become a plain apology; adding 'دينار' is a mild assumption not in the ticket. |
+| e05 | not_received | ✓ | drafted | P1 |  | 4 | The draft does not ask for the exact date and time of the transfer; the ticket only says 'two days ago'. |
+| e06 | app_bug | ✓ | drafted | P3 |  | 5 |  |
+| e07 | unauthorized_charge | ✓ | escalated | P1 | fraud | — |  |
+| e08 | cash_in_not_credited | ✓ | drafted | P2 |  | 4 | The draft asks for the agent's name and location but not the approximate time of the transaction; the ticket gives only the day. |
+| e09 | fees_limits_question | ✓ | drafted | P3 |  | 5 |  |
+| e10 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
+| e11 | sim_change | ✓ | drafted | P2 ✗ (P1) |  | 5 |  |
+| e12 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| e13 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| e14 | reversal_request | ✓ | flagged | P1 | missing:reference | 5 |  |
+| e15 | bill_not_reflected | ✓ | drafted | P3 |  | 5 |  |
