@@ -15,6 +15,7 @@ from typing import Any
 
 from . import classify as cls
 from . import draft as drf
+from . import draft_check
 from .clean import _DIGITS, _TATWEEL, clean
 from .config import models, taxonomy
 from .fixes import enabled
@@ -36,6 +37,10 @@ FLAG_AR = {
     "recheck_disagreed": "النموذج الثاني صنّفها بشكل مختلف",
     "recheck_same_team": "النموذجين اختلفوا بالنوع بس نفس القسم: تأكد من نوع المشكلة قبل الاعتماد",
     "model_error": "صار خطأ بالنموذج، تحتاج مراجعة يدوية",
+    "draft:stray_latin": "المسودة بيها حروف إنكليزية بغير مكانها",
+    "draft:promise": "المسودة توعد بنتيجة أو وقت: تأكد قبل الاعتماد",
+    "draft:asks_secret": "المسودة تطلب رمز أو كلمة سر: لا تعتمدها",
+    "draft:unknown_number": "المسودة بيها رقم مو موجود بالتذكرة أو المعلومات",
 }
 
 
@@ -156,9 +161,11 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         send("draft", "error", {"error": f"{type(e).__name__}: {e}"})
         return finish(Outcome.ESCALATED, flags + ["model_error"], team=team, priority=priority)
+    checks = draft_check.problems(reply, user) if enabled("draft_check") else []
+    flags += [f"draft:{p}" for p in checks]
     send("draft", "done", {"model": models()["drafter"]["model"], "backend": backend(),
                            "seconds": round(time.time() - t0, 1), "user_prompt": user, "reply": reply,
-                           "ask_for": drf.ask_for(ex)})
+                           "ask_for": drf.ask_for(ex), "checks": checks})
 
     outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
     extra = {"recheck_alternative": alternative} if alternative else {}

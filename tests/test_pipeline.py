@@ -312,3 +312,28 @@ def test_f3_still_escalates_other_team_or_fraud(monkeypatch):
                    '{"category": "fraud_security", "subcategory": "unauthorized_charge", "confidence": 0.9}']:
         run = _fake_classifier_by_role(monkeypatch, {**SAME_TEAM, "rechecker": second})
         assert run.process(T_WRONG)["outcome"] == "escalated"
+
+
+# --- F2: draft rule checks ---
+
+def test_draft_check_catches_each_problem():
+    from pipeline.draft_check import problems
+
+    given = "<ticket>\nشحنت رصيد ٥ الاف وما وصل\n</ticket>\nAmount: 5,000 IQD\nKnown facts: none"
+    assert problems("هلا بيك، وصلتنا مشكلة شحن 5,000 دينار وراح يراجعها القسم.", given) == []
+    assert problems("hلا هلا بيك", given) == ["stray_latin"]
+    assert problems("هلا بيك، الفلوس راح ترجع خلال ساعة.", given) == ["promise"]
+    assert problems("هلا بيك، ممكن تدزلنا الرمز اللي وصلك؟", given) == ["asks_secret"]
+    assert problems("هلا بيك، لا تشارك الرمز ويه أي احد.", given) == []
+    assert problems("هلا بيك، الرسوم 2,500 دينار.", given) == ["unknown_number"]
+    assert problems("هلا بيك، الرد خلال ٢٤ ساعة.", given + "; Expected response time: خلال ٢٤ ساعة") == []
+
+
+def test_draft_problems_flag_the_ticket_only_under_f2(monkeypatch):
+    clf = '{"category": "general", "subcategory": "app_bug", "confidence": 0.92}'
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    run = _fake_models(monkeypatch, clf, "hلا بيك")
+    assert run.process("التطبيق يفتح شاشة بيضاء")["outcome"] == "drafted"
+    monkeypatch.setenv("PIPELINE_FIXES", "draft_check")
+    result = run.process("التطبيق يفتح شاشة بيضاء")
+    assert result["outcome"] == "flagged" and result["flags"] == ["draft:stray_latin"]
