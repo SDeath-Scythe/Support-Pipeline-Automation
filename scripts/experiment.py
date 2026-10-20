@@ -37,6 +37,12 @@ CODES = {
     "F6": "fee_amount",
     "F7": "no_now_urgency",
     "F8": "unclear_template",
+    "F3b": "recheck_use_second",
+    "F3c": "recheck_cross_team",
+    "F9": "confusable_recheck",
+    "F10": "runner_up",
+    "F11": "ask_if_missing",
+    "F12": "no_specific_followup",
 }
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"

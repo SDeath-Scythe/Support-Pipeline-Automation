@@ -27,3 +27,12 @@ Every subcategory appears at least 3 times in each test set (23 × 3 = 69 ≤ 80
  "secondary_subcategory": null, "priority": "P2", "reference": "88213",
  "amount_iqd": 50000, "date": null, "dialect": "baghdadi", "style": "short", "edge_case": null}
 ```
+
+## Probe sets used in experiments (`probes/`)
+
+| File | Tickets | Use |
+|---|---|---|
+| `edge_cases.jsonl`, `mixed_30.jsonl`, `synthetic_20.jsonl` | 15, 30, 20 | Early probes and smoke tests |
+| `fixes_30.jsonl` | 30 | Rounds 1–2 of the fix experiments |
+| `dev_95.jsonl` | 95 | The four sets above joined (generated, same lines), the round-3 dev set |
+| `holdout_30.jsonl` | 30 | Sealed: only run for the final round-3 check |
