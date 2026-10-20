@@ -1,0 +1,97 @@
+# baseline-d2 on fixes_30
+
+Fixes on: none · backend `cli` · 2026-10-20T13:37:58 · compared with `baseline`
+
+| Metric | baseline | baseline-d2 | Change |
+|---|---|---|---|
+| Subcategory correct (first model) | 29/30 | 29/30 |  |
+| Subcategory used correct | 29/30 | 29/30 |  |
+| Wrong type, not escalated | 0 | 0 |  |
+| Outcome matches gold | 29/30 | 29/30 |  |
+| Draft given iff it should be | 29/30 | 29/30 |  |
+| Priority correct | 24/30 | 24/30 |  |
+| Amount correct | 30/30 | 30/30 |  |
+| Fee correct (fee tickets) | 0/4 | 0/4 |  |
+| Escalated | 2 | 2 |  |
+| Flagged | 0 | 0 |  |
+| Drafted (ready) | 28 | 28 |  |
+| Drafts judged | 28 | 28 |  |
+| Bad drafts (judge) | 2 | 0 | -2 better |
+| Bad drafts marked ready | 2 | 0 | -2 better |
+| Mean draft score (1-5) | 4.5 | 4.61 | +0.11 better |
+| Model calls (pipeline) | 63 | 63 |  |
+| Judge: understood | 28/28 | 28/28 |  |
+| Judge: grounded | 27/28 | 28/28 | +1 better |
+| Judge: no_promise | 26/28 | 28/28 | +2 better |
+| Judge: asks_right | 23/28 | 23/28 |  |
+| Judge: safe | 28/28 | 28/28 |  |
+| Judge: tone | 28/28 | 28/28 |  |
+| Judge: clean | 28/28 | 28/28 |  |
+
+## Tickets that changed (28)
+
+| Ticket | Targets | What changed |
+|---|---|---|
+| f01 | F7 | draft changed (score 5 → 5) |
+| f02 | F7 | draft changed (score 5 → 5) |
+| f03 | F7 | draft changed (score 5 → 5) |
+| f04 | F7 | draft changed (score 5 → 5) |
+| f05 | F7,F2 | draft changed (score 4 → 5) |
+| f06 | F7 | draft changed (score 4 → 4) |
+| f07 | F8 | draft changed (score 5 → 5) |
+| f08 | F8 | draft changed (score 5 → 5) |
+| f09 | F8 | draft changed (score 3 → 4) |
+| f10 | F8 | draft changed (score 4 → 5) |
+| f11 | F3 | draft changed (score 5 → 5) |
+| f12 | F3 | draft changed (score 5 → 5) |
+| f13 | F3 | draft changed (score 4 → 4) |
+| f15 | F3 | draft changed (score 5 → 5) |
+| f16 | F3 | draft changed (score 4 → 5) |
+| f17 | F6 | draft changed (score 5 → 5) |
+| f18 | F6 | draft changed (score 4 → 4) |
+| f19 | F6 | draft changed (score 5 → 5) |
+| f20 | F2 | draft changed (score 5 → 4) |
+| f21 | F2 | draft changed (score 5 → 5) |
+| f22 | F2 | draft changed (score 5 → 5) |
+| f23 | F2 | draft changed (score 3 → 4) |
+| f24 | F2 | draft changed (score 4 → 4) |
+| f25 | control | draft changed (score 4 → 4) |
+| f27 | control | draft changed (score 4 → 4) |
+| f28 | control | draft changed (score 4 → 4) |
+| f29 | control | draft changed (score 5 → 5) |
+| f30 | control | draft changed (score 5 → 4) |
+
+## Every ticket
+
+| Ticket | Gold | Got | Outcome | Priority | Flags | Draft score | Judge notes |
+|---|---|---|---|---|---|---|---|
+| f01 | rejected_or_pending | ✓ | drafted | P2 ✗ (P3) |  | 5 |  |
+| f02 | forgot_pin | ✓ | drafted | P2 ✗ (P3) |  | 5 |  |
+| f03 | app_bug | ✓ | drafted | P2 ✗ (P3) |  | 5 |  |
+| f04 | sim_change | ✓ | drafted | P1 ✗ (P2) |  | 5 |  |
+| f05 | fees_limits_question | ✓ | drafted | P2 ✗ (P3) |  | 5 |  |
+| f06 | not_received | ✓ | drafted | P1 |  | 4 | The phrase 'أكو أسف' is awkward and should read something like 'آسفين على الموضوع'. |
+| f07 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| f08 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| f09 | unclear | ✓ | drafted | P3 |  | 4 | The draft asks for the customer's neighborhood, which this issue does not need; it is a small optional ask that is easy to drop. |
+| f10 | unclear | ✓ | drafted | P3 |  | 5 |  |
+| f11 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| f12 | blocked_account | ✓ | drafted | P2 |  | 5 |  |
+| f13 | rejected_or_pending | ✓ | drafted | P3 |  | 4 | "شفنا" implies the agent checked the rejection, but it only comes from the customer's message, so rephrase it as acknowledging what the customer said. |
+| f14 | fees_limits_question | ✗ not_received | escalated ✗ (drafted) | P2 ✗ (P3) | missing:reference, recheck_disagreed | — |  |
+| f15 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
+| f16 | card_payment_failed | ✓ | drafted | P3 |  | 5 |  |
+| f17 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| f18 | fees_limits_question | ✓ | drafted | P3 |  | 4 | The draft adds 'دينار' to amounts the customer gave without a currency; this is minor and likely correct. |
+| f19 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
+| f20 | wrong_recipient | ✓ | drafted | P2 |  | 4 | The draft never says it cannot give an exact date, which the customer asked for directly, and the opening restatement reads a bit awkwardly. |
+| f21 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
+| f22 | login_otp | ✓ | drafted | P2 |  | 5 |  |
+| f23 | card_payment_failed | ✓ | drafted | P3 |  | 4 | The draft asks for the store name, but the customer already said Amazon, so this question should be removed. |
+| f24 | complaint | ✓ | drafted | P3 |  | 4 | The draft never mentions the customer's compensation demand, so the agent may want to add a brief line acknowledging it without promising anything. |
+| f25 | not_received | ✓ | drafted | P2 |  | 4 | The draft does not ask for the approximate time of the transfer; the ticket gives only 'yesterday'. |
+| f26 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
+| f27 | delivery_or_activation | ✓ | drafted | P3 |  | 4 | The draft asks for the exact error message text even though no information is needed for this issue; it is optional and harmless but could be dropped. |
+| f28 | bill_not_reflected | ✓ | drafted | P3 |  | 4 | The draft asks for the bill type even though the customer already said it was the internet bill. |
+| f29 | merchant_payment | ✓ | drafted | P3 |  | 5 |  |
+| f30 | cash_out_refused | ✓ | drafted | P3 |  | 4 | The phrase 'وياك وياه وكيل الكرادة' is garbled and needs a small fix (e.g. 'وياك من وكيل الكرادة'). |
