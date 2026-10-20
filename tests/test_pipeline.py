@@ -392,3 +392,22 @@ def test_draft_check_v2_avoids_round1_false_alarms():
     assert problems("يكون عدنا رد خلال 24 ساعة.", "Known facts: Expected response time: خلال ٢٤ ساعة") == []
     # "الف وحدة" in the ticket allows 1,000 in the draft
     assert problems("وتتوقع تكون العمولة 1,000.", "المفروض الف وحدة") == []
+
+
+# --- usage logging ---
+
+def test_usage_recorded_from_cli_and_cache(monkeypatch, tmp_path):
+    import json
+    import subprocess
+
+    from pipeline import llm
+
+    out = {"is_error": False, "result": "ok", "total_cost_usd": 0.002,
+           "usage": {"input_tokens": 10, "cache_read_input_tokens": 90, "output_tokens": 7}}
+    monkeypatch.setenv("LLM_BACKEND", "cli")
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(out), stderr=""))
+    monkeypatch.setenv("LLM_CACHE_DIR", str(tmp_path))
+    llm.call("classifier", "S", "u")
+    assert llm.last_usage() == {"input_tokens": 100, "output_tokens": 7, "cost_usd": 0.002}
+    llm.call("classifier", "S", "u")
+    assert llm.last_usage()["cached"] is True and llm.last_usage()["output_tokens"] == 7

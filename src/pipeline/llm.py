@@ -29,6 +29,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -44,6 +45,17 @@ BACKENDS = ("api", "cli")
 _API_ENV_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 
 _client = None
+
+# Token use of the last call made on this thread (each ticket runs on one thread).
+_usage = threading.local()
+
+
+def last_usage() -> dict:
+    """Tokens (and, on cli, the cost Claude Code reports) of this thread's last call.
+
+    {"input_tokens", "output_tokens", "cost_usd"?, "cached"?}. Empty if unknown.
+    """
+    return dict(getattr(_usage, "value", {}))
 
 
 class BackendError(RuntimeError):
@@ -89,6 +101,9 @@ def _call_api(cfg: dict, system: str, user: str) -> str:
         system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user}],
     )
+    u = resp.usage
+    _usage.value = {"input_tokens": u.input_tokens + (getattr(u, "cache_read_input_tokens", 0) or 0)
+                    + (getattr(u, "cache_creation_input_tokens", 0) or 0), "output_tokens": u.output_tokens}
     return "".join(block.text for block in resp.content if block.type == "text")
 
 
@@ -126,6 +141,10 @@ def _call_cli(cfg: dict, system: str, user: str) -> str:
     data = json.loads(proc.stdout)
     if data.get("is_error"):
         raise RuntimeError(f"claude -p error: {str(data.get('result'))[:500]}")
+    u = data.get("usage") or {}
+    _usage.value = {"input_tokens": sum(u.get(k, 0) or 0 for k in
+                                        ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")),
+                    "output_tokens": u.get("output_tokens", 0), "cost_usd": data.get("total_cost_usd")}
     return data["result"]
 
 
@@ -151,10 +170,13 @@ def _cached(cfg: dict, system: str, user: str, send) -> str:
             time.sleep(0.5)
     try:
         if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))["reply"]
+            stored = json.loads(path.read_text(encoding="utf-8"))
+            _usage.value = {**stored.get("usage", {}), "cached": True}
+            return stored["reply"]
         reply = send(cfg, system, user)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"model": cfg["model"], "reply": reply}, ensure_ascii=False), encoding="utf-8")
+        tmp.write_text(json.dumps({"model": cfg["model"], "reply": reply, "usage": last_usage()},
+                                  ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, path)
         return reply
     finally:
@@ -167,6 +189,7 @@ def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
     Retries once on failure; the caller escalates the ticket if it still fails.
     """
     cfg = models()[role]
+    _usage.value = {}
     send = _call_api if backend() == "api" else _call_cli
     last_error: Exception | None = None
     for _ in range(retries + 1):

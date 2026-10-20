@@ -56,6 +56,17 @@ def main() -> None:
     with ThreadPoolExecutor(args.workers) as pool:
         rows = list(pool.map(run_one, tickets))
 
+    usage = [e["data"].get("usage") or {} for r in rows for e in r["events"] if e["status"] == "done"]
+    usage = [u for u in usage if u]
+    totals = {
+        "model_calls": len(usage),
+        "cached_calls": sum(bool(u.get("cached")) for u in usage),
+        "input_tokens": sum(u.get("input_tokens", 0) for u in usage),
+        "output_tokens": sum(u.get("output_tokens", 0) for u in usage),
+        "cost_usd": round(sum(u.get("cost_usd") or 0 for u in usage), 4),
+    }
+    print(f"Model calls {totals['model_calls']} ({totals['cached_calls']} from cache), "
+          f"tokens in {totals['input_tokens']:,} / out {totals['output_tokens']:,}, reported cost ${totals['cost_usd']}")
     out = Path(args.out) if args.out else ROOT / "runs" / f"{started:%Y%m%d-%H%M%S}-{src.stem}-{backend()}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({
@@ -65,6 +76,7 @@ def main() -> None:
             "models": {r: c["model"] for r, c in models().items()},
             "thresholds": load_thresholds()["confidence"],
             "fixes": fixes,
+            "usage": totals,
         },
         "tickets": rows,
     }, ensure_ascii=False, indent=1), encoding="utf-8")

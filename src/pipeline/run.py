@@ -20,7 +20,7 @@ from .clean import _DIGITS, _TATWEEL, clean
 from .config import load_yaml, models, taxonomy
 from .fixes import enabled
 from .gate import check
-from .llm import backend, call
+from .llm import backend, call, last_usage
 from .route import route
 from .schemas import Extraction, Outcome
 
@@ -64,6 +64,7 @@ def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str
         "user_prompt": user,
         "reply": reply,
         "extraction": ex.model_dump(),
+        "usage": last_usage(),
     }
 
 
@@ -175,7 +176,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     flags += [f"draft:{p}" for p in checks]
     send("draft", "done", {"model": models()["drafter"]["model"], "backend": backend(),
                            "seconds": round(time.time() - t0, 1), "user_prompt": user, "reply": reply,
-                           "ask_for": drf.ask_for(ex), "checks": checks})
+                           "ask_for": drf.ask_for(ex), "checks": checks, "usage": last_usage()})
 
     outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
     extra = {"recheck_alternative": alternative} if alternative else {}
