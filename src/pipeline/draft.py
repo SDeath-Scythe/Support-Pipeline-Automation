@@ -10,6 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from .config import load_yaml, taxonomy
+from .fixes import enabled
 from .llm import call
 from .schemas import Extraction
 
@@ -26,6 +27,11 @@ FIELD_AR = {
     "phone_number": "الرقم اللي انشحن",
     "screenshot": "صورة من الشاشة",
 }
+
+
+def policy() -> dict:
+    """The grounding facts. F5 (policy_facts) swaps in the filled-in experiment file."""
+    return load_yaml("experiments/policy_filled.yaml" if enabled("policy_facts") else "policy.yaml")
 
 
 @lru_cache(maxsize=1)
@@ -45,18 +51,18 @@ def _have(ex: Extraction, field: str) -> bool:
 
 def ask_for(ex: Extraction) -> list[str]:
     """Fields the policy says the customer should send that the ticket doesn't contain."""
-    sub = load_yaml("policy.yaml")["subcategories"].get(ex.subcategory) or {}
+    sub = policy()["subcategories"].get(ex.subcategory) or {}
     return [f for f in sub.get("customer_should_send", []) if not _have(ex, f)]
 
 
 def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:
-    policy = load_yaml("policy.yaml")
+    facts_src = policy()
     tax = taxonomy()
     sub = tax.get(ex.subcategory)
     facts = []
-    if policy["company"].get("support_hours_ar"):
-        facts.append(f"Support hours: {policy['company']['support_hours_ar']}")
-    rt = (policy["subcategories"].get(ex.subcategory) or {}).get("response_time_ar")
+    if facts_src["company"].get("support_hours_ar"):
+        facts.append(f"Support hours: {facts_src['company']['support_hours_ar']}")
+    rt = (facts_src["subcategories"].get(ex.subcategory) or {}).get("response_time_ar")
     if rt:
         facts.append(f"Expected response time for this issue: {rt}")
     lines = [

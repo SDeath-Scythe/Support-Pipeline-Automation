@@ -368,3 +368,15 @@ def test_fee_field_only_in_prompt_under_f6(monkeypatch):
     assert "- `fee_iqd`" in p and '"amount_usd": null, "fee_iqd": null' in p
     fee = ex(category="agents_cash", subcategory="overcharged_fee", reference=None, amount_iqd=50000, fee_iqd=7000)
     assert "Disputed fee: 7,000 IQD" in user_prompt("…", fee, "agent_network")
+
+
+# --- F5: filled-in policy facts for the drafter ---
+
+def test_policy_facts_reach_the_drafter_only_under_f5(monkeypatch):
+    from pipeline.draft import user_prompt
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert "Known facts: none" in user_prompt("…", ex(), "transfers")
+    monkeypatch.setenv("PIPELINE_FIXES", "policy_facts")
+    p = user_prompt("…", ex(), "transfers")
+    assert "Support hours:" in p and "Expected response time for this issue: خلال ٢٤ ساعة" in p
