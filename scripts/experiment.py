@@ -66,7 +66,15 @@ def docs_dir(set_name: str) -> Path:
 
 
 def load_run(set_name: str, label: str) -> dict:
-    return json.loads(run_path(set_name, label).read_text(encoding="utf-8"))
+    """A saved run, with gold labels taken from the current set file (so a corrected label
+    applies to runs made before the correction; the model outputs are untouched)."""
+    run = json.loads(run_path(set_name, label).read_text(encoding="utf-8"))
+    src = ROOT / "data/probes" / f"{set_name}.jsonl"
+    if src.exists():
+        gold = {d["id"]: d for d in map(json.loads, src.read_text(encoding="utf-8").splitlines()) if d}
+        for row in run["tickets"]:
+            row["ticket"] = gold.get(row["ticket"].get("id"), row["ticket"])
+    return run
 
 
 # ---------------------------------------------------------------- run
