@@ -66,7 +66,7 @@ SPLITS = {"dev": "dev", "mvp_test": "mvp", "heldout": "hold"}     # split -> id 
 MIN_PER_SUB = 3
 BATCH = 10
 WORKERS = 4
-MAX_ROUNDS = 6
+MAX_ROUNDS = 9
 DUP_THRESHOLD = 0.8            # normalised characters (the author's rule)
 DUP_TOKEN_THRESHOLD = 0.5      # content words, dialect words folded: the same sentence in another dialect
 DUP_TOKEN_MIN = 5              # ... only when both tickets have at least this many content words
@@ -287,7 +287,7 @@ def make_specs(split: str, n: int, seed: int) -> list[dict]:
 
 # ---------------------------------------------------------------- generation
 
-def spec_for_prompt(s: dict, variation: int) -> dict:
+def spec_for_prompt(s: dict, variation: int, avoid: list[str] | None = None) -> dict:
     tax = taxonomy()
     sub = tax.get(s["subcategory"])
     out = {"spec_id": s["spec_id"],
@@ -295,6 +295,8 @@ def spec_for_prompt(s: dict, variation: int) -> dict:
            "dialect": s["dialect"], "style": s["style"], "difficulty": s["difficulty"],
            "include_reference": s["include_reference"], "include_phone": s["include_phone"],
            "urgency": s["urgency"], "variation": variation}
+    if avoid:
+        out["avoid_words"] = avoid
     if s["secondary_subcategory"]:
         sec = s["secondary_subcategory"]
         out["second_issue"] = {"key": sec, "label": tax.get(sec).label, "description": DESCRIPTIONS[sec]}
@@ -546,10 +548,11 @@ def build(split: str, seed: int, n: int) -> None:
         if not pending:
             break
         batches = [pending[i:i + BATCH] for i in range(0, len(pending), BATCH)]
+        avoid = sorted(m for m in MARKERS if marker_counts[m] >= cap)   # words already at the cap
 
         def run(args, rnd=rnd):
             b, chunk = args
-            user = json.dumps([spec_for_prompt(s, rnd) for s in chunk], ensure_ascii=False, indent=1)
+            user = json.dumps([spec_for_prompt(s, rnd, avoid) for s in chunk], ensure_ascii=False, indent=1)
             try:
                 return b, model_batch(cache, "gen", f"r{rnd}_b{b:02d}", "generator", system, user, counters)
             except Exception as e:  # noqa: BLE001 - a failed batch is simply retried next round
@@ -593,19 +596,25 @@ def build(split: str, seed: int, n: int) -> None:
     # Blind audit (evaluator role): labels without the gold, disagreements go to review.
     records = [accepted[s["spec_id"]] for s in specs if s["spec_id"] in accepted]
     asys = audit_system()
-    chunks = [records[i:i + BATCH] for i in range(0, len(records), BATCH)]
+    # Labels already saved for this split and seed are reused by ticket id (a top-up run with more
+    # rounds replays the same accepted tickets), so only new tickets are audited.
+    labels = {}
+    for f in sorted((ROOT / "runs/generation" / cache).glob("audit_*.json")):
+        labels.update({x.get("id"): x for x in json.loads(f.read_text(encoding="utf-8")) if isinstance(x, dict)})
+    todo = [r for r in records if r["id"] not in labels]
+    chunks = [todo[i:i + BATCH] for i in range(0, len(todo), BATCH)]
 
     def audit(args):
         b, chunk = args
         user = json.dumps([{"id": r["id"], "text": r["text"]} for r in chunk], ensure_ascii=False, indent=1)
+        name = f"b{b:02d}" if len(todo) == len(records) else f"x{len(records) - len(todo)}_b{b:02d}"
         try:
-            return model_batch(cache, "audit", f"b{b:02d}", "evaluator", asys, user, counters)
+            return model_batch(cache, "audit", name, "evaluator", asys, user, counters)
         except Exception as e:  # noqa: BLE001
             return {"error": str(e)[:200]}
 
     with ThreadPoolExecutor(WORKERS) as ex:
         audits = list(ex.map(audit, enumerate(chunks)))
-    labels = {}
     for a in audits:
         if isinstance(a, list):
             labels.update({x.get("id"): x for x in a if isinstance(x, dict)})

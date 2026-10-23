@@ -23,6 +23,7 @@ You get a list of specs. Write exactly one ticket per spec and return them all i
 - `include_reference`: if true, write the placeholder {REF} exactly once where the customer gives the transaction / operation number (رقم العملية، رقم الحوالة، ref). If false, do not write {REF} and do not invent any reference number.
 - `include_phone`: if true, write the placeholder {PHONE} exactly once where the customer gives a phone number (the number money or credit was sent to). If false, do not write {PHONE} and do not invent any phone number.
 - `urgency`: if true, the customer sounds urgent with a word like ضروري or عاجل or بسرعة.
+- `avoid_words` (optional): words other tickets already use too often. Do not use them in this ticket.
 - `variation`: a number; when it is above 1, write a different ticket from any you would write for the same spec.
 
 ## Rules
