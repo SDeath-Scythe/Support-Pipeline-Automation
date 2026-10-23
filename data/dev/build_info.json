@@ -1,0 +1,20 @@
+{
+ "split": "dev",
+ "seed": 1001,
+ "requested": 240,
+ "accepted": 240,
+ "model_calls_this_run": {
+  "generator": 26,
+  "evaluator": 24
+ },
+ "model_calls_total": {
+  "generator": 26,
+  "evaluator": 24
+ },
+ "rejected": {
+  "brand_name": 2,
+  "near_duplicate": 3
+ },
+ "unaudited": 0,
+ "audit_disputed": 3
+}
