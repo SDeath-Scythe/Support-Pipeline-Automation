@@ -1,6 +1,6 @@
 # Handover: testing and improving the support pipeline
 
-**Period:** 20–21 Oct 2026 · **Branch:** `claude/eager-tesla-x1dcxj` (nothing on `main`) · **Commits:** 90, starting after `cb5b89c` · **Tests:** 25 → 49, all passing
+**Period:** 20–23 Oct 2026 · **Branch:** `claude/eager-tesla-x1dcxj` (nothing on `main`) · **Commits:** all after `cb5b89c` · **Tests:** 25 → 51, all passing
 
 This document hands over everything done in one working session with the Claude Code assistant: what was tested, what was learned, what was built, why each choice was made, and what to do next. It covers the whole session, from the first smoke test to the final hold-out check. The detailed numbers live in [`docs/experiments/LOG.md`](docs/experiments/LOG.md) and the per-config pages; this file is the guided tour.
 
@@ -20,11 +20,12 @@ This document hands over everything done in one working session with the Claude 
   | `no_now_urgency` | F7 | "هسه" (now) no longer raises priority |
   | `ask_if_missing` | F11 | The draft only asks for a shop / agent / bill detail if the ticket doesn't already give it |
   | `no_specific_followup` | F12 | The draft must not promise to send a specific answer, date or result |
+  | `fraud_secondary_cleanup` | F14b | A fraud ticket's "second issue" is cleared when it's only a consequence of the fraud (added in the follow-up, see 6) |
 
   Turn them all on with:
   ```bash
   PIPELINE_FIXES=draft_check,recheck_cross_team,fee_followup,\
-  no_now_urgency,ask_if_missing,no_specific_followup \
+  no_now_urgency,ask_if_missing,no_specific_followup,fraud_secondary_cleanup \
     python app/server.py
   ```
 
@@ -262,6 +263,12 @@ Each entry gives the observation that started it, the reasoning, how it was buil
 - Tested in isolation as you asked, with **placeholder** values in `config/experiments/policy_filled.yaml`. The real `policy.yaml` is untouched.
 - Mean score 4.50 → 4.61, within noise. Drafts now state response times and hours. The judge rewards safety, not information, so the benefit is under-measured. Fill in the real values, then re-test.
 
+### ❌→✅ F14 → **F14b**: the fraud / second-issue rule · adopt F14b
+
+- **Observation (raised by the author):** the classifier prompt says "pick exactly one category and one subcategory", but rule 1 says, for fraud, "put the other issue in `secondary_subcategory`". Rule 1 also contradicts rule 5 ("being locked out after a scam … stays with the main subcategory"). In saved runs the model split on it: e02 ("gave my code, now locked out") got `login_otp` as the second issue on some runs and none on others. Across 522 saved fraud classifications, 26 (5%) were like this.
+- **F14:** reword those two sentences in the prompt. Tested on existing tickets only, with replicates. The second-issue field improved on one ticket, but **3 wrong ticket types reached a draft in every run** (0 before), and the recommended set fell 95 → 92/95. The re-check model shares the prompt, so both models started making the same mistakes and F3c's safety net disappeared. **Not adopted.**
+- **F14b:** enforce the same rule in code after each classification. A fraud ticket's second issue is cleared when it is a consequence (an account-access or fraud subcategory); a separate request is kept. No model input changes. Result: **identical on every metric in all 6 comparisons**, and it clears all 26 inconsistent cases. **Adopt.**
+
 ### ❌ Tried and dropped
 
 | Fix | Idea | Why dropped |
@@ -269,6 +276,7 @@ Each entry gives the observation that started it, the reasoning, how it was buil
 | F9 | Re-check answers in look-alike pairs under 0.90 | +6 calls, no gain on top of F3c |
 | F10 | Classifier names a runner-up | +16 calls, slightly worse, wrong types reached drafts |
 | F13 | Sharper look-alike hints in the classifier prompt | Helps alone (90 → 92), but **−4 with F3c**: a surer first model sends fewer tickets to the re-check F3c relies on |
+| F14 | Reworded fraud / second-issue rule in the classifier prompt | Both models start making the same mistakes; 3 wrong types reach drafts in every run. Replaced by F14b |
 
 ### Combinations
 
@@ -293,7 +301,7 @@ Built after the experiments, as you asked. These help *us* watch the pipeline an
 ## 8. Lessons learned
 
 1. **Measure noise before believing a gain.** Identical runs moved classification by about 2/95 tickets and the mean draft score by about 0.1. Several early "gains" (F6 on f14, F5's score) were inside that.
-2. **Prompt changes have side effects elsewhere.** Adding one field (F6) or sharper hints (F13) shifted unrelated classifications and the re-check rate. Prefer adding a *separate* small call (F6b) over growing the main prompt.
+2. **Prompt changes have side effects elsewhere.** Adding one field (F6), sharper hints (F13) or rewording one rule (F14) shifted unrelated classifications. Because the classifier and the re-check share the prompt, an edit can make *both* models wrong in the same way and silently remove the safety net. Prefer a code rule (F14b) or a separate small call (F6b) over editing the main prompt, and always test prompt edits with replicates.
 3. **The wording of an instruction can break the output.** F12 v1's "follow up" produced malformed Arabic; the same idea, worded differently, was the best draft fix.
 4. **The second opinion is the confidence signal.** The model's own confidence is already well ordered (95/95 right at ≥0.90, 40/42 at 0.75–0.90, 12/18 below). The cheap win was *acting on* the existing re-check (F3c), not adding more checks (F9, F10).
 5. **Keep a test set you never look at.** The hold-out caught that the round-2 set was worse than baseline, which tuning on `fixes_30` alone had hidden.
@@ -307,7 +315,7 @@ All on `claude/eager-tesla-x1dcxj`. With no flags set, the pipeline behaves exac
 
 | Area | Files | Change |
 |---|---|---|
-| Fix flags | `src/pipeline/fixes.py` | 14 flags, read from `PIPELINE_FIXES` |
+| Fix flags | `src/pipeline/fixes.py` | 16 flags, read from `PIPELINE_FIXES` |
 | Classifier | `classify.py`, `prompts/fee_system.md`, `schemas.py` | F6 field, F10 runner-up, F13 hints (all flag-gated); F6b fee prompt and parser; optional `fee_iqd` and `runner_up` fields |
 | Gate | `gate.py` | F9 look-alike and F10 runner-up re-check triggers |
 | Run | `run.py` | F3/F3b/F3c re-check handling, F6b fee call, F8 template, F2 checks, Arabic flag notes |
@@ -318,7 +326,7 @@ All on `claude/eager-tesla-x1dcxj`. With no flags set, the pipeline behaves exac
 | Scripts | `scripts/experiment.py`, `scripts/prompts/judge_draft.md`, `run_batch.py` | Experiment runner, scorer, judge, pooling; `--out`, fixes and usage in run meta |
 | Viewer | `app/server.py`, `app/static/index.html` | Experiment runs, safe run paths, queue sort, tokens and cost, fee field |
 | Data | `data/probes/synthetic_20`, `fixes_30`, `dev_95`, `holdout_30` (+ `data/README.md` table) | 20 + 30 + 30 new labelled tickets; dev_95 joins existing sets |
-| Tests | `tests/test_pipeline.py` | 25 → 49 tests: every flag on and off, cache and salt, draft checks, fee parsing |
+| Tests | `tests/test_pipeline.py` | 25 → 51 tests: every flag on and off, cache and salt, draft checks, fee parsing |
 | Docs | `docs/test-runs/…`, `docs/experiments/…`, this file | Smoke-test record, method, log, per-config pages, screenshots |
 
 Run outputs (`runs/`) and the response cache stay git-ignored, as `runs/` already was.
@@ -338,8 +346,8 @@ About 155 tickets exist, none checked for dialect realism by a native speaker, a
 **How:** build the Opus generator (subcategory × dialect × style); add a few real, anonymised phrasings from support staff; write a **fresh hold-out for every round**.
 
 ### 3. Make the recommendation the real code, and delete the rest
-Fourteen flags are off by default, so the shipped behaviour is still the baseline. The dead variants (F3, F3b, F6, F9, F10, F13) make `run.py` and the gate harder to read.
-**How:** make F2, F3c, F6b, F7, F11 and F12 v2 the normal code path; delete the dropped flags and their code (they live on in `LOG.md` and git history); keep F8 as a config option and F5 waiting on real values. Keep the experiment harness for future ideas.
+Sixteen flags are off by default, so the shipped behaviour is still the baseline. The dead variants (F3, F3b, F6, F9, F10, F13, F14) make `run.py` and the gate harder to read.
+**How:** make F2, F3c, F6b, F7, F11, F12 v2 and F14b the normal code path; delete the dropped flags (including F14) and their code (they live on in `LOG.md` and git history); keep F8 as a config option and F5 waiting on real values. Keep the experiment harness for future ideas.
 
 ### 4. Fix the remaining classification confusions
 "Raise my limit" keeps being read as a fee/limit question (s05, m08, h19). An agent top-up drifts to cash-in (f15). A confidence of exactly 0.75 passes the gate without a re-check.
@@ -352,7 +360,11 @@ This is a company decision. Real response times and hours make drafts genuinely 
 The response cache and run files store full ticket text; `mask_for_logs` isn't applied to them. Prompt injection was tested on only 3 tickets.
 **How:** mask stored text, keep the cache to synthetic experiments only, and add about 10 adversarial tickets (Arabizi injection, fake "system" messages, requests for other customers' data) to the regression tests.
 
-### 7. Once agents use it: measure edits, not judge scores
+### 7. Decide whether the fixing team should get a written handoff
+Today **every draft is a reply to the customer**; the drafter's prompt says so. The team that fixes the issue gets only structured data: the team, the priority, the extracted fields and a fixed one-line note per flag. **Escalated tickets (all fraud included) get no text at all.** A second, internal note (for example "Customer sent 40,000 IQD to the wrong number, ref 61200984; asks how long the return takes; recipient number still missing") would help most on exactly those escalated tickets.
+**How:** a separate drafter call with its own prompt, written for the team rather than the customer. Test it with the same with/without method, with the judge rating usefulness to the team.
+
+### 8. Once agents use it: measure edits, not judge scores
 How often agents approve, edit or take over (recommendation #1, deferred) will replace the model judge as the true quality metric.
 
 **What to stop doing:** adding more prompt or rule tweaks on the `cli` backend. Round 3 showed fixes interact through prompt changes; the next real gains come from items 1–3.
@@ -373,7 +385,7 @@ How often agents approve, edit or take over (recommendation #1, deferred) will r
 
 ```bash
 pip install -r requirements.txt
-pytest                                             # 49 tests
+pytest                                             # 51 tests
 
 # The viewer (shows saved runs and experiment runs)
 python app/server.py                               # http://localhost:8000

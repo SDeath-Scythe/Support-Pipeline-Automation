@@ -6,7 +6,7 @@ All numbers come from the `cli` backend: good for comparing configs with each ot
 
 ## Current recommendation (after round 3)
 
-**Adopt F2 + F3c + F6b + F7 + F11 + F12 (v2).** This replaces F3 with F3c and F6 with F6b compared with the round-2 advice. F8 stays your call; F5 needs your real policy values. Do not adopt F9, F10 or F13 (reasons below).
+**Adopt F2 + F3c + F6b + F7 + F11 + F12 (v2)**, plus **F14b** (the fraud/secondary cleanup rule, added later; see the follow-up below). This replaces F3 with F3c and F6 with F6b compared with the round-2 advice. F8 stays your call; F5 needs your real policy values. Do not adopt F9, F10 or F13 (reasons below).
 
 Confirmed on **holdout_30**: 30 tickets written before any round-3 result and run only once the recommendation was fixed. Three runs of each arm (as run, fresh classifier, fresh drafter):
 
@@ -25,6 +25,19 @@ Confirmed on **holdout_30**: 30 tickets written before any round-3 result and ru
 Pages: [holdout_30/summary.md](holdout_30/summary.md), [pooled drafts](holdout_30/pooled-rec-vs-baseline.md). The dev results (95 tickets, `dev_95`) are in [dev_95/summary.md](dev_95/summary.md).
 
 One ticket is missed by every configuration: **h19** ("I want to raise my monthly limit, how long, which papers?") is read as a fee/limit *question* instead of `limit_upgrade`. It's the same confusion as s05 and m08 on the dev set. Adding `[limit_upgrade, fees_limits_question]` as a look-alike pair, or a sharper hint, is the next thing to try. It was left alone here so the hold-out stays a fair test.
+
+### Follow-up: the fraud / secondary-subcategory rule (F14, F14b)
+
+**Raised by the author:** the classifier prompt says "pick exactly one category and one subcategory", yet rule 1 says "put the other issue in `secondary_subcategory`" for fraud. Worse, rule 1 contradicts rule 5 ("being locked out after a scam … stays with the main subcategory"). Across all 522 saved fraud classifications, 26 (5%) put a consequence of the fraud in the secondary field: e02 and f22 (`login_otp`), f26 (`unauthorized_charge`). The same ticket got different answers on different runs.
+
+Tested only on existing tickets (dev_95, holdout_30), with 3 runs per arm on dev:
+
+| Fix | Change | Result | Verdict |
+|---|---|---|---|
+| **F14** | Reword the two prompt sentences so rule 1 defers to rule 5 | Secondary correct 64/63/63 → 65/64/64 (one ticket). But subcategory used 90/88/91 → **87/86/87**, and 95 → **92** inside the recommended set; **3 wrong types reach a draft in every run** (0 before). The re-check uses the same prompt and now makes the same mistakes (m02, m23), so the disagreement F3c relies on disappears; m08 also flips. Hold-out 28 → 27/26. | **Do not adopt** |
+| **F14b** | Same rule enforced in code: a fraud ticket's secondary is cleared when it is an account-access or fraud subcategory (a consequence); a separate request (e.g. e13's top-up) is kept | Identical to its baseline on every metric in all 6 comparisons (no model input changes, so it can't shift classifications); clears all 26 inconsistent cases seen | **Adopt** (small, safe) |
+
+Lesson, the third time it has shown up (F6, F13, F14): the classifier and the re-check share one prompt, so editing it can make both models wrong in the same way and silently remove the safety net. Prefer code rules or separate calls over prompt edits, and always test a prompt edit with replicates.
 
 ### Round 3: what was tried
 

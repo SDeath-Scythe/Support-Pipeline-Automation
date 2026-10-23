@@ -21,6 +21,8 @@ The numbers follow the recommendation list from the 20 Oct smoke test ([../test-
 | F11 | `ask_if_missing` | Round 3: shop / agent / bill details are asked for only if the ticket doesn't give them. | draft |
 | F12 | `no_specific_followup` | Round 3: the drafter must not promise to send a specific answer, date or result (v2 wording). | draft |
 | F13 | `lookalike_hints` | Round 3: sharper classifier hints for look-alike subcategories. | classify |
+| F14 | `fraud_secondary_rule` | Follow-up: reworded fraud / second-issue rule in the classifier prompt (not adopted). | classify |
+| F14b | `fraud_secondary_cleanup` | Follow-up: the same rule enforced in code after each classification. | after classify |
 | F8 | `unclear_template` | Unclear / off-topic tickets get a fixed reply that asks what the problem is (and vaguely what details help), with no drafter call. | draft |
 
 Not tested here, because they only help us monitor and do not change what the agent sees: review logging (1), cost logging and the evaluation additions (part of 9), queue sorting (10). They come after the experiments. Confidence (4) is a separate discussion.
