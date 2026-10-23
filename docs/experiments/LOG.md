@@ -6,7 +6,7 @@ All numbers come from the `cli` backend: good for comparing configs with each ot
 
 ## Current recommendation (after round 3)
 
-**Adopt F2 + F3c + F6b + F7 + F11 + F12 (v2)**, plus **F14b** (the fraud/secondary cleanup rule, added later; see the follow-up below). This replaces F3 with F3c and F6 with F6b compared with the round-2 advice. F8 stays your call; F5 needs your real policy values. Do not adopt F9, F10 or F13 (reasons below).
+**Adopt F2 + F3c + F6b + F15 + F11 + F12 (v2) + F14b.** F15 (no word raises priority) replaced F7 on 24 Oct after a correction from the project author; F14b was added after the fraud/secondary follow-up below. **F16** (the meaning of "ورقة") is pending an API test with replicates. This replaces F3 with F3c and F6 with F6b compared with the round-2 advice. F8 stays your call; F5 needs your real policy values. Do not adopt F9, F10 or F13 (reasons below).
 
 Confirmed on **holdout_30**: 30 tickets written before any round-3 result and run only once the recommendation was fixed. Three runs of each arm (as run, fresh classifier, fresh drafter):
 
@@ -25,6 +25,15 @@ Confirmed on **holdout_30**: 30 tickets written before any round-3 result and ru
 Pages: [holdout_30/summary.md](holdout_30/summary.md), [pooled drafts](holdout_30/pooled-rec-vs-baseline.md). The dev results (95 tickets, `dev_95`) are in [dev_95/summary.md](dev_95/summary.md).
 
 One ticket is missed by every configuration: **h19** ("I want to raise my monthly limit, how long, which papers?") is read as a fee/limit *question* instead of `limit_upgrade`. It's the same confusion as s05 and m08 on the dev set. Adding `[limit_upgrade, fees_limits_question]` as a look-alike pair, or a sharper hint, is the next thing to try. It was left alone here so the hold-out stays a fair test.
+
+### Corrections from the project author (24 Oct): F15 and F16
+
+The project author, a native Iraqi speaker, corrected two assumptions built into the pipeline:
+
+| Flag | Change | Why | Status |
+|---|---|---|---|
+| **F15** `no_urgency_words` | No word changes priority; only the subcategory default and the ≥ 1,000,000 IQD amount rule | No word (هسه, ضروري, عاجل, بسرعة, صارلي يومين…) reliably marks urgency. F7 only removed هسه | **Adopt, replaces F7.** Rule-only, so no model noise. The old probe sets' gold priorities assumed urgent words raise priority, so priority scores on those sets will drop under F15; the regenerated dataset is labelled with F15 |
+| **F16** `warqa_usd` | The classifier prompt's amount example: "ورقة" is a 100 USD note, "خمسين ورقة" = 5,000 USD (amount_usd); "خمسين الف" = 50,000 IQD | The old example said "خمسين ورقة" = 50,000 IQD: wrong, and it contradicted the amount_usd line | **Not run.** It edits the shared classifier prompt; F6, F13 and F14 all shifted other classifications, so test it with replicates on the API before adopting |
 
 ### Follow-up: the fraud / secondary-subcategory rule (F14, F14b)
 

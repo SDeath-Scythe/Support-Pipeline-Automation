@@ -17,7 +17,7 @@ This document hands over everything done in one working session with the Claude 
   | `draft_check` | F2 | Rule checks on every draft (stray Latin letters, promises, PIN/OTP requests, invented numbers); a failing draft is flagged with the reason |
   | `recheck_cross_team` | F3c | When the two models disagree, use the **re-check model's** answer and flag it, instead of escalating (never for fraud) |
   | `fee_followup` | F6b | A small extra call extracts the disputed fee, only for fee tickets |
-  | `no_now_urgency` | F7 | "هسه" (now) no longer raises priority |
+  | `no_urgency_words` | F15 | No word raises priority (not "هسه", "ضروري", "عاجل" or any other): the subcategory default, raised only for ≥ 1,000,000 IQD. Supersedes F7 |
   | `ask_if_missing` | F11 | The draft only asks for a shop / agent / bill detail if the ticket doesn't already give it |
   | `no_specific_followup` | F12 | The draft must not promise to send a specific answer, date or result |
   | `fraud_secondary_cleanup` | F14b | A fraud ticket's "second issue" is cleared when it's only a consequence of the fraud (added in the follow-up, see 6) |
@@ -25,7 +25,7 @@ This document hands over everything done in one working session with the Claude 
   Turn them all on with:
   ```bash
   PIPELINE_FIXES=draft_check,recheck_cross_team,fee_followup,\
-  no_now_urgency,ask_if_missing,no_specific_followup,fraud_secondary_cleanup \
+  no_urgency_words,ask_if_missing,no_specific_followup,fraud_secondary_cleanup \
     python app/server.py
   ```
 
@@ -148,7 +148,7 @@ Ten recommendations came out of the smoke test. You decided what to do with each
 | 4 | Improve confidence without 3 calls per ticket | Recommend something | Tested as F9, F10, F13; the winner was F3c |
 | 5 | Fill `policy.yaml` | Test in isolation, before/after | **F5**: tested with placeholder values |
 | 6 | Extract the disputed fee | Do it | **F6** → replaced by **F6b** |
-| 7 | Urgency words | Check that "now" doesn't raise priority | **F7** → adopted |
+| 7 | Urgency words | Check that "now" doesn't raise priority | **F7** → adopted, then superseded by **F15** (no word raises priority) |
 | 8 | Fixed reply for unclear tickets | Good idea, hint at the info needed | **F8**: your call (trade-off) |
 | 9 | Evaluation gaps | Do it (monitoring: later) | Judge, field accuracy, cost logging |
 | 10 | Sort the queue | Do it (monitoring: later) | Viewer sort by priority or team |
@@ -167,7 +167,7 @@ flowchart LR
     C --> K["Classify + extract<br/>Haiku<br/>(F6, F10, F13)"]
     K --> FEE["Fee call<br/>(F6b)"]
     FEE --> G{"Confidence gate<br/>rules<br/>(F9, F10)"}
-    G -->|pass| R["Route + priority<br/>rules<br/>(F7)"]
+    G -->|pass| R["Route + priority<br/>rules<br/>(F7, F15)"]
     G -->|re-check| RC["Re-check<br/>Sonnet<br/>(F3, F3b, F3c)"]
     RC --> R
     G -->|escalate| E[Escalated<br/>no draft]
@@ -202,7 +202,7 @@ flowchart LR
 
 Each entry gives the observation that started it, the reasoning, how it was built, and what the data said. The numbers are the key ones; the full tables are in [`docs/experiments/LOG.md`](docs/experiments/LOG.md).
 
-### ✅ F7: "هسه" no longer raises priority · adopt
+### ✅→⤴ F7: "هسه" no longer raises priority · superseded by F15
 
 - **Observation:** `URGENT_WORDS` contains "هسه" (now), which is everyday wording ("هسه شلون ارجعه؟"), so ordinary tickets were bumped a level.
 - **Implementation:** `route.py`: `urgent_words()` leaves out `NOW_WORDS` when the flag is on. Real urgency ("ضروري", "عاجل") still counts.
@@ -269,6 +269,12 @@ Each entry gives the observation that started it, the reasoning, how it was buil
 - **F14:** reword those two sentences in the prompt. Tested on existing tickets only, with replicates. The second-issue field improved on one ticket, but **3 wrong ticket types reached a draft in every run** (0 before), and the recommended set fell 95 → 92/95. The re-check model shares the prompt, so both models started making the same mistakes and F3c's safety net disappeared. **Not adopted.**
 - **F14b:** enforce the same rule in code after each classification. A fraud ticket's second issue is cleared when it is a consequence (an account-access or fraud subcategory); a separate request is kept. No model input changes. Result: **identical on every metric in all 6 comparisons**, and it clears all 26 inconsistent cases. **Adopt.**
 
+### Corrections from the project author (a native Iraqi speaker), 24 Oct
+
+**F15 `no_urgency_words` (supersedes F7) · adopt.** No word in a ticket reliably marks urgency: not "هسه", "ضروري", "عاجل", "بسرعة", "صارلي يومين" or any other. With F15, priority is the subcategory's default, raised one level only for amounts ≥ 1,000,000 IQD. It is a routing rule, so there is no model noise. It disagrees with the old probe sets' gold priorities, which assumed urgent words raise priority; the regenerated dataset is labelled with F15.
+
+**F16 `warqa_usd` · test before adopting.** "ورقة" is a 100 USD note, so "خمسين ورقة" = 5,000 USD (amount_usd), while "خمسين الف" = 50,000 IQD. The classifier prompt's amount_iqd example said "خمسين ورقة" = 50,000 IQD, which was wrong (and contradicted its own amount_usd line). F16 corrects that one example. Because it edits the shared classifier prompt, and three prompt edits (F6, F13, F14) shifted other classifications, it must be tested with replicates on the API before it is adopted.
+
 ### ❌ Tried and dropped
 
 | Fix | Idea | Why dropped |
@@ -319,7 +325,7 @@ All on `claude/eager-tesla-x1dcxj`. With no flags set, the pipeline behaves exac
 | Classifier | `classify.py`, `prompts/fee_system.md`, `schemas.py` | F6 field, F10 runner-up, F13 hints (all flag-gated); F6b fee prompt and parser; optional `fee_iqd` and `runner_up` fields |
 | Gate | `gate.py` | F9 look-alike and F10 runner-up re-check triggers |
 | Run | `run.py` | F3/F3b/F3c re-check handling, F6b fee call, F8 template, F2 checks, Arabic flag notes |
-| Route | `route.py` | F7 `urgent_words()` |
+| Route | `route.py` | F7 and F15 in `urgent_words()` |
 | Draft | `draft.py`, `draft_check.py` | F5 policy source, F11 split asks, F12 rule; F2 checks module |
 | Model calls | `llm.py` | Response cache with a lock per key, per-role salt, `last_usage()` |
 | Config | `config/templates.yaml`, `config/experiments/*.yaml`, `taxonomy.yaml` (look-alike pairs), `thresholds.yaml` (`confusable_below`) | Template text, placeholder policy, F13 hints. The real `policy.yaml` is untouched. |
@@ -347,7 +353,7 @@ About 155 tickets exist, none checked for dialect realism by a native speaker, a
 
 ### 3. Make the recommendation the real code, and delete the rest
 Sixteen flags are off by default, so the shipped behaviour is still the baseline. The dead variants (F3, F3b, F6, F9, F10, F13, F14) make `run.py` and the gate harder to read.
-**How:** make F2, F3c, F6b, F7, F11, F12 v2 and F14b the normal code path; delete the dropped flags (including F14) and their code (they live on in `LOG.md` and git history); keep F8 as a config option and F5 waiting on real values. Keep the experiment harness for future ideas.
+**How:** make F2, F3c, F6b, F15, F11, F12 v2 and F14b the normal code path; delete the dropped flags (including F7 and F14) and their code (they live on in `LOG.md` and git history); keep F8 as a config option and F5 waiting on real values. Keep the experiment harness for future ideas.
 
 ### 4. Fix the remaining classification confusions
 "Raise my limit" keeps being read as a fee/limit question (s05, m08, h19). An agent top-up drifts to cash-in (f15). A confidence of exactly 0.75 passes the gate without a re-check.
@@ -392,8 +398,8 @@ python app/server.py                               # http://localhost:8000
 
 # One config on a set (runs go to runs/exp/<set>/, git-ignored)
 python scripts/experiment.py run baseline --set data/probes/dev_95.jsonl
-python scripts/experiment.py run F2+F3c+F6b+F7+F11+F12 --set data/probes/dev_95.jsonl
-python scripts/experiment.py report F2+F3c+F6b+F7+F11+F12 --set data/probes/dev_95.jsonl
+python scripts/experiment.py run F2+F3c+F6b+F15+F11+F12+F14b --set data/probes/dev_95.jsonl
+python scripts/experiment.py report F2+F3c+F6b+F15+F11+F12+F14b --set data/probes/dev_95.jsonl
 
 # Noise checks: fresh classifier, or fresh drafts with classification fixed
 python scripts/experiment.py run baseline --salt classifier=c1 --label baseline-c1

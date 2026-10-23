@@ -12,7 +12,9 @@ The numbers follow the recommendation list from the 20 Oct smoke test ([../test-
 | F3 | `recheck_same_team` | When the re-check disagrees but both answers go to the **same team** (and neither is fraud), flag the ticket with a draft instead of escalating it. | gate |
 | F5 | `policy_facts` | The drafter gets filled-in facts (response times, support hours). **Tested on its own only**, as asked. | draft |
 | F6 | `fee_amount` | The classifier extracts the disputed fee (`fee_iqd`) separately from the transaction amount. | classify |
-| F7 | `no_now_urgency` | "هسه" (now) no longer raises priority. | route |
+| F7 | `no_now_urgency` | "هسه" (now) no longer raises priority. Superseded by F15. | route |
+| F15 | `no_urgency_words` | No word raises priority (author's correction): the subcategory default, raised only for ≥ 1,000,000 IQD. Replaces F7 in the recommended set. | route |
+| F16 | `warqa_usd` | Classifier prompt: "ورقة" is a 100 USD note ("خمسين ورقة" = 5,000 USD), not 1,000 IQD (author's correction). A prompt edit: test with API replicates before adopting. | classify |
 | F3b | `recheck_use_second` | Round 3: a same-team disagreement is drafted from the re-check's answer, flagged. | gate |
 | F3c | `recheck_cross_team` | Round 3: any non-fraud disagreement is drafted from the re-check's answer (routed to its team), flagged. | gate |
 | F6b | `fee_followup` | Round 3: a separate small call extracts the fee, only for fee tickets; the classifier prompt is unchanged. | after classify |
