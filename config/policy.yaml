@@ -1,8 +1,13 @@
 # Grounding: the ONLY facts a draft reply may state.
-# If a fact is not here, the draft must not promise it (no invented timelines,
-# fees or outcomes). All values are fictional, for a synthetic company.
+# If a fact is not here, the draft must not state or promise it (no invented
+# timelines, fees, names or outcomes).
 #
-# TODO(Salih): fill in the values marked null before drafts are built.
+# Company facts are intentionally empty. A company deploying this adds its own
+# name, support hours and response times here; until then, drafts refer to the
+# support team and never state a timeline, fee or company name.
+#
+# customer_should_send is not company policy: it is the information each issue
+# needs, and drafts ask for it when the ticket doesn't already give it.
 
 company:
   name_ar: null            # fictional company name shown in replies
