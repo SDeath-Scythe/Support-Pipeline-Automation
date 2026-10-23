@@ -650,3 +650,12 @@ def test_profiles_off_by_default_and_config_is_valid(monkeypatch):
         assert False, "unknown profile should raise"
     except llm.BackendError:
         pass
+
+
+def test_parse_takes_the_first_json_object():
+    from pipeline.classify import parse
+
+    two = '{"category": "general", "subcategory": "unclear", "confidence": 0.8} {"note": "extra"}'
+    assert parse(two).subcategory == "unclear"
+    trailing = 'Here: {"category": "general", "subcategory": "app_bug", "confidence": 0.9}\nThe {braces} after.'
+    assert parse(trailing).subcategory == "app_bug"

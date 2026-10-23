@@ -30,7 +30,8 @@ TICKET = clean("دزيت ٧٥ الف لاختي من الصبح وما وصلت�
 
 def listed_models(p: dict) -> set[str] | None:
     req = urllib.request.Request(p["base_url"].rstrip("/") + "/models",
-                                 headers={"Authorization": f"Bearer {os.environ[p['key_env']]}"})
+                                 headers={"Authorization": f"Bearer {os.environ[p['key_env']]}",
+                                          "User-Agent": "support-pipeline-test/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.load(r)

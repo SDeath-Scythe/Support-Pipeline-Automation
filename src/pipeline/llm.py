@@ -249,7 +249,9 @@ def _call_openai(cfg: dict, system: str, user: str) -> str:
         _wait_turn(cfg["provider"], float(cfg.get("rpm", 10)))
         req = urllib.request.Request(
             cfg["base_url"].rstrip("/") + "/chat/completions", data=json.dumps(body).encode("utf-8"),
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+            # A named User-Agent: Groq's Cloudflare front blocks Python's default one (error 1010).
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                     "User-Agent": "support-pipeline-test/1.0"})
         try:
             with urllib.request.urlopen(req, timeout=cfg.get("timeout_s", 180)) as resp:
                 data = json.load(resp)

@@ -2,9 +2,9 @@
  "meta": {
   "set": "holdout_30",
   "backend": "cli",
-  "started": "2026-10-23T18:03:30",
-  "wall_seconds": 2.1,
-  "workers": 4,
+  "started": "2026-10-23T18:58:14",
+  "wall_seconds": 1.4,
+  "workers": 3,
   "models": {
    "classifier": "claude-haiku-5-5",
    "drafter": "claude-sonnet-5-5",
@@ -12,6 +12,7 @@
    "generator": "claude-opus-5-5",
    "evaluator": "claude-opus-5-5"
   },
+  "profile": null,
   "thresholds": {
    "pass_above": 0.75,
    "recheck_from": 0.6,

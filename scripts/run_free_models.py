@@ -35,6 +35,7 @@ def main() -> None:
     ap.add_argument("--profiles", nargs="*")
     ap.add_argument("--set", default=str(ROOT / "data/probes/holdout_30.jsonl"))
     ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--table-only", action="store_true", help="rebuild the table from runs already made")
     args = ap.parse_args()
     raw = load_yaml("free_models.yaml")
     names = args.profiles or [n for n, p in raw["profiles"].items() if keys_ok(p, raw["providers"])]
@@ -43,9 +44,10 @@ def main() -> None:
     set_name = Path(args.set).stem
 
     # The Claude reference: the recommended set on the same tickets (cached if it already ran).
-    subprocess.run(E + ["run", REC, "--set", args.set, "--workers", "3"], check=True)
-    subprocess.run(E + ["report", REC, "--set", args.set], check=True)
-    for name in names:
+    if not args.table_only:
+        subprocess.run(E + ["run", REC, "--set", args.set, "--workers", "3"], check=True)
+        subprocess.run(E + ["report", REC, "--set", args.set], check=True)
+    for name in ([] if args.table_only else names):
         env = {**os.environ, "LLM_PROFILE": name}
         label = f"free-{name}"
         subprocess.run(E + ["run", REC, "--set", args.set, "--label", label, "--workers", str(args.workers)],
@@ -66,6 +68,7 @@ def main() -> None:
             "models": run["meta"]["models"],
             "errors": sum("model_error" in r["result"].get("flags", []) for r in rows),
             "sec": sum(r["seconds"] for r in rows) / len(rows),
+            "cached": (run["meta"].get("usage") or {}).get("cached_calls", 0) == (run["meta"].get("usage") or {}).get("model_calls", -1),
         }
 
     def fmt(v):
@@ -78,7 +81,7 @@ def main() -> None:
     for k, title in keys:
         lines.append(f"| {title} | " + " | ".join(fmt(metrics[c].get(k)) for c, _ in cols) + " |")
     lines.append("| Model errors (call failed, escalated) | " + " | ".join(str(meta[c]["errors"]) for c, _ in cols) + " |")
-    lines.append("| Seconds per ticket (incl. rate limits) | " + " | ".join(f"{meta[c]['sec']:.1f}" for c, _ in cols) + " |")
+    lines.append("| Seconds per ticket (incl. rate limits) | " + " | ".join("cached" if meta[c]["cached"] else f"{meta[c]['sec']:.1f}" for c, _ in cols) + " |")
     lines += ["", "Models per column:", ""]
     for c, t in cols:
         m = meta[c]["models"]

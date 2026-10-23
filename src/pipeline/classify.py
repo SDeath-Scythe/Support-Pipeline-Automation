@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -77,15 +76,19 @@ def _system_prompt(fee_field: bool, runner_up: bool = False, lookalike: bool = F
     return prompt
 
 
-_JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+def _first_object(reply: str) -> dict:
+    """The first complete JSON object in the reply. Tolerates code fences, stray text and text
+    after the object (some models add a second object or a note, which a greedy {.*} would join)."""
+    start = reply.find("{")
+    if start < 0:
+        raise ValueError(f"No JSON object in reply: {reply[:200]!r}")
+    obj, _ = json.JSONDecoder().raw_decode(reply[start:])
+    return obj
 
 
 def parse(reply: str) -> Extraction:
     """Parse the model reply into an Extraction. Tolerates code fences or stray text."""
-    match = _JSON_OBJECT.search(reply)
-    if not match:
-        raise ValueError(f"No JSON object in reply: {reply[:200]!r}")
-    return Extraction.model_validate(json.loads(match.group()))
+    return Extraction.model_validate(_first_object(reply))
 
 
 _FEE_PROMPT = Path(__file__).parent / "prompts" / "fee_system.md"
@@ -96,8 +99,10 @@ def fee_prompt() -> str:
 
 
 def parse_fee(reply: str) -> int | None:
-    match = _JSON_OBJECT.search(reply)
-    value = json.loads(match.group()).get("fee_iqd") if match else None
+    try:
+        value = _first_object(reply).get("fee_iqd")
+    except ValueError:
+        value = None
     return int(value) if isinstance(value, (int, float)) and value > 0 else None
 
 

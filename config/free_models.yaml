@@ -25,7 +25,7 @@ providers:
   mistral:
     base_url: https://api.mistral.ai/v1
     key_env: MISTRAL_API_KEY
-    rpm: 2             # free "experiment" tier is very slow; raise if your plan allows
+    rpm: 2             # free "experiment" tier: 429s at higher rates in the first check
   openrouter:
     base_url: https://openrouter.ai/api/v1
     key_env: OPENROUTER_API_KEY
@@ -33,20 +33,24 @@ providers:
 
 # role -> [provider, model]. Roles not listed (generator, evaluator) keep config/models.yaml,
 # so the draft judge stays the same for every profile and scores stay comparable.
+#
+# Updated 23 Oct 2026 to what the keys actually list: Groq no longer serves Llama, Mistral no longer
+# serves Saba, Gemini 2.5 Flash is closed to new users and gemini-flash-latest timed out. Mizan-tested
+# models are marked (M). The Mistral key had a 0 requests/minute quota (plan not activated).
 profiles:
-  google:            # Gemma classifies, Gemini Flash re-checks and drafts
-    classifier: [google, gemma-3-27b-it, merge_system]   # Gemma on this API takes no system message
-    rechecker:  [google, gemini-2.5-flash]
-    drafter:    [google, gemini-2.5-flash]
-  groq:              # Llama 3.3 classifies, gpt-oss re-checks, Llama 4 Maverick drafts
-    classifier: [groq, llama-3.3-70b-versatile]
+  google:            # Gemma 4 31B (M 82.4) classifies; Gemini 3.5 Flash re-checks and drafts
+    classifier: [google, gemma-4-31b-it, merge_system]   # Gemma on this API takes no system message
+    rechecker:  [google, gemini-3.5-flash]
+    drafter:    [google, gemini-3.5-flash]
+  groq:              # Qwen 3.8 27B classifies; gpt-oss-120b (M 82.0) re-checks and drafts
+    classifier: [groq, qwen/qwen3.8-27b]
     rechecker:  [groq, openai/gpt-oss-120b]
-    drafter:    [groq, meta-llama/llama-4-maverick-17b-128e-instruct]
-  mistral:           # Mistral Small classifies, Mistral Saba (Arabic-focused) re-checks and drafts
+    drafter:    [groq, openai/gpt-oss-120b]
+  mistral:           # Mistral Small classifies; Mistral Medium re-checks and drafts
     classifier: [mistral, mistral-small-latest]
-    rechecker:  [mistral, mistral-saba-latest]
-    drafter:    [mistral, mistral-saba-latest]
+    rechecker:  [mistral, mistral-medium-latest]
+    drafter:    [mistral, mistral-medium-latest]
   mixed:             # best free model per role across providers (needs Google + Groq keys)
-    classifier: [google, gemini-2.5-flash]
-    rechecker:  [groq, meta-llama/llama-4-maverick-17b-128e-instruct]
-    drafter:    [google, gemini-2.5-flash]
+    classifier: [google, gemini-3.5-flash]
+    rechecker:  [groq, openai/gpt-oss-120b]
+    drafter:    [google, gemini-3.5-flash]
