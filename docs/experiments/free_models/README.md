@@ -26,7 +26,7 @@ Full table: [holdout_30.md](holdout_30.md). Per-ticket pages: `../holdout_30/fre
 
 **What it suggests (one run each, not calibration):** none of the free options matches the Claude setup on this pipeline as-is. Google is the closest in quality but its free quota is too small for a real batch of 100–150 tickets a day. Groq has the capacity but produces more risky drafts, which the F2 draft checks partly catch; adding "قريباً" to the promise rule would catch most of them. The prompts were tuned on Claude, so other models might improve with model-specific wording. That would be its own with/without test.
 
-**To finish the test:** once the Gemini quota resets (daily), run `python scripts/run_free_models.py --profiles google mixed`. Calls that already succeeded are reused from the cache, so only the failed ones are re-sent. Activate the Mistral plan, then add `mistral`.
+**To finish the test:** once the Gemini quota resets (daily), run `python scripts/run_free_models.py --profiles google mixed`. Since the cache now names the backend in its key (so API and cli replies can never mix), the earlier free-model replies are not reused: the whole profile is re-sent. Activate the Mistral plan, then add `mistral`.
 
 ## Which models, and why
 

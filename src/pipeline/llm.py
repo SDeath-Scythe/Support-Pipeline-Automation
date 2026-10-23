@@ -23,6 +23,8 @@ APIs (keys from the environment). Other roles keep config/models.yaml. Unset, no
 Experiments only: set LLM_CACHE_DIR to reuse the reply to an identical call (same
 model, system and user prompt). Runs with and without a fix then differ only where the
 fix changes a model's input, not because the model answered differently a second time.
+The key also names the backend for every non-cli backend (api, or openai:<provider>), so an
+API run never gets a stored cli reply back; cli keys are unchanged, so old cli entries stay valid.
 """
 
 from __future__ import annotations
@@ -161,15 +163,19 @@ def _salt(role: str | None) -> str:
     return pairs.get(role or "", "")
 
 
-def _cached(cfg: dict, system: str, user: str, send, role: str | None = None) -> str:
+def _cached(cfg: dict, system: str, user: str, send, role: str | None = None,
+            backend_tag: str | None = None) -> str:
     """Return the stored reply for this exact call, or make it once and store it.
 
     A lock directory per key stops two parallel runs paying for the same call twice.
+    `backend_tag` is None for cli (keys unchanged from before it existed) and names any other
+    backend, so the same model and prompts on the API never return a cli reply.
     """
     cache_dir = os.getenv("LLM_CACHE_DIR")
     if not cache_dir:
         return send(cfg, system, user)
-    parts = [cfg["model"], system, user] + ([_salt(role)] if _salt(role) else [])
+    parts = ([cfg["model"], system, user] + ([_salt(role)] if _salt(role) else [])
+             + ([f"backend={backend_tag}"] if backend_tag else []))
     key = hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
     path = Path(cache_dir) / f"{key}.json"
     lock = path.with_suffix(".lock")
@@ -278,10 +284,11 @@ def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
     cfg = route or models()[role]
     _usage.value = {}
     send = _call_openai if route else (_call_api if backend() == "api" else _call_cli)
+    tag = f"openai:{route['provider']}" if route else (None if backend() == "cli" else backend())
     last_error: Exception | None = None
     for _ in range(retries + 1):
         try:
-            return _cached(cfg, system, user, send, role)
+            return _cached(cfg, system, user, send, role, tag)
         except Exception as e:  # noqa: BLE001 - surfaced to caller after retry
             last_error = e
     where = f"{route['provider']}/{route['model']}" if route else f"the {backend()} backend"

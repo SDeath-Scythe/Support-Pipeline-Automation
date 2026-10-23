@@ -659,3 +659,51 @@ def test_parse_takes_the_first_json_object():
     assert parse(two).subcategory == "unclear"
     trailing = 'Here: {"category": "general", "subcategory": "app_bug", "confidence": 0.9}\nThe {braces} after.'
     assert parse(trailing).subcategory == "app_bug"
+
+
+# --- cache keys are per backend (an API run must never get a cli reply back) ---
+
+def test_cache_does_not_return_cli_reply_to_api_run(monkeypatch, tmp_path):
+    from pipeline import llm
+
+    sent = {"cli": 0, "api": 0}
+
+    def fake_cli(cfg, system, user):
+        sent["cli"] += 1
+        return "cli reply"
+
+    def fake_api(cfg, system, user):
+        sent["api"] += 1
+        return "api reply"
+
+    monkeypatch.setattr(llm, "_call_cli", fake_cli)
+    monkeypatch.setattr(llm, "_call_api", fake_api)
+    monkeypatch.delenv("LLM_PROFILE", raising=False)
+    monkeypatch.delenv("LLM_CACHE_SALT", raising=False)
+    monkeypatch.setenv("LLM_CACHE_DIR", str(tmp_path))
+
+    monkeypatch.setenv("LLM_BACKEND", "cli")
+    assert llm.call("classifier", "SYS", "same ticket") == "cli reply"
+    monkeypatch.setenv("LLM_BACKEND", "api")
+    assert llm.call("classifier", "SYS", "same ticket") == "api reply"     # its own sender, not the cli reply
+    assert sent == {"cli": 1, "api": 1}
+    monkeypatch.setenv("LLM_BACKEND", "cli")
+    assert llm.call("classifier", "SYS", "same ticket") == "cli reply"     # still a cache hit
+    monkeypatch.setenv("LLM_BACKEND", "api")
+    assert llm.call("classifier", "SYS", "same ticket") == "api reply"     # api now cached too
+    assert sent == {"cli": 1, "api": 1}
+
+
+def test_cli_cache_key_unchanged(monkeypatch, tmp_path):
+    """Entries written before the backend tag existed must still be found on cli."""
+    import hashlib
+    import json
+
+    from pipeline import llm
+
+    monkeypatch.setenv("LLM_CACHE_DIR", str(tmp_path))
+    monkeypatch.delenv("LLM_CACHE_SALT", raising=False)
+    old_key = hashlib.sha256(json.dumps(["m", "S", "u"]).encode("utf-8")).hexdigest()
+    (tmp_path / f"{old_key}.json").write_text(json.dumps({"model": "m", "reply": "stored"}), encoding="utf-8")
+    assert llm._cached({"model": "m"}, "S", "u", lambda *a: "fresh") == "stored"
+    assert llm._cached({"model": "m"}, "S", "u", lambda *a: "fresh", backend_tag="api") == "fresh"
