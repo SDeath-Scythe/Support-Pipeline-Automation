@@ -20,6 +20,7 @@ FIXES = {
     "confusable_recheck": "F9: re-check when the answer is in a known look-alike pair and confidence < 0.90",
     "runner_up": "F10: the classifier names a runner-up; re-check when it has one and confidence < 0.90",
     "lookalike_hints": "F13: sharper classifier hints for the look-alike subcategories",
+    "fraud_secondary_rule": "F14: rule 1 defers to rule 5, so a consequence of the fraud is not a secondary issue",
     "ask_if_missing": "F11: the drafter asks for unverifiable details only if the ticket does not give them",
     "no_specific_followup": "F12: the drafter must not promise to send a specific answer, date or result",
     "fee_amount": "F6: the classifier extracts the disputed fee separately (fee_iqd)",

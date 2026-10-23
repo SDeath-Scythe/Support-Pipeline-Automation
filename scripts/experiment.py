@@ -45,6 +45,7 @@ CODES = {
     "F12": "no_specific_followup",
     "F13": "lookalike_hints",
     "F6b": "fee_followup",
+    "F14": "fraud_secondary_rule",
 }
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"
@@ -178,6 +179,10 @@ def score(run: dict, judged: dict[str, dict]) -> tuple[dict, list[dict]]:
             "gold_sub": g["subcategory"], "sub": ex.get("subcategory"),
             "sub_ok": ex.get("subcategory") == g["subcategory"],
             "final_sub": final, "final_ok": final == g["subcategory"],
+            "secondary": (r.get("extraction") or ex).get("secondary_subcategory"),
+            "secondary_ok": None if "secondary_subcategory" not in g else
+                            (r.get("extraction") or ex).get("secondary_subcategory") == g["secondary_subcategory"],
+            "gold_fraud": g.get("category") == "fraud_security",
             "wrong_not_escalated": r["outcome"] != "escalated" and final != g["subcategory"],
             "gold_outcome": g["outcome"], "outcome": r["outcome"], "outcome_ok": r["outcome"] == g["outcome"],
             "draft_avail_ok": has_draft == (g["outcome"] != "escalated"),
@@ -204,6 +209,8 @@ def score(run: dict, judged: dict[str, dict]) -> tuple[dict, list[dict]]:
     m = {
         "tickets": n,
         "subcategory": rate("sub_ok"), "final_subcategory": rate("final_ok"),
+        "secondary": rate("secondary_ok"),
+        "secondary_fraud": rate("secondary_ok", [x for x in rows if x["gold_fraud"]]),
         "wrong_not_escalated": sum(x["wrong_not_escalated"] for x in rows), "outcome": rate("outcome_ok"), "draft_available": rate("draft_avail_ok"),
         "priority": rate("priority_ok"), "amount": rate("amount_ok"), "fee": rate("fee_ok"), "reference": rate("ref_ok"),
         "escalated": sum(x["outcome"] == "escalated" for x in rows),
@@ -224,6 +231,8 @@ def score(run: dict, judged: dict[str, dict]) -> tuple[dict, list[dict]]:
 LABELS = [
     ("subcategory", "Subcategory correct (first model)", +1),
     ("final_subcategory", "Subcategory used correct", +1),
+    ("secondary", "Secondary subcategory correct", +1),
+    ("secondary_fraud", "Secondary correct (fraud tickets)", +1),
     ("wrong_not_escalated", "Wrong type, not escalated", -1), ("outcome", "Outcome matches gold", +1),
     ("draft_available", "Draft given iff it should be", +1), ("priority", "Priority correct", +1),
     ("amount", "Amount correct", +1), ("fee", "Fee correct (fee tickets)", +1),

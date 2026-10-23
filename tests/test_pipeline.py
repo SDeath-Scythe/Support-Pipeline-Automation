@@ -543,3 +543,21 @@ def test_parse_fee_rejects_junk():
 
     assert parse_fee('{"fee_iqd": 2500}') == 2500
     assert parse_fee('{"fee_iqd": null}') is None and parse_fee("no json") is None and parse_fee('{"fee_iqd": "x"}') is None
+
+
+# --- F14: fraud rule defers to the two-issues rule ---
+
+def test_f14_rewords_only_the_two_sentences(monkeypatch):
+    from pipeline.classify import system_prompt
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    base = system_prompt()
+    assert "Put the other issue in `secondary_subcategory`." in base
+    monkeypatch.setenv("PIPELINE_FIXES", "fraud_secondary_rule")
+    p = system_prompt()
+    assert "Put the other issue in `secondary_subcategory`." not in p
+    assert "Being locked out, or losing money, because of the scam is part of the fraud" in p
+    assert "`secondary_subcategory` is optional; use it only as rules 1 and 5 describe." in p
+    # everything else is untouched
+    assert p.split("## Rules for choosing")[1].split("2. **Read the story")[1] == \
+        base.split("## Rules for choosing")[1].split("2. **Read the story")[1]
