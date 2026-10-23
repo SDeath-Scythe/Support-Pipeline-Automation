@@ -777,6 +777,8 @@ def test_generator_warqa_is_usd_notes():
     base = {"include_reference": False, "include_phone": False, "style": "short", "dialect": "baghdadi",
             "amount_iqd": None, "amount_usd": 5000, "usd_as_warqa": 50}
     assert g.problems(base, "حولت خمسين ورقة لاخوي وما وصلت") == []
+    arabizi = {**base, "style": "arabizi", "usd_as_warqa": 5, "amount_usd": 500}
+    assert g.problems(arabizi, "7awalt 5 wara8a l a5oya w ma wuslat") == []      # Arabizi ورقة counts too
     assert "warqa_missing" in g.problems(base, "حولت خمسة الاف دولار وما وصلت")
     iqd = {**base, "amount_iqd": 50000, "amount_usd": None, "usd_as_warqa": None}
     assert "warqa_without_usd" in g.problems(iqd, "حولت خمسين ورقة وما وصلت")    # never dinars

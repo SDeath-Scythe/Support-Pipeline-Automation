@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -145,7 +146,12 @@ WARQA_SUBS = {"not_received", "wrong_recipient", "cash_in_not_credited"}
 WARQA_SHARE = 0.08     # of the amount tickets in WARQA_SUBS, besides half of the usd_amount edge cases
 WARQA_INSTRUCTION = ("The amount is in 100-dollar notes: write exactly {n} ورقة (one ورقة = 100 USD), "
                      "the way Iraqis count dollars. Do not convert it and do not write دولار.")
-_WARQA = re.compile(r"(^|\s)(ال)?ورق(ه|ات|تين)?(\s|$)")   # on normalised text
+_WARQA = re.compile(r"(^|\s)(ال)?ورق(ه|ات|تين)?(\s|$)")                     # on normalised text
+_WARQA_LATIN = re.compile(r"(^|[^a-z0-9])(el|il|l)?war(a)?[8qg9k](a|at|ten|tain)?([^a-z0-9]|$)")   # Arabizi, raw text
+
+
+def has_warqa(text: str) -> bool:
+    return bool(_WARQA.search(normalise(text)) or _WARQA_LATIN.search(text.lower()))
 # Dialect marker words, matched on normalised text (with an optional و/ف/ب/ل in front).
 # Prefix forms (ديـ) and letters (چ، گ) are not words and are not counted.
 MARKERS = {
@@ -407,11 +413,11 @@ def problems(spec: dict, text: str) -> list[str]:
     if (spec["style"] == "short" and n > 200) or (spec["style"] == "long" and n < 90) or n > 1200:
         out.append("length_vs_style")
     norm = normalise(rest)
-    has_warqa = bool(_WARQA.search(norm))
+    warqa = has_warqa(rest)
     if spec.get("usd_as_warqa"):
-        if not has_warqa:
+        if not warqa:
             out.append("warqa_missing")
-    elif has_warqa:
+    elif warqa:
         out.append("warqa_without_usd")         # "ورقة" is a 100 USD note, never dinars
     elif spec["amount_usd"] is not None and not re.search(r"دولار|\$|usd|dollar|dolar", low):
         out.append("usd_not_stated")
@@ -537,7 +543,10 @@ def build(split: str, seed: int, n: int) -> None:
     cache = f"{split}-s{seed}"                        # new seed, new batches: old replies are never reused
     marker_counts = Counter()
     cap = math.floor(MARKER_CAP * n)
-    rng = random.Random(seed * 7 + 1)                # numbers for {REF} / {PHONE}
+    # Numbers for {REF} / {PHONE} come from each spec's own generator, so they do not depend on
+    # the order tickets are accepted in (a top-up run keeps every earlier ticket's text).
+    def spec_rng(spec_id: str) -> random.Random:
+        return random.Random(f"{seed}:{spec_id}")
     specs = make_specs(split, n, seed)
     system = (ROOT / "scripts/prompts/generate_tickets.md").read_text(encoding="utf-8")
     pool = existing_texts(split)
@@ -574,6 +583,7 @@ def build(split: str, seed: int, n: int) -> None:
                 if bad:
                     rejects.update(bad)
                     continue
+                rng = spec_rng(spec["spec_id"])
                 ref = make_reference(rng) if spec["include_reference"] else None
                 phone = make_phone(rng) if spec["include_phone"] else None
                 filled = text.replace("{REF}", ref or "").replace("{PHONE}", phone or "").strip()
@@ -596,18 +606,23 @@ def build(split: str, seed: int, n: int) -> None:
     # Blind audit (evaluator role): labels without the gold, disagreements go to review.
     records = [accepted[s["spec_id"]] for s in specs if s["spec_id"] in accepted]
     asys = audit_system()
-    # Labels already saved for this split and seed are reused by ticket id (a top-up run with more
-    # rounds replays the same accepted tickets), so only new tickets are audited.
+    # Labels already saved for this split and seed are reused when the ticket text is unchanged
+    # (a top-up run replays the same accepted tickets), so only new or changed tickets are audited.
+    digest = {r["id"]: hashlib.sha256(r["text"].encode("utf-8")).hexdigest()[:16] for r in records}
+    seen = ROOT / "runs/generation" / cache / "audited_texts.json"
+    old = json.loads(seen.read_text(encoding="utf-8")) if seen.exists() else {}
     labels = {}
     for f in sorted((ROOT / "runs/generation" / cache).glob("audit_*.json")):
-        labels.update({x.get("id"): x for x in json.loads(f.read_text(encoding="utf-8")) if isinstance(x, dict)})
+        for x in json.loads(f.read_text(encoding="utf-8")):
+            if isinstance(x, dict) and x.get("id") in digest and old.get(x.get("id")) == digest[x.get("id")]:
+                labels[x["id"]] = x
     todo = [r for r in records if r["id"] not in labels]
     chunks = [todo[i:i + BATCH] for i in range(0, len(todo), BATCH)]
 
     def audit(args):
         b, chunk = args
         user = json.dumps([{"id": r["id"], "text": r["text"]} for r in chunk], ensure_ascii=False, indent=1)
-        name = f"b{b:02d}" if len(todo) == len(records) else f"x{len(records) - len(todo)}_b{b:02d}"
+        name = "t" + hashlib.sha256(" ".join(digest[r["id"]] for r in chunk).encode()).hexdigest()[:10]
         try:
             return model_batch(cache, "audit", name, "evaluator", asys, user, counters)
         except Exception as e:  # noqa: BLE001
@@ -615,9 +630,13 @@ def build(split: str, seed: int, n: int) -> None:
 
     with ThreadPoolExecutor(WORKERS) as ex:
         audits = list(ex.map(audit, enumerate(chunks)))
-    for a in audits:
+    for a, chunk in zip(audits, chunks):
         if isinstance(a, list):
-            labels.update({x.get("id"): x for x in a if isinstance(x, dict)})
+            ids = {r["id"] for r in chunk}
+            labels.update({x.get("id"): x for x in a if isinstance(x, dict) and x.get("id") in ids})
+    old.update({i: digest[i] for i in labels})
+    seen.parent.mkdir(parents=True, exist_ok=True)
+    seen.write_text(json.dumps(old, indent=0), encoding="utf-8")
     unaudited = 0
     for r in records:
         if r["id"] in labels:
@@ -725,7 +744,7 @@ def print_stats(splits: list[str]) -> bool:
             reasons[s]["ورقة (USD notes)"] += "ورقة" in rr
     table("Review reasons", reasons, ["any review_reason", "audit disputed", "two issues", "ورقة (USD notes)"])
     table("Amounts in USD", {s: Counter({"amount_usd": sum(r["amount_usd"] is not None for r in v),
-                                         "as ورقة": sum(bool(_WARQA.search(normalise(r["text"]))) for r in v)})
+                                         "as ورقة": sum(bool(has_warqa(r["text"])) for r in v)})
                              for s, v in data.items()}, ["amount_usd", "as ورقة"])
     return marker_table(data)
 
@@ -741,7 +760,7 @@ def handcheck_must(r: dict) -> str | None:
         return "audit dispute"
     if r["secondary_subcategory"]:
         return "two issues"
-    if r["amount_usd"] is not None or _WARQA.search(normalise(r["text"])):
+    if r["amount_usd"] is not None or has_warqa(r["text"]):
         return "ورقة / USD"
     return None
 
