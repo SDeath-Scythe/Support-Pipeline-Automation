@@ -19,6 +19,10 @@ NOW_WORDS = ["هسه"]
 
 
 def urgent_words() -> list[str]:
+    # F15 (no_urgency_words), from the project author (a native speaker): no word marks real
+    # urgency reliably, so with F15 no word changes priority. It supersedes F7.
+    if enabled("no_urgency_words"):
+        return []
     if enabled("no_now_urgency"):
         return [w for w in URGENT_WORDS if w not in NOW_WORDS]
     return URGENT_WORDS

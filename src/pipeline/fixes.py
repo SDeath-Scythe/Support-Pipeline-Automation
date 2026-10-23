@@ -26,7 +26,8 @@ FIXES = {
     "no_specific_followup": "F12: the drafter must not promise to send a specific answer, date or result",
     "fee_amount": "F6: the classifier extracts the disputed fee separately (fee_iqd)",
     "fee_followup": "F6b: a small extra call extracts the fee, only for fee tickets; the classifier prompt is unchanged",
-    "no_now_urgency": "F7: 'هسه' (now) no longer raises priority",
+    "no_now_urgency": "F7: 'هسه' (now) no longer raises priority (superseded by F15)",
+    "no_urgency_words": "F15: no word raises priority; only the subcategory default and the large-amount rule",
     "unclear_template": "F8: unclear tickets get a fixed reply instead of a drafter call",
 }
 

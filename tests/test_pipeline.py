@@ -758,3 +758,19 @@ def test_generator_numbers_and_checks():
     assert "invented_long_number" in g.problems(spec, "حولت رقم العملية {REF} والثاني 88213990")
     assert "ref_placeholder" in g.problems(spec, "حولت فلوس وما وصلت")
     assert "brand_name" in g.problems(spec, "شحنت رصيد زين رقم العملية {REF}")
+
+
+# --- F15: no word raises priority ---
+
+def test_f15_no_word_raises_priority_but_amount_still_does(monkeypatch):
+    topup = ex(category="bills_topup", subcategory="topup_failed", reference=None, amount_iqd=5000)
+    urgent = "ضروري عاجل بسرعة هسه صارلي يومين ثاني مرة الرصيد ما وصل"
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert route(topup, urgent)[1] == "P2"                              # off: urgent words raise P3 -> P2
+    monkeypatch.setenv("PIPELINE_FIXES", "no_urgency_words")
+    assert route(topup, urgent)[1] == "P3"                              # on: subcategory default
+    big = ex(subcategory="not_received", amount_iqd=1_000_000)
+    assert route(big, "حولت مليون وما وصل")[1] == "P1"                  # the amount rule is kept
+    assert route(ex(amount_iqd=999_999), "ضروري")[1] == "P2"
+    monkeypatch.setenv("PIPELINE_FIXES", "no_urgency_words,no_now_urgency")
+    assert route(topup, urgent)[1] == "P3"                              # F15 wins over F7
