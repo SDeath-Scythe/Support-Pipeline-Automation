@@ -19,7 +19,7 @@ Every subcategory appears at least 3 times in each test set (23 × 3 = 69 ≤ 80
 - A spec list per split from its seed: subcategory (the category mix of a real L1 day, after at least 3 per subcategory), dialect (Baghdadi / southern / Mosuli), style (short, long, typos, mixed English, voice-note style, Arabizi capped at 3%), difficulty, and a tagged **edge case** for about 18% (missing or fake reference, two issues, off-topic, prompt injection, negation, phone instead of a reference, amount slang, USD amount, fraud hidden as the second issue).
 - The `generator` role (Opus) writes about 10 tickets per call, as JSON. It writes `{REF}` and `{PHONE}`; code fills them (references: 7–10 digits, with dashes, spaces, Arabic-Indic digits or a 2-letter prefix; phones: fake `07[3-9]XXXXXXXX`), so the gold value is what code inserted. The amount is fixed in the spec, so gold amounts are exact. No real company, brand, bank or person names (checked against a block list).
 - Code checks every ticket: schema and taxonomy keys, placeholders used as specified, the reference really in the text (`gate.reference_in_text`), no invented long numbers, no brand names, style sanity, "ورقة" only where the spec asks for dollar notes, no Mosuli غ for ر. Failed specs are regenerated until each split is full.
-- **Variety:** a ticket is rejected if it is a near-duplicate of any ticket in any split or in `probes/`: normalised characters more than 0.8 similar, or content words more than 0.5 similar with common dialect variants folded (this catches the same sentence rewritten in another dialect, like dev-0083 / dev-0138 in the first build). A ticket is also rejected if it would put any dialect marker word in more than 10% of its split; the build fails if any marker is above 15%.
+- **Variety:** a ticket is rejected if it is a near-duplicate of any ticket in any split or in `probes/`: normalised characters more than 0.8 similar, or content words more than 0.5 similar with common dialect variants folded (this catches the same sentence rewritten in another dialect, like dev-0083 / dev-0138 in the first build). A ticket is also rejected if it would put any dialect marker word in more than 10% of its split; the build fails if any marker is above 15%. From round 2 the generator is told which marker words are already at the cap (`avoid_words`), and from round 7 a spec whose draft was a near-duplicate gets that draft back (`too_similar_to`) with a request for a clearly different ticket.
 - **Priority and outcome come from code**: the taxonomy and routing rules with the recommended flags on. With F15, gold priority is the subcategory's `default_priority`, raised one level only for an amount of 1,000,000 IQD or more; no word changes it. Outcome: escalated for fraud, flagged if a required field is missing, otherwise drafted.
 - **Blind audit:** the `evaluator` role (Opus) labels every ticket without seeing its gold label, using the classifier rules with F16 ("ورقة" = 100 USD). A disagreement never changes gold; it goes into `review_reason`. `review_reason` also marks every two-issue ticket and every ticket whose amount is in ورقة.
 - **heldout** was generated in its own run with its own seed, and only its statistics were printed. Keep it unread until the progress review.
@@ -35,10 +35,11 @@ The first build (seeds 1001 / 2002 / 3003) was replaced because of three correct
 
 Also: "هسه" was in 26% of the first build's tickets and was one of the prompt's dialect examples; it is no longer an example, and each marker word is capped as above.
 
-## Dataset (generated 23 Oct 2026)
+## Dataset (regenerated 23 Oct 2026, seeds 1101 / 2202 / 3303)
 
 | | dev | mvp_test | heldout | total |
 |---|---|---|---|---|
+| Seed | 1101 | 2202 | 3303 | |
 | Tickets | 240 | 80 | 80 | 400 |
 | transfers (25% target) | 60 | 19 | 19 | 98 |
 | account_access (15% target) | 36 | 12 | 12 | 60 |
@@ -49,39 +50,77 @@ Also: "هسه" was in 26% of the first build's tickets and was one of the prompt
 | verification (8% target) | 19 | 6 | 6 | 31 |
 | fraud_security (7% target) | 17 | 6 | 6 | 29 |
 | Fewest tickets in any subcategory | 5 | 3 | 3 | 3 |
-| Dialect: baghdadi | 123 | 35 | 28 | 186 |
-| Dialect: southern | 77 | 25 | 25 | 127 |
-| Dialect: mosuli | 40 | 20 | 27 | 87 |
-| Style: short | 79 | 26 | 25 | 130 |
-| Style: long | 38 | 14 | 13 | 65 |
-| Style: typos | 37 | 9 | 13 | 59 |
-| Style: mixed_english | 35 | 12 | 14 | 61 |
-| Style: voice_note_style | 44 | 18 | 14 | 76 |
-| Style: arabizi | 7 | 1 | 1 | 9 |
-| Difficulty: easy | 72 | 29 | 37 | 138 |
-| Difficulty: medium | 98 | 29 | 19 | 146 |
-| Difficulty: hard | 70 | 22 | 24 | 116 |
-| Tagged edge cases | 43 | 14 | 14 | 71 |
-| Outcome: drafted | 200 | 69 | 66 | 335 |
-| Outcome: flagged | 23 | 5 | 8 | 36 |
+| Dialect: baghdadi | 120 | 38 | 40 | 198 |
+| Dialect: southern | 67 | 25 | 24 | 116 |
+| Dialect: mosuli | 53 | 17 | 16 | 86 |
+| Style: short | 67 | 29 | 27 | 123 |
+| Style: long | 52 | 18 | 17 | 87 |
+| Style: typos | 31 | 14 | 12 | 57 |
+| Style: mixed_english | 46 | 10 | 10 | 66 |
+| Style: voice_note_style | 37 | 7 | 12 | 56 |
+| Style: arabizi | 7 | 2 | 2 | 11 |
+| Difficulty: easy | 90 | 28 | 29 | 147 |
+| Difficulty: medium | 88 | 32 | 32 | 152 |
+| Difficulty: hard | 62 | 20 | 19 | 101 |
+| Tagged edge cases | 43 (17.9%) | 14 (17.5%) | 14 (17.5%) | 71 |
+| Outcome: drafted | 198 | 65 | 64 | 327 |
+| Outcome: flagged | 25 | 9 | 10 | 44 |
 | Outcome: escalated | 17 | 6 | 6 | 29 |
-| Priority: P1 | 42 | 14 | 10 | 66 |
-| Priority: P2 | 94 | 30 | 33 | 157 |
-| Priority: P3 | 104 | 36 | 37 | 177 |
-| Audit disputed (in review) | 3 | 0 | 2 | 5 |
-| Any review_reason | 70 | 25 | 22 | 117 |
-| Generator calls (Opus) | 26 | 10 | 9 | 45 |
-| Audit calls (Opus) | 24 | 8 | 8 | 40 |
+| Priority: P1 | 28 | 10 | 11 | 49 |
+| Priority: P2 | 90 | 28 | 27 | 145 |
+| Priority: P3 | 122 | 42 | 42 | 206 |
+| amount_usd (of which as ورقة) | 8 (6) | 2 (1) | 4 (4) | 14 (11) |
+| Two-issue tickets | 9 | 3 | 3 | 15 |
+| Audit disputed (in review) | 5 | 0 | 3 | 8 |
+| Any review_reason | 19 | 4 | 9 | 32 |
+| Generator calls (Opus) | 37 | 18 | 14 | 69 |
+| Audit calls (Opus) | 49 | 9 | 8 | 66 |
 
-Each split's `build_info.json` records its seed, model calls, rejected drafts (brand name, near-duplicate, USD not stated) and audit disputes.
+Dev's audit calls include one full re-audit: a bug in the ورقة check (it only read Arabic script, so an Arabizi "5 wara8a" ticket was rejected nine times) was fixed mid-build, and the fix changed the filled-in numbers, so every dev ticket was audited again.
 
-Regenerate (model replies are cached under `runs/generation/`, so a re-run with the same seed reuses them; delete that folder for fresh tickets):
+Across all 400 tickets, no pair is above 0.8 on characters or 0.5 on content words (the closest pair is 0.76 on characters), and no ticket is a near-duplicate of a probe. No draft was rejected for Mosuli غ-for-ر.
+
+### Marker words (% of tickets in the split)
+
+Cap 10% at acceptance, build fails above 15%. Words not listed (شكو، بلكي، لعد، خوش، عيني، اغاتي، يابه) are at 0%. "اريد" is not counted, because it is also standard Arabic (أريد).
+
+| Word | dev | mvp_test | heldout |
+|---|---|---|---|
+| هسه | 10.0% | 10.0% | 10.0% |
+| ايش | 10.0% | 10.0% | 10.0% |
+| شلون | 10.0% | 10.0% | 6.2% |
+| شنو | 10.0% | 5.0% | 8.8% |
+| گلت / گال | 9.2% | 10.0% | 5.0% |
+| ماكو | 7.5% | 5.0% | 6.2% |
+| ليش | 6.7% | 5.0% | 1.2% |
+| شنهو | 5.8% | 6.2% | 5.0% |
+| هيج | 4.6% | 3.8% | 2.5% |
+| اكو | 4.2% | 6.2% | 10.0% |
+| يمعود | 4.2% | 8.8% | 8.8% |
+| صارلي | 4.2% | 5.0% | 2.5% |
+| ويا | 2.9% | 2.5% | 0.0% |
+| هواي | 2.9% | 2.5% | 5.0% |
+| كلش | 2.5% | 2.5% | 2.5% |
+| شگد / شكد | 2.1% | 5.0% | 1.2% |
+| چان | 1.7% | 1.2% | 1.2% |
+| *Urgency words (F15: no effect on priority)* | | | |
+| ضروري | 9.6% | 10.0% | 8.8% |
+| بسرعة | 4.2% | 6.2% | 3.8% |
+| عاجل | 1.2% | 0.0% | 0.0% |
+
+### Hand-check sheet (`review/handcheck_80.csv`, seed 4404)
+
+80 rows: 63 dev, 17 mvp_test, no heldout. All 26 must-check tickets (5 audit disputes, 12 two-issue, 9 with ورقة or a USD amount) plus 54 random tickets chosen to spread across subcategories and dialects (random: 21 southern, 19 Mosuli, 14 Baghdadi). All 23 subcategories appear. Rows are shuffled.
+
+Each split's `build_info.json` records its seed, model calls, rejected drafts and audit disputes.
+
+Regenerate (model replies are cached under `runs/generation/<split>-s<seed>/`, so a re-run with the same seed reuses them; a new seed starts fresh):
 
 ```bash
-python scripts/generate_tickets.py build --split dev      --seed 1001 --n 240
-python scripts/generate_tickets.py build --split mvp_test --seed 2002 --n 80
-python scripts/generate_tickets.py build --split heldout  --seed 3003 --n 80   # separate run; prints statistics only
-python scripts/generate_tickets.py handcheck --seed 4004
+python scripts/generate_tickets.py build --split dev      --seed 1101 --n 240
+python scripts/generate_tickets.py build --split mvp_test --seed 2202 --n 80
+python scripts/generate_tickets.py build --split heldout  --seed 3303 --n 80   # separate run; prints statistics only
+python scripts/generate_tickets.py handcheck --seed 4404
 python scripts/generate_tickets.py stats                                       # coverage tables, no ticket text
 ```
 

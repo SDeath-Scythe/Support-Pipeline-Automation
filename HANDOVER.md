@@ -348,8 +348,8 @@ Every number came from the `cli` backend, which the README itself says not to us
 **How:** with an API key, re-run `baseline` vs the recommended set (`scripts/experiment.py`, `--backend api`). Have you or a native Iraqi speaker hand-check about 30 labels and score about 30 drafts, then compare those scores with the judge's: keep the judge if they agree, fix the rubric if not. This is the "80 hand-checked tickets" step from `data/README.md`.
 
 ### 2. Grow and ground the data
-About 155 tickets exist, none checked for dialect realism by a native speaker, and the 400-ticket generator isn't built. `holdout_30` is now **spent** (h19 was inspected).
-**How:** build the Opus generator (subcategory × dialect × style); add a few real, anonymised phrasings from support staff; write a **fresh hold-out for every round**.
+The 400-ticket dataset now exists (`scripts/generate_tickets.py`; dev 240, mvp_test 80, heldout 80), regenerated on 23 Oct with the author's three corrections (ورقة = 100 USD, no Mosuli غ for ر, F15 priority), dialect-word caps and stricter near-duplicate checks; see `data/README.md`. It has not been hand-checked yet. `holdout_30` is **spent** (h19 was inspected).
+**How:** the author fills in `data/review/handcheck_80.csv` (dev and mvp_test only) before the pipeline or any experiment is run on the new data; add a few real, anonymised phrasings from support staff; write a **fresh hold-out for every round**.
 
 ### 3. Make the recommendation the real code, and delete the rest
 Sixteen flags are off by default, so the shipped behaviour is still the baseline. The dead variants (F3, F3b, F6, F9, F10, F13, F14) make `run.py` and the gate harder to read.
