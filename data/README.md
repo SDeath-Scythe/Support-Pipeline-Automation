@@ -18,11 +18,22 @@ Every subcategory appears at least 3 times in each test set (23 × 3 = 69 ≤ 80
 
 - A spec list per split from its seed: subcategory (the category mix of a real L1 day, after at least 3 per subcategory), dialect (Baghdadi / southern / Mosuli), style (short, long, typos, mixed English, voice-note style, Arabizi capped at 3%), difficulty, and a tagged **edge case** for about 18% (missing or fake reference, two issues, off-topic, prompt injection, negation, phone instead of a reference, amount slang, USD amount, fraud hidden as the second issue).
 - The `generator` role (Opus) writes about 10 tickets per call, as JSON. It writes `{REF}` and `{PHONE}`; code fills them (references: 7–10 digits, with dashes, spaces, Arabic-Indic digits or a 2-letter prefix; phones: fake `07[3-9]XXXXXXXX`), so the gold value is what code inserted. The amount is fixed in the spec, so gold amounts are exact. No real company, brand, bank or person names (checked against a block list).
-- Code checks every ticket: schema and taxonomy keys, placeholders used as specified, the reference really in the text (`gate.reference_in_text`), no invented long numbers, no brand names, style sanity, and near-duplicates (normalised similarity > 0.85) against every other split and the probe sets. Failed specs are regenerated until each split is full.
-- **Priority and outcome come from code**: the taxonomy and routing rules with the recommended flags on (F7: "هسه" alone does not raise priority). Outcome: escalated for fraud, flagged if a required field is missing, otherwise drafted.
-- **Blind audit:** the `evaluator` role (Opus) labels every ticket without seeing its gold label. A disagreement never changes gold; it goes into `review_reason`. `review_reason` also marks every ticket containing "هسه" (priority check) and every two-issue ticket.
+- Code checks every ticket: schema and taxonomy keys, placeholders used as specified, the reference really in the text (`gate.reference_in_text`), no invented long numbers, no brand names, style sanity, "ورقة" only where the spec asks for dollar notes, no Mosuli غ for ر. Failed specs are regenerated until each split is full.
+- **Variety:** a ticket is rejected if it is a near-duplicate of any ticket in any split or in `probes/`: normalised characters more than 0.8 similar, or content words more than 0.5 similar with common dialect variants folded (this catches the same sentence rewritten in another dialect, like dev-0083 / dev-0138 in the first build). A ticket is also rejected if it would put any dialect marker word in more than 10% of its split; the build fails if any marker is above 15%.
+- **Priority and outcome come from code**: the taxonomy and routing rules with the recommended flags on. With F15, gold priority is the subcategory's `default_priority`, raised one level only for an amount of 1,000,000 IQD or more; no word changes it. Outcome: escalated for fraud, flagged if a required field is missing, otherwise drafted.
+- **Blind audit:** the `evaluator` role (Opus) labels every ticket without seeing its gold label, using the classifier rules with F16 ("ورقة" = 100 USD). A disagreement never changes gold; it goes into `review_reason`. `review_reason` also marks every two-issue ticket and every ticket whose amount is in ورقة.
 - **heldout** was generated in its own run with its own seed, and only its statistics were printed. Keep it unread until the progress review.
-- Hand check: `data/review/handcheck_80.csv` (columns ok / fix / note left blank, for Google Sheets).
+- Hand check: `data/review/handcheck_80.csv` (columns ok / fix / note left blank, for Google Sheets), from dev and mvp_test only: every audit dispute, every two-issue ticket and every ticket with "ورقة" or a USD amount, then at least 30 random tickets spread across subcategories and dialects.
+
+## Corrections from the project author (a native Iraqi speaker), 23 Oct
+
+The first build (seeds 1001 / 2002 / 3003) was replaced because of three corrections:
+
+1. **"ورقة" is a 100 USD note.** "خمسين ورقة" = 50 × 100 = 5,000 USD (`amount_usd` 5000); "خمسين الف" = 50,000 IQD. The first build used "خمسين ورقة" for 50,000 IQD, as the classifier prompt's example did (fixed behind F16 `warqa_usd`). Now "ورقة" appears only where the spec gives `usd_as_warqa`, and gold `amount_usd` = count × 100.
+2. **Mosuli does not spell ر as غ** ("اعغفها", "شهغ", "انتظغ" are wrong). The prompt uses other Mosuli features (ق kept, ايش) and standard spelling when unsure; code rejects known غ-for-ر forms.
+3. **No word raises priority**, not "هسه", "ضروري", "عاجل", "بسرعة", "صارلي يومين" or any other. Gold priority is the subcategory default, raised one level only for ≥ 1,000,000 IQD (F15 `no_urgency_words`, which supersedes F7).
+
+Also: "هسه" was in 26% of the first build's tickets and was one of the prompt's dialect examples; it is no longer an example, and each marker word is capped as above.
 
 ## Dataset (generated 23 Oct 2026)
 
