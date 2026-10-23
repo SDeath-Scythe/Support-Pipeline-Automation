@@ -576,3 +576,77 @@ def test_f14b_clears_consequence_keeps_separate_request(monkeypatch):
         assert run.process("واحد كال واخذ الكود")["extraction"]["secondary_subcategory"] == kept
     monkeypatch.delenv("PIPELINE_FIXES")
     assert run.process("واحد كال واخذ الكود")["extraction"]["secondary_subcategory"] == "topup_failed"
+
+
+# --- free-model profiles (OpenAI-compatible backend; wiring only, no real API) ---
+
+def _stub_server(replies):
+    """A local OpenAI-compatible endpoint: returns queued (status, body) pairs, records requests."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    seen = []
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):  # noqa: N802
+            seen.append({"path": self.path, "auth": self.headers.get("Authorization"),
+                         "body": json.loads(self.rfile.read(int(self.headers["Content-Length"])))})
+            status, body = replies.pop(0)
+            self.send_response(status)
+            if status == 429:
+                self.send_header("Retry-After", "0.01")
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, seen
+
+
+def test_profile_routes_role_to_openai_compatible_api(monkeypatch):
+    from pipeline import llm
+
+    ok = {"choices": [{"message": {"content": "{\"ok\": 1}"}}], "usage": {"prompt_tokens": 12, "completion_tokens": 3}}
+    srv, seen = _stub_server([(429, {}), (200, ok)])
+    route = {"base_url": f"http://127.0.0.1:{srv.server_port}/v1", "key_env": "TEST_KEY", "rpm": 6000,
+             "provider": "stub", "model": "m-1", "merge_system": False, "max_tokens": 4096, "temperature": 0.0}
+    monkeypatch.setattr(llm, "profile_route", lambda role: route if role == "classifier" else None)
+    monkeypatch.setenv("TEST_KEY", "k")
+    monkeypatch.delenv("LLM_CACHE_DIR", raising=False)
+
+    assert llm.call("classifier", "SYS", "تذكرة") == "{\"ok\": 1}"        # retried once after the 429
+    assert len(seen) == 2 and seen[1]["path"] == "/v1/chat/completions" and seen[1]["auth"] == "Bearer k"
+    assert seen[1]["body"]["messages"] == [{"role": "system", "content": "SYS"}, {"role": "user", "content": "تذكرة"}]
+    assert llm.last_usage()["input_tokens"] == 12 and llm.last_usage()["model"] == "m-1"
+
+    srv.shutdown()
+    srv2, seen2 = _stub_server([(200, ok)])
+    route.update(base_url=f"http://127.0.0.1:{srv2.server_port}/v1", merge_system=True)
+    llm.call("classifier", "SYS", "تذكرة")
+    assert seen2[0]["body"]["messages"] == [{"role": "user", "content": "SYS\n\nتذكرة"}]   # Gemma-style
+    srv2.shutdown()
+
+
+def test_profiles_off_by_default_and_config_is_valid(monkeypatch):
+    from pipeline import llm
+    from pipeline.config import load_yaml
+
+    monkeypatch.delenv("LLM_PROFILE", raising=False)
+    assert llm.profile_route("classifier") is None and llm.model_for("drafter") == models()["drafter"]["model"]
+    raw = load_yaml("free_models.yaml")
+    for name, prof in raw["profiles"].items():
+        assert set(prof) == {"classifier", "rechecker", "drafter"}, name
+        assert prof["classifier"][1] != prof["rechecker"][1], f"{name}: re-check must be a different model"
+        assert all(entry[0] in raw["providers"] for entry in prof.values()), name
+    monkeypatch.setenv("LLM_PROFILE", "groq")
+    assert llm.model_for("drafter").startswith("groq/") and llm.model_for("evaluator") == models()["evaluator"]["model"]
+    monkeypatch.setenv("LLM_PROFILE", "nope")
+    try:
+        llm.profile_route("classifier")
+        assert False, "unknown profile should raise"
+    except llm.BackendError:
+        pass

@@ -17,10 +17,10 @@ from . import classify as cls
 from . import draft as drf
 from . import draft_check
 from .clean import _DIGITS, _TATWEEL, clean
-from .config import load_yaml, models, taxonomy
+from .config import load_yaml, taxonomy
 from .fixes import enabled
 from .gate import check
-from .llm import backend, call, last_usage
+from .llm import backend, call, last_usage, model_for
 from .route import route
 from .schemas import Extraction, Outcome
 
@@ -78,7 +78,7 @@ def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str
         ex = _clean_secondary(ex)
     return ex, {
         "role": role,
-        "model": models()[role]["model"],
+        "model": model_for(role),
         "backend": backend(),
         "seconds": round(time.time() - t0, 1),
         "user_prompt": user,
@@ -108,7 +108,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     send("clean", "done", {"text": text, "changes": _clean_changes(raw_text)})
 
     # 2. Classify + extract (classifier model)
-    send("classify", "running", {"model": models()["classifier"]["model"], "backend": backend()})
+    send("classify", "running", {"model": model_for("classifier"), "backend": backend()})
     try:
         ex, info = _model_step("classifier", cls.system_prompt(), cls.user_prompt(text))
     except Exception as e:  # noqa: BLE001
@@ -141,7 +141,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     # 4. Re-check (second model, classifies blind)
     alternative = None
     if gate.needs_recheck:
-        send("recheck", "running", {"model": models()["rechecker"]["model"], "backend": backend()})
+        send("recheck", "running", {"model": model_for("rechecker"), "backend": backend()})
         try:
             ex2, info2 = _model_step("rechecker", cls.system_prompt(), cls.user_prompt(text))
             agree = ex2.subcategory == ex.subcategory
@@ -203,7 +203,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
         outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
         return finish(outcome, flags, team=team, priority=priority, draft_ar=reply, extraction=ex.model_dump())
 
-    send("draft", "running", {"model": models()["drafter"]["model"], "backend": backend(),
+    send("draft", "running", {"model": model_for("drafter"), "backend": backend(),
                               "ask_for": drf.ask_for(ex)})
     t0 = time.time()
     user = drf.user_prompt(text, ex, team)
@@ -214,7 +214,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
         return finish(Outcome.ESCALATED, flags + ["model_error"], team=team, priority=priority)
     checks = draft_check.problems(reply, user) if enabled("draft_check") else []
     flags += [f"draft:{p}" for p in checks]
-    send("draft", "done", {"model": models()["drafter"]["model"], "backend": backend(),
+    send("draft", "done", {"model": model_for("drafter"), "backend": backend(),
                            "seconds": round(time.time() - t0, 1), "user_prompt": user, "reply": reply,
                            "ask_for": drf.ask_for(ex), "checks": checks, "usage": last_usage()})
 

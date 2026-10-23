@@ -16,6 +16,10 @@ Two backends, same prompts and same code path:
 Pick one with `backend:` in config/models.yaml, or override per run with the
 LLM_BACKEND environment variable.
 
+Comparison tests only: set LLM_PROFILE to a profile in config/free_models.yaml to send the
+classifier, rechecker and drafter roles to free-tier models through their OpenAI-compatible
+APIs (keys from the environment). Other roles keep config/models.yaml. Unset, nothing changes.
+
 Experiments only: set LLM_CACHE_DIR to reuse the reply to an identical call (same
 model, system and user prompt). Runs with and without a fix then differ only where the
 fix changes a model's input, not because the model answered differently a second time.
@@ -31,11 +35,13 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from .config import llm_backend, models
+from .config import llm_backend, load_yaml, models
 
 load_dotenv()
 
@@ -191,18 +197,90 @@ def _cached(cfg: dict, system: str, user: str, send, role: str | None = None) ->
         shutil.rmtree(lock, ignore_errors=True)
 
 
+# --- free-model profiles (comparison tests; see config/free_models.yaml) ---
+
+_rate_lock = threading.Lock()
+_next_slot: dict[str, float] = {}
+
+
+def profile_route(role: str) -> dict | None:
+    """The provider/model a role is sent to under LLM_PROFILE, or None to use models.yaml."""
+    name = os.getenv("LLM_PROFILE")
+    if not name:
+        return None
+    raw = load_yaml("free_models.yaml")
+    if name not in raw["profiles"]:
+        raise BackendError(f"Unknown LLM_PROFILE '{name}'. Use one of: {', '.join(raw['profiles'])}.")
+    entry = raw["profiles"][name].get(role)
+    if entry is None:
+        return None
+    provider, model, *opts = entry
+    return {**raw["providers"][provider], "provider": provider, "model": model,
+            "merge_system": "merge_system" in opts,
+            # free models include reasoning models that spend tokens before answering
+            "max_tokens": max(models()[role]["max_tokens"], 4096),
+            "temperature": models()[role]["temperature"]}
+
+
+def model_for(role: str) -> str:
+    """The model a role actually uses (profile model, or the one in config/models.yaml)."""
+    route = profile_route(role)
+    return f"{route['provider']}/{route['model']}" if route else models()[role]["model"]
+
+
+def _wait_turn(provider: str, rpm: float) -> None:
+    """Space calls to one provider so a free tier's requests-per-minute limit is respected."""
+    with _rate_lock:
+        now = time.time()
+        slot = max(now, _next_slot.get(provider, 0.0))
+        _next_slot[provider] = slot + 60.0 / rpm
+    time.sleep(max(0.0, slot - now))
+
+
+def _call_openai(cfg: dict, system: str, user: str) -> str:
+    key = os.getenv(cfg["key_env"])
+    if not key:
+        raise BackendError(f"{cfg['key_env']} is not set (needed for {cfg['provider']}).")
+    messages = ([{"role": "user", "content": f"{system}\n\n{user}"}] if cfg.get("merge_system")
+                else [{"role": "system", "content": system}, {"role": "user", "content": user}])
+    body = {"model": cfg["model"], "messages": messages,
+            "temperature": cfg["temperature"], "max_tokens": cfg["max_tokens"]}
+    for attempt in range(6):
+        _wait_turn(cfg["provider"], float(cfg.get("rpm", 10)))
+        req = urllib.request.Request(
+            cfg["base_url"].rstrip("/") + "/chat/completions", data=json.dumps(body).encode("utf-8"),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=cfg.get("timeout_s", 180)) as resp:
+                data = json.load(resp)
+            break
+        except urllib.error.HTTPError as e:
+            detail = e.read()[:300].decode("utf-8", "replace")
+            if e.code in (429, 500, 502, 503, 504) and attempt < 5:   # rate limit or busy: back off
+                time.sleep(float(e.headers.get("Retry-After") or 0) or min(60, 5 * 2 ** attempt))
+                continue
+            raise RuntimeError(f"{cfg['provider']} HTTP {e.code} for {cfg['model']}: {detail}") from None
+    text = data["choices"][0]["message"].get("content") or ""
+    u = data.get("usage") or {}
+    _usage.value = {"input_tokens": u.get("prompt_tokens", 0), "output_tokens": u.get("completion_tokens", 0),
+                    "provider": cfg["provider"], "model": cfg["model"]}
+    return text
+
+
 def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
     """Send one message for `role` and return the text reply.
 
     Retries once on failure; the caller escalates the ticket if it still fails.
     """
-    cfg = models()[role]
+    route = profile_route(role)
+    cfg = route or models()[role]
     _usage.value = {}
-    send = _call_api if backend() == "api" else _call_cli
+    send = _call_openai if route else (_call_api if backend() == "api" else _call_cli)
     last_error: Exception | None = None
     for _ in range(retries + 1):
         try:
             return _cached(cfg, system, user, send, role)
         except Exception as e:  # noqa: BLE001 - surfaced to caller after retry
             last_error = e
-    raise RuntimeError(f"Model call failed for role '{role}' on the {backend()} backend") from last_error
+    where = f"{route['provider']}/{route['model']}" if route else f"the {backend()} backend"
+    raise RuntimeError(f"Model call failed for role '{role}' on {where}") from last_error

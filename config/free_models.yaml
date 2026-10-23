@@ -1,0 +1,52 @@
+# Free-tier models for a comparison test (not calibration). Used only when LLM_PROFILE is set:
+#
+#   LLM_PROFILE=google python scripts/experiment.py run ... --label google
+#
+# Without LLM_PROFILE nothing here is read and the pipeline uses config/models.yaml as before.
+#
+# Model choice: Iraqi-track scores from the Mizan benchmark (arXiv 2609.13980, Sept 2026, pilot of
+# 27 systems): gemini-2.5-flash 83.6, llama-4-maverick 83.0, gemma-3-27b-it 82.7, gpt-oss-120b 82.0,
+# mistral-saba 80.9, llama-3.3-70b 79.1 (claude-haiku-4-5 81.9 for reference). Arabic-specialised
+# 7-9B models scored about 10 points lower on Iraqi (allam-7b 64.7, silma-9b 63.2), so none are used.
+#
+# Each profile pairs two DIFFERENT models: the re-check only catches an error when the second
+# opinion comes from another model (round 3: F3c relies on that disagreement).
+# Model ids change often; scripts/check_free_models.py lists what each key can actually reach.
+
+providers:
+  google:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    key_env: GEMINI_API_KEY
+    rpm: 10            # free tier, Flash; the limiter keeps calls under this
+  groq:
+    base_url: https://api.groq.com/openai/v1
+    key_env: GROQ_API_KEY
+    rpm: 25
+  mistral:
+    base_url: https://api.mistral.ai/v1
+    key_env: MISTRAL_API_KEY
+    rpm: 2             # free "experiment" tier is very slow; raise if your plan allows
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    key_env: OPENROUTER_API_KEY
+    rpm: 15
+
+# role -> [provider, model]. Roles not listed (generator, evaluator) keep config/models.yaml,
+# so the draft judge stays the same for every profile and scores stay comparable.
+profiles:
+  google:            # Gemma classifies, Gemini Flash re-checks and drafts
+    classifier: [google, gemma-3-27b-it, merge_system]   # Gemma on this API takes no system message
+    rechecker:  [google, gemini-2.5-flash]
+    drafter:    [google, gemini-2.5-flash]
+  groq:              # Llama 3.3 classifies, gpt-oss re-checks, Llama 4 Maverick drafts
+    classifier: [groq, llama-3.3-70b-versatile]
+    rechecker:  [groq, openai/gpt-oss-120b]
+    drafter:    [groq, meta-llama/llama-4-maverick-17b-128e-instruct]
+  mistral:           # Mistral Small classifies, Mistral Saba (Arabic-focused) re-checks and drafts
+    classifier: [mistral, mistral-small-latest]
+    rechecker:  [mistral, mistral-saba-latest]
+    drafter:    [mistral, mistral-saba-latest]
+  mixed:             # best free model per role across providers (needs Google + Groq keys)
+    classifier: [google, gemini-2.5-flash]
+    rechecker:  [groq, meta-llama/llama-4-maverick-17b-128e-instruct]
+    drafter:    [google, gemini-2.5-flash]

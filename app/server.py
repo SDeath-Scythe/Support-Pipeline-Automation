@@ -24,7 +24,7 @@ from pipeline import classify as cls  # noqa: E402
 from pipeline import draft as drf  # noqa: E402
 from pipeline.config import models, taxonomy  # noqa: E402
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
-from pipeline.llm import backend  # noqa: E402
+from pipeline.llm import backend, model_for  # noqa: E402
 from pipeline.run import process  # noqa: E402
 
 STATIC = Path(__file__).parent / "static"
@@ -66,7 +66,7 @@ def meta() -> dict:
     tax = taxonomy()
     return {
         "backend": backend(),
-        "models": {role: cfg["model"] for role, cfg in models().items()},
+        "models": {role: model_for(role) for role in models()},
         "thresholds": load_thresholds()["confidence"],
         "subcategories": {k: {"label": s.label_ar, "category": s.category,
                               "category_label": tax.categories_ar[s.category]} for k, s in tax.subcategories.items()},

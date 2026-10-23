@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -23,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from pipeline.config import models  # noqa: E402
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.fixes import active as active_fixes  # noqa: E402
-from pipeline.llm import backend  # noqa: E402
+from pipeline.llm import backend, model_for  # noqa: E402
 from pipeline.run import process  # noqa: E402
 
 
@@ -73,7 +74,8 @@ def main() -> None:
         "meta": {
             "set": src.stem, "backend": backend(), "started": started.isoformat(timespec="seconds"),
             "wall_seconds": round(time.time() - t0, 1), "workers": args.workers,
-            "models": {r: c["model"] for r, c in models().items()},
+            "models": {r: model_for(r) for r in models()},
+            "profile": os.getenv("LLM_PROFILE") or None,
             "thresholds": load_thresholds()["confidence"],
             "fixes": fixes,
             "usage": totals,
