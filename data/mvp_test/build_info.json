@@ -1,0 +1,21 @@
+{
+ "split": "mvp_test",
+ "seed": 2202,
+ "requested": 80,
+ "accepted": 80,
+ "model_calls_this_run": {
+  "generator": 1,
+  "evaluator": 1
+ },
+ "model_calls_total": {
+  "generator": 18,
+  "evaluator": 9
+ },
+ "rejected": {
+  "near_duplicate": 26,
+  "brand_name": 2,
+  "marker_over_cap": 7
+ },
+ "unaudited": 0,
+ "audit_disputed": 0
+}
