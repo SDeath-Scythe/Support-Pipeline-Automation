@@ -269,7 +269,7 @@ Each entry gives the observation that started it, the reasoning, how it was buil
 - **F14:** reword those two sentences in the prompt. Tested on existing tickets only, with replicates. The second-issue field improved on one ticket, but **3 wrong ticket types reached a draft in every run** (0 before), and the recommended set fell 95 → 92/95. The re-check model shares the prompt, so both models started making the same mistakes and F3c's safety net disappeared. **Not adopted.**
 - **F14b:** enforce the same rule in code after each classification. A fraud ticket's second issue is cleared when it is a consequence (an account-access or fraud subcategory); a separate request is kept. No model input changes. Result: **identical on every metric in all 6 comparisons**, and it clears all 26 inconsistent cases. **Adopt.**
 
-### Corrections from the project author (a native Iraqi speaker), 24 Oct
+### Corrections from the project author (a native Iraqi speaker), 23 Oct
 
 **F15 `no_urgency_words` (supersedes F7) · adopt.** No word in a ticket reliably marks urgency: not "هسه", "ضروري", "عاجل", "بسرعة", "صارلي يومين" or any other. With F15, priority is the subcategory's default, raised one level only for amounts ≥ 1,000,000 IQD. It is a routing rule, so there is no model noise. It disagrees with the old probe sets' gold priorities, which assumed urgent words raise priority; the regenerated dataset is labelled with F15.
 

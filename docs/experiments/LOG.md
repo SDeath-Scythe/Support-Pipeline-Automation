@@ -6,7 +6,7 @@ All numbers come from the `cli` backend: good for comparing configs with each ot
 
 ## Current recommendation (after round 3)
 
-**Adopt F2 + F3c + F6b + F15 + F11 + F12 (v2) + F14b.** F15 (no word raises priority) replaced F7 on 24 Oct after a correction from the project author; F14b was added after the fraud/secondary follow-up below. **F16** (the meaning of "ورقة") is pending an API test with replicates. This replaces F3 with F3c and F6 with F6b compared with the round-2 advice. F8 stays your call; F5 needs your real policy values. Do not adopt F9, F10 or F13 (reasons below).
+**Adopt F2 + F3c + F6b + F15 + F11 + F12 (v2) + F14b.** F15 (no word raises priority) replaced F7 on 23 Oct after a correction from the project author; F14b was added after the fraud/secondary follow-up below. **F16** (the meaning of "ورقة") is pending an API test with replicates. This replaces F3 with F3c and F6 with F6b compared with the round-2 advice. F8 stays your call; F5 needs your real policy values. Do not adopt F9, F10 or F13 (reasons below).
 
 Confirmed on **holdout_30**: 30 tickets written before any round-3 result and run only once the recommendation was fixed. Three runs of each arm (as run, fresh classifier, fresh drafter):
 
@@ -26,7 +26,7 @@ Pages: [holdout_30/summary.md](holdout_30/summary.md), [pooled drafts](holdout_3
 
 One ticket is missed by every configuration: **h19** ("I want to raise my monthly limit, how long, which papers?") is read as a fee/limit *question* instead of `limit_upgrade`. It's the same confusion as s05 and m08 on the dev set. Adding `[limit_upgrade, fees_limits_question]` as a look-alike pair, or a sharper hint, is the next thing to try. It was left alone here so the hold-out stays a fair test.
 
-### Corrections from the project author (24 Oct): F15 and F16
+### Corrections from the project author (23 Oct): F15 and F16
 
 The project author, a native Iraqi speaker, corrected two assumptions built into the pipeline:
 
