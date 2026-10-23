@@ -561,3 +561,18 @@ def test_f14_rewords_only_the_two_sentences(monkeypatch):
     # everything else is untouched
     assert p.split("## Rules for choosing")[1].split("2. **Read the story")[1] == \
         base.split("## Rules for choosing")[1].split("2. **Read the story")[1]
+
+
+# --- F14b: clear a fraud ticket's secondary when it is only a consequence ---
+
+def test_f14b_clears_consequence_keeps_separate_request(monkeypatch):
+    from pipeline import run
+
+    monkeypatch.setenv("PIPELINE_FIXES", "fraud_secondary_cleanup")
+    for second, kept in [("login_otp", None), ("unauthorized_charge", None), ("topup_failed", "topup_failed")]:
+        reply = ('{"category": "fraud_security", "subcategory": "suspected_scam", '
+                 f'"secondary_subcategory": "{second}", "confidence": 0.95}}')
+        monkeypatch.setattr(run, "call", lambda role, system, user, r=reply: r)
+        assert run.process("واحد كال واخذ الكود")["extraction"]["secondary_subcategory"] == kept
+    monkeypatch.delenv("PIPELINE_FIXES")
+    assert run.process("واحد كال واخذ الكود")["extraction"]["secondary_subcategory"] == "topup_failed"

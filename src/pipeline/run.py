@@ -55,10 +55,27 @@ def _clean_changes(raw: str) -> dict[str, int]:
     }
 
 
+# F14b (fraud_secondary_cleanup): rule 1 of the classifier prompt (fraud: put the other issue in
+# secondary) contradicts rule 5 (a consequence is not a second issue), so "gave my code, now locked
+# out" sometimes got login_otp as secondary. Rewording the prompt (F14) shifted other classifications,
+# so this is enforced in code: a consequence of the fraud is cleared, a separate request is kept.
+_FRAUD_CONSEQUENCES = ("account_access", "fraud_security")
+
+
+def _clean_secondary(ex: Extraction) -> Extraction:
+    tax = taxonomy()
+    sec = tax.subcategories.get(ex.secondary_subcategory or "")
+    if ex.category == "fraud_security" and sec is not None and sec.category in _FRAUD_CONSEQUENCES:
+        return ex.model_copy(update={"secondary_subcategory": None})
+    return ex
+
+
 def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str, Any]]:
     t0 = time.time()
     reply = call(role, system, user)
     ex = cls.parse(reply)
+    if enabled("fraud_secondary_cleanup"):
+        ex = _clean_secondary(ex)
     return ex, {
         "role": role,
         "model": models()[role]["model"],
