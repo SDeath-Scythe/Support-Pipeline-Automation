@@ -6,6 +6,8 @@ Fixes on: ask_if_missing, draft_check, fee_followup, no_now_urgency, no_specific
 |---|---|---|---|
 | Subcategory correct (first model) | 28/30 | 28/30 |  |
 | Subcategory used correct | 28/30 | 29/30 | +1 better |
+| Secondary subcategory correct | 30/30 | 30/30 |  |
+| Secondary correct (fraud tickets) | 2/2 | 2/2 |  |
 | Wrong type, not escalated | 1 | 1 |  |
 | Outcome matches gold | 29/30 | 28/30 | -1 worse |
 | Draft given iff it should be | 29/30 | 29/30 |  |

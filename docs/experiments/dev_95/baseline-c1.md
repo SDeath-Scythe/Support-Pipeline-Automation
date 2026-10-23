@@ -6,6 +6,8 @@ Fixes on: none · backend `cli` · 2026-10-20T13:26:30 · compared with `baselin
 |---|---|---|---|
 | Subcategory correct (first model) | 90/95 | 88/95 | -2 worse |
 | Subcategory used correct | 90/95 | 88/95 | -2 worse |
+| Secondary subcategory correct | 64/65 | 63/65 | -1 worse |
+| Secondary correct (fraud tickets) | 6/6 | 6/6 |  |
 | Wrong type, not escalated | 0 | 0 |  |
 | Outcome matches gold | 90/95 | 88/95 | -2 worse |
 | Draft given iff it should be | 90/95 | 88/95 | -2 worse |
