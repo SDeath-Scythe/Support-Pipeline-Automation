@@ -45,14 +45,22 @@ _FRAUD_NEW = ("   If the customer *also* raises a separate request that is not a
               "of the fraud, not a second issue.")
 
 
+# F16 (warqa_usd), from the project author (a native speaker): "ورقة" is a 100 USD note, so
+# "خمسين ورقة" is 5,000 USD, not 50,000 IQD as the amount_iqd example said (it also contradicted
+# the amount_usd line). A classifier-prompt edit: test with replicates on the API before adopting.
+_WARQA_ORIG = '"خمسين" or "خمسين ورقة" about money means 50,000;'
+_WARQA_NEW = ('"خمسين" or "خمسين الف" about money means 50,000 IQD ("ورقة" is a 100 USD note, so '
+              '"خمسين ورقة" = 5,000 USD and goes in amount_usd);')
+
+
 def system_prompt() -> str:
     return _system_prompt(enabled("fee_amount"), enabled("runner_up"), enabled("lookalike_hints"),
-                          enabled("fraud_secondary_rule"))
+                          enabled("fraud_secondary_rule"), enabled("warqa_usd"))
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=32)
 def _system_prompt(fee_field: bool, runner_up: bool = False, lookalike: bool = False,
-                   fraud_rule: bool = False) -> str:
+                   fraud_rule: bool = False, warqa: bool = False) -> str:
     """The classifier prompt, with the taxonomy filled in from config/taxonomy.yaml."""
     raw = load_yaml("taxonomy.yaml")
     # F13 (lookalike_hints): sharper one-line definitions for the look-alike subcategories.
@@ -70,6 +78,8 @@ def _system_prompt(fee_field: bool, runner_up: bool = False, lookalike: bool = F
         prompt = prompt.replace(usd, usd + _FEE_FIELD).replace('"amount_usd": null, ', '"amount_usd": null, "fee_iqd": null, ')
     if fraud_rule:
         prompt = prompt.replace(_ONE_ORIG, _ONE_NEW).replace(_FRAUD_ORIG, _FRAUD_NEW)
+    if warqa:
+        prompt = prompt.replace(_WARQA_ORIG, _WARQA_NEW)
     if runner_up:
         prompt = prompt.replace("\n## Output", _RUNNER_UP + "\n## Output").replace(
             '"confidence": 0.0', '"runner_up": null, "confidence": 0.0')

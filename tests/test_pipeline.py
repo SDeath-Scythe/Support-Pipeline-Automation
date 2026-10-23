@@ -774,3 +774,22 @@ def test_f15_no_word_raises_priority_but_amount_still_does(monkeypatch):
     assert route(ex(amount_iqd=999_999), "ضروري")[1] == "P2"
     monkeypatch.setenv("PIPELINE_FIXES", "no_urgency_words,no_now_urgency")
     assert route(topup, urgent)[1] == "P3"                              # F15 wins over F7
+
+
+# --- F16: "ورقة" is a 100 USD note ---
+
+def test_f16_rewords_only_the_warqa_example(monkeypatch):
+    import hashlib
+
+    from pipeline.classify import system_prompt
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    base = system_prompt()
+    assert '"خمسين ورقة" about money means 50,000;' in base
+    assert hashlib.sha256(base.encode()).hexdigest().startswith("cb700138234e")   # baseline prompt unchanged
+    monkeypatch.setenv("PIPELINE_FIXES", "warqa_usd")
+    p = system_prompt()
+    assert '"خمسين ورقة" about money means 50,000;' not in p
+    assert '"ورقة" is a 100 USD note, so "خمسين ورقة" = 5,000 USD and goes in amount_usd' in p
+    assert '"خمسين الف" about money means 50,000 IQD' in p
+    assert p.count("\n") == base.count("\n")                                     # one line changed, nothing added

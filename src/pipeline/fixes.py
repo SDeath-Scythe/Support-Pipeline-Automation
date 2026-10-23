@@ -28,6 +28,7 @@ FIXES = {
     "fee_followup": "F6b: a small extra call extracts the fee, only for fee tickets; the classifier prompt is unchanged",
     "no_now_urgency": "F7: 'هسه' (now) no longer raises priority (superseded by F15)",
     "no_urgency_words": "F15: no word raises priority; only the subcategory default and the large-amount rule",
+    "warqa_usd": "F16: classifier prompt: 'ورقة' is a 100 USD note ('خمسين ورقة' = 5,000 USD), not 1,000 IQD",
     "unclear_template": "F8: unclear tickets get a fixed reply instead of a drafter call",
 }
 
