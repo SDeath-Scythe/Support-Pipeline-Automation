@@ -16,6 +16,7 @@ from typing import Any
 from . import classify as cls
 from . import draft as drf
 from . import draft_check
+from . import handoff
 from .clean import _DIGITS, _TATWEEL, clean
 from .config import load_yaml, taxonomy
 from .fixes import enabled
@@ -74,8 +75,11 @@ def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str
     t0 = time.time()
     reply = call(role, system, user)
     ex = cls.parse(reply)
+    cleared = None
     if enabled("fraud_secondary_cleanup"):
+        before = ex.secondary_subcategory
         ex = _clean_secondary(ex)
+        cleared = before if before and ex.secondary_subcategory is None else None
     return ex, {
         "role": role,
         "model": model_for(role),
@@ -85,6 +89,7 @@ def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str
         "reply": reply,
         "extraction": ex.model_dump(),
         "usage": last_usage(),
+        **({"cleared_secondary": cleared} if cleared else {}),
     }
 
 
@@ -94,9 +99,15 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     def send(stage: str, status: str, data: dict[str, Any] | None = None) -> None:
         emit({"stage": stage, "status": status, "data": data or {}, "ms": int((time.time() - started) * 1000)})
 
+    # What the handoff note (F17) needs, filled in as the stages run.
+    ctx: dict[str, Any] = {"ex": None, "confidence": None, "second": None, "cleared": None}
+
     def finish(outcome: Outcome, flags: list[str], **extra: Any) -> dict[str, Any]:
         result = {"outcome": outcome.value, "flags": flags,
                   "notes_ar": [FLAG_AR.get(f, f) for f in flags], **extra}
+        if outcome == Outcome.ESCALATED and enabled("handoff_note"):
+            result["handoff_ar"] = handoff.note(ctx["ex"], flags, confidence=ctx["confidence"],
+                                                second=ctx["second"], cleared_secondary=ctx["cleared"])
         send("result", "done", result)
         return result
 
@@ -116,6 +127,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
         for s in ("gate", "recheck", "route", "draft"):
             send(s, "skipped")
         return finish(Outcome.ESCALATED, ["model_error"])
+    ctx.update(ex=ex, cleared=info.get("cleared_secondary"))
     sub = tax.subcategories.get(ex.subcategory)
     info["labels"] = {
         "category": tax.categories.get(ex.category, ex.category),
@@ -129,6 +141,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     send("gate", "done", {**gate.model_dump(), "model_confidence": ex.confidence, "decision": decision,
                           "high_risk": bool(sub and sub.high_risk)})
     flags = list(gate.flags)
+    ctx["confidence"] = gate.confidence
 
     if gate.escalate:
         for s in ("recheck",):
@@ -159,11 +172,13 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
             if use_second and not gate2.escalate:
                 alternative, ex, sub = ex.subcategory, ex2, sub2
                 flags = list(gate2.flags) + ["recheck_used_second"]
+                ctx.update(ex=ex, confidence=gate2.confidence, cleared=info2.get("cleared_secondary"))
             elif same_team and enabled("recheck_same_team"):
                 flags.append("recheck_same_team")
                 alternative = ex2.subcategory
             elif not agree or ex2.category == "fraud_security":
                 flags.append("fraud" if ex2.category == "fraud_security" else "recheck_disagreed")
+                ctx["second"] = ex2
                 team, priority = route(ex2 if ex2.category == "fraud_security" else ex, text)
                 send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority})
                 send("draft", "skipped", {"why": "المراجعة ما اتفقت: الموظف يقرر"})

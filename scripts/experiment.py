@@ -47,6 +47,7 @@ CODES = {
     "F6b": "fee_followup",
     "F14": "fraud_secondary_rule",
     "F14b": "fraud_secondary_cleanup",
+    "F17": "handoff_note",
 }
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"

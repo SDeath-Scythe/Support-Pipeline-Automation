@@ -833,3 +833,71 @@ def test_f16_rewords_only_the_warqa_example(monkeypatch):
     assert '"ورقة" is a 100 USD note, so "خمسين ورقة" = 5,000 USD and goes in amount_usd' in p
     assert '"خمسين الف" about money means 50,000 IQD' in p
     assert p.count("\n") == base.count("\n")                                     # one line changed, nothing added
+
+
+# --- F17: handoff note for escalated tickets ---
+
+FRAUD_LOCKED = '{"category": "fraud_security", "subcategory": "suspected_scam", "secondary_subcategory": "login_otp", "amount_iqd": 250000, "confidence": 0.95}'
+
+
+def test_handoff_off_by_default(monkeypatch):
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    run = _fake_models(monkeypatch, FRAUD_LOCKED)
+    assert "handoff_ar" not in run.process("واحد اتصل وطلب الرمز وانطيته، وراحت ربع مليون")
+
+
+def test_handoff_fraud_note(monkeypatch):
+    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
+    run = _fake_models(monkeypatch, FRAUD_LOCKED)
+    note = run.process("واحد اتصل وطلب الرمز وانطيته، وراحت ربع مليون، وهسه ما اكدر افوت")["handoff_ar"]
+    assert "الاحتيال والأمان › احتيال أو مشاركة الرمز" in note
+    assert "أثر على الحساب: الدخول ورمز التحقق" in note      # the lock-out is kept as context
+    assert "المبلغ 250,000 دينار" in note
+    assert "سبب التصعيد: احتمال احتيال" in note
+    assert "ناقص" not in note                                # fraud asks the customer for nothing
+
+
+def test_handoff_keeps_lockout_when_f14b_clears_it(monkeypatch):
+    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note,fraud_secondary_cleanup")
+    run = _fake_models(monkeypatch, FRAUD_LOCKED)
+    result = run.process("واحد اتصل وطلب الرمز وانطيته، وهسه ما اكدر افوت")
+    assert result["extraction"]["secondary_subcategory"] is None     # F14b cleared the label
+    assert "أثر على الحساب" in result["handoff_ar"]                  # but the team still sees it
+
+
+def test_handoff_recheck_disagreement_names_both_answers_and_missing(monkeypatch):
+    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
+    run = _fake_classifier_by_role(monkeypatch, {
+        "classifier": '{"category": "transfers", "subcategory": "not_received", "amount_iqd": 100000, "confidence": 0.7}',
+        "rechecker": '{"category": "general", "subcategory": "fees_limits_question", "amount_iqd": 100000, "confidence": 0.7}',
+    })
+    result = run.process("حولت ١٠٠ الف ووصلت ٩٨، وين راحت الالفين؟")
+    note = result["handoff_ar"]
+    assert result["outcome"] == "escalated"
+    assert "النموذجين اختلفوا" in note and "التحويل ما وصل أو انخصم" in note and "سؤال عن الرسوم والحدود" in note
+    assert "غير محسوم" in note and "ناقص" not in note       # the type is in doubt, so no topic or missing list
+    assert "المبلغ 100,000 دينار" in note
+
+
+def test_handoff_low_confidence_and_model_error(monkeypatch):
+    from pipeline import handoff
+    from pipeline.schemas import Extraction
+
+    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
+    low = Extraction(category="general", subcategory="unclear", confidence=0.4)
+    assert "الثقة واطية (0.40)" in handoff.note(low, [], confidence=0.4)
+    assert "خطأ بالنموذج" in handoff.note(None, ["model_error"])
+
+
+def test_handoff_only_on_escalated(monkeypatch):
+    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
+    run = _fake_models(monkeypatch, '{"category": "general", "subcategory": "app_bug", "confidence": 0.92}')
+    assert "handoff_ar" not in run.process("التطبيق يفتح شاشة بيضاء")
+
+
+def test_handoff_invalid_category_is_not_presented_as_a_topic(monkeypatch):
+    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
+    run = _fake_models(monkeypatch, '{"category": "transfers", "subcategory": "unclear", "confidence": 0.3}')
+    note = run.process("شكد رسوم التحويل لحساب بمصرف؟")["handoff_ar"]
+    assert "غير محسوم" in note and "غير واضح" not in note
+    assert "التصنيف ما يطابق قائمة الأقسام" in note

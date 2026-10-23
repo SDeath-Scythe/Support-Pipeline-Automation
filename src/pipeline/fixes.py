@@ -22,6 +22,7 @@ FIXES = {
     "lookalike_hints": "F13: sharper classifier hints for the look-alike subcategories",
     "fraud_secondary_rule": "F14: rule 1 defers to rule 5, so a consequence of the fraud is not a secondary issue",
     "fraud_secondary_cleanup": "F14b: rule, not prompt: a fraud ticket's secondary is cleared when it is only a consequence (account access or another fraud type)",
+    "handoff_note": "F17: escalated tickets get a short Arabic note for the receiving team, built from the extracted fields (no model call)",
     "ask_if_missing": "F11: the drafter asks for unverifiable details only if the ticket does not give them",
     "no_specific_followup": "F12: the drafter must not promise to send a specific answer, date or result",
     "fee_amount": "F6: the classifier extracts the disputed fee separately (fee_iqd)",

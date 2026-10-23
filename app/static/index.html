@@ -146,6 +146,9 @@ textarea.edit { width: 100%; max-width: 640px; min-height: 120px; padding: 12px 
 .outcome { font-size: 20px; font-weight: 700; margin: 0; }
 .result.drafted .outcome { color: var(--ok); } .result.flagged .outcome { color: var(--warn); } .result.escalated .outcome { color: var(--bad); }
 .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.handoff { margin-top: 12px; padding: 10px 14px; border-radius: 8px; background: var(--paper); border-inline-start: 3px solid var(--bad); max-width: 640px; }
+.handoff-title { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.handoff-body { white-space: pre-line; font-size: 15px; line-height: 1.8; }
 .gold { margin-top: 14px; font-size: 13.5px; }
 .gold table { border-collapse: collapse; width: 100%; max-width: 640px; }
 .gold td { padding: 4px 8px; border-bottom: 1px solid var(--line); }
@@ -422,7 +425,9 @@ function renderResult(d) {
   const box = el("div", { class: `result ${d.outcome}` },
     el("p", { class: "outcome", text: OUTCOME_AR[d.outcome] }),
     d.notes_ar?.length ? el("div", { class: "chips" }, d.notes_ar.map(n => el("span", { class: "chip", text: n }))) : null,
-    d.team ? el("div", { class: "note", text: `${META.teams[d.team]?.label_ar || d.team} · ${d.priority}` }) : null);
+    d.team ? el("div", { class: "note", text: `${META.teams[d.team]?.label_ar || d.team} · ${d.priority}` }) : null,
+    d.handoff_ar ? el("div", { class: "handoff" }, el("div", { class: "handoff-title", text: "ملاحظة للقسم المستلم" }),
+      el("div", { class: "handoff-body", text: d.handoff_ar })) : null);
   if (d.draft_ar) {
     const actions = el("div", { class: "actions" });
     const approve = el("button", { class: "btn", text: "اعتمد الرد" });
