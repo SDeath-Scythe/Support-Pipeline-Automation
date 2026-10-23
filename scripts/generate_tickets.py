@@ -604,21 +604,35 @@ def print_stats(splits: list[str]) -> None:
 
 
 def handcheck(seed: int, n: int = 80) -> None:
+    """80 rows for a person to check: every audit dispute and two-issue ticket first, then the
+    other review_reason tickets ("contains هسه") and, if room is left, random tickets, both spread
+    across the splits in proportion to their size."""
     rng = random.Random(seed)
     rows = [r for s in SPLITS for r in load(s)]
-    def rank(r):
+    share = {s: len(load(s)) / max(len(rows), 1) for s in SPLITS}
+
+    def must(r):
         rr = r["review_reason"] or ""
-        return 0 if "audit:" in rr else 1 if "two issues" in rr else 2
-    review = sorted([r for r in rows if r["review_reason"]], key=lambda r: (rank(r), r["id"]))
-    picked = review[:n]
-    left = n - len(picked)
-    if left > 0:
-        rest = {s: [r for r in rows if r["split"] == s and not r["review_reason"]] for s in SPLITS}
-        share = {"dev": 0.5, "mvp_test": 0.25, "heldout": 0.25}
-        quota = {s: int(left * share[s]) for s in SPLITS}
-        quota["dev"] += left - sum(quota.values())
-        for s in SPLITS:
-            picked += rng.sample(rest[s], min(quota[s], len(rest[s])))
+        return "audit:" in rr or "two issues" in rr
+
+    def spread(pool: list[dict], k: int) -> list[dict]:
+        by = {s: [r for r in pool if r["split"] == s] for s in SPLITS}
+        for v in by.values():
+            rng.shuffle(v)
+        quota = {s: min(len(by[s]), int(k * share[s])) for s in SPLITS}
+        while sum(quota.values()) < min(k, len(pool)):   # hand out the rounding remainder
+            s = max((x for x in SPLITS if quota[x] < len(by[x])), key=lambda x: k * share[x] - quota[x])
+            quota[s] += 1
+        return [r for s in SPLITS for r in by[s][:quota[s]]]
+
+    first = sorted([r for r in rows if must(r)], key=lambda r: (0 if "audit:" in r["review_reason"] else 1, r["id"]))
+    other_review = [r for r in rows if r["review_reason"] and not must(r)]
+    picked = first[:n]
+    picked += spread(other_review, n - len(picked))
+    review_total = len(first) + len(other_review)
+    review_in = sum(bool(r["review_reason"]) for r in picked)
+    if len(picked) < n:
+        picked += spread([r for r in rows if not r["review_reason"]], n - len(picked))
     out = ROOT / "data/review/handcheck_80.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8", newline="") as f:
@@ -631,8 +645,9 @@ def handcheck(seed: int, n: int = 80) -> None:
             w.writerow([r["id"], r["split"], r["text"], r["category"], r["subcategory"], r["secondary_subcategory"] or "",
                         r["reference"] or "", amount, r["priority"], r["outcome"], r["review_reason"] or "", "", "", ""])
     by_split = Counter(r["split"] for r in picked)
-    print(f"handcheck: {len(picked)} rows ({len(review)} with a review_reason"
-          f"{', ' + str(len(review) - n) + ' did not fit' if len(review) > n else ''}); by split: {dict(by_split)}")
+    print(f"handcheck: {len(picked)} rows; by split {dict(by_split)}; review_reason tickets: {review_total} in total, "
+          f"{review_in} included (all {len(first)} audit / two-issue ones first), {review_total - review_in} did not fit; "
+          f"random fill: {len(picked) - review_in}")
 
 
 def main() -> None:

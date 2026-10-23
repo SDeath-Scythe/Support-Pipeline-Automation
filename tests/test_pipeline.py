@@ -707,3 +707,54 @@ def test_cli_cache_key_unchanged(monkeypatch, tmp_path):
     (tmp_path / f"{old_key}.json").write_text(json.dumps({"model": "m", "reply": "stored"}), encoding="utf-8")
     assert llm._cached({"model": "m"}, "S", "u", lambda *a: "fresh") == "stored"
     assert llm._cached({"model": "m"}, "S", "u", lambda *a: "fresh", backend_tag="api") == "fresh"
+
+
+# --- synthetic ticket generator (no model calls) ---
+
+def _gen():
+    import importlib.util
+    from pathlib import Path
+
+    p = Path(__file__).resolve().parents[1] / "scripts/generate_tickets.py"
+    spec = importlib.util.spec_from_file_location("generate_tickets", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_generator_plan_is_deterministic_and_meets_minimums():
+    from collections import Counter
+
+    g = _gen()
+    a, b = g.make_specs("mvp_test", 80, 2002), g.make_specs("mvp_test", 80, 2002)
+    assert a == b and len(a) == 80
+    counts = Counter(s["subcategory"] for s in a)
+    assert len(counts) == 23 and min(counts.values()) >= 3
+    assert sum(s["style"] == "arabizi" for s in a) <= 0.03 * 80
+    edge = sum(bool(s["edge_case"]) for s in a)
+    assert 0.15 * 80 <= edge <= 0.20 * 80
+    for s in a:   # fraud's second issue is never an account-access consequence (F14b)
+        if s["edge_case"] == "fraud_hidden_second":
+            assert taxonomy().get(s["secondary_subcategory"]).category not in ("account_access", "fraud_security")
+
+
+def test_generator_numbers_and_checks():
+    import random
+    import re
+
+    from pipeline.gate import reference_in_text
+
+    g = _gen()
+    rng = random.Random(5)
+    for _ in range(200):
+        ref = g.make_reference(rng)
+        digits = re.sub(r"\D", "", clean(ref))
+        assert 7 <= len(digits) <= 10 and reference_in_text(ref, clean(f"رقم العملية {ref} وما وصلت"))
+        phone = re.sub(r"\D", "", clean(g.make_phone(rng)))
+        assert re.fullmatch(r"07[3-9]\d{8}", phone)
+    spec = {"include_reference": True, "include_phone": False, "style": "short", "amount_iqd": 1500000, "amount_usd": None}
+    assert g.problems(spec, "حولت مليون ونص رقم العملية {REF}") == []
+    assert g.problems(spec, "حولت 1500000 رقم العملية {REF}") == []           # the amount itself is allowed
+    assert "invented_long_number" in g.problems(spec, "حولت رقم العملية {REF} والثاني 88213990")
+    assert "ref_placeholder" in g.problems(spec, "حولت فلوس وما وصلت")
+    assert "brand_name" in g.problems(spec, "شحنت رصيد زين رقم العملية {REF}")
