@@ -5,11 +5,11 @@ You get a list of specs. Write exactly one ticket per spec and return them all i
 ## Each spec tells you
 - `issue`: the problem the customer has (its key, label and a short description). The ticket must be clearly about this issue as an Iraqi customer would describe it. Never write the label or key itself.
 - `second_issue` (optional): a second, separate request in the same ticket.
-- `dialect`:
-  - `baghdadi`: شكو، شلون، هسه، اكو / ماكو، كلش، ديروح، اريد، شنو، چان
-  - `southern` (Basra, Nasiriyah, Amarah): شنهو / شنو، يمعود، هواي، ﭽ for ك in some words (چان، ﭽا)، ابد، ليش هيج، اكو
-  - `mosuli`: ق kept (قلتُ), غ for ر in some words (اغيد، مغتين), ايش for شنو, كتيغ for very, هوني for here
-  Use the dialect naturally; don't overdo it.
+- `dialect`: a few typical features (examples, not a checklist):
+  - `baghdadi`: شكو، شلون، اكو / ماكو، كلش، ديـ for the present (ديروح)، چان
+  - `southern` (Basra, Nasiriyah, Amarah): شنهو، يمعود، هواي، ﭽ for ك in some words (ﭽا)، هيج
+  - `mosuli`: ق kept as ق (قلت، قال) where Baghdad says ك/گ, ايش for "what". Keep ر as ر (do not replace it with غ). If you are unsure of a Mosuli form, use standard spelling.
+  Use the dialect naturally and lightly. **Vary the wording:** no single dialect word (including the examples above and words for "now") should appear in more than about one ticket in ten; many tickets need none of them.
 - `style`:
   - `short`: one sentence, under about 15 words.
   - `long`: 3 to 6 sentences with background and some frustration or detail.
@@ -19,7 +19,7 @@ You get a list of specs. Write exactly one ticket per spec and return them all i
   - `arabizi`: Arabic written in Latin letters and numbers (3=ع, 7=ح, 2=ء, 5=خ, 6=ط, 9=ص), as Iraqis type it.
 - `difficulty`: `easy` = one clear problem; `medium` = needs some reading (slang, indirect wording); `hard` = genuinely easy to misread, while the intended issue stays the right answer.
 - `edge_case` (optional) with an instruction: follow it exactly.
-- `amount_iqd` or `amount_usd` (optional): the ticket MUST state exactly this amount, written the way a customer would (digits, Arabic-Indic digits, words, or dropping the thousand: خمسين = 50,000, ربع مليون = 250,000, مليون ونص = 1,500,000). If neither is given, write no amount.
+- `amount_iqd` or `amount_usd` (optional): the ticket MUST state exactly this amount, written the way a customer would. Dinars: digits, Arabic-Indic digits, words, "الف" (خمسين الف = 50,000), or dropping the thousand when the context is clear (ربع مليون = 250,000, مليون ونص = 1,500,000). **Never write "ورقة" for dinars.** "ورقة" is a 100 USD note: use it only when the spec gives `usd_as_warqa`, and then write exactly that number of ورقة (e.g. `usd_as_warqa: 50` → "خمسين ورقة" = 5,000 USD). Otherwise dollars are written as دولار or $. If no amount is given, write no amount.
 - `include_reference`: if true, write the placeholder {REF} exactly once where the customer gives the transaction / operation number (رقم العملية، رقم الحوالة، ref). If false, do not write {REF} and do not invent any reference number.
 - `include_phone`: if true, write the placeholder {PHONE} exactly once where the customer gives a phone number (the number money or credit was sent to). If false, do not write {PHONE} and do not invent any phone number.
 - `urgency`: if true, the customer sounds urgent with a word like ضروري or عاجل or بسرعة.

@@ -713,12 +713,18 @@ def test_cli_cache_key_unchanged(monkeypatch, tmp_path):
 
 def _gen():
     import importlib.util
+    import os
     from pathlib import Path
 
     p = Path(__file__).resolve().parents[1] / "scripts/generate_tickets.py"
     spec = importlib.util.spec_from_file_location("generate_tickets", p)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    before = os.environ.get("PIPELINE_FIXES")
+    spec.loader.exec_module(mod)            # the script sets PIPELINE_FIXES for itself; undo that here
+    if before is None:
+        os.environ.pop("PIPELINE_FIXES", None)
+    else:
+        os.environ["PIPELINE_FIXES"] = before
     return mod
 
 
@@ -752,12 +758,44 @@ def test_generator_numbers_and_checks():
         assert 7 <= len(digits) <= 10 and reference_in_text(ref, clean(f"رقم العملية {ref} وما وصلت"))
         phone = re.sub(r"\D", "", clean(g.make_phone(rng)))
         assert re.fullmatch(r"07[3-9]\d{8}", phone)
-    spec = {"include_reference": True, "include_phone": False, "style": "short", "amount_iqd": 1500000, "amount_usd": None}
+    spec = {"include_reference": True, "include_phone": False, "style": "short", "amount_iqd": 1500000, "amount_usd": None,
+            "dialect": "baghdadi"}
     assert g.problems(spec, "حولت مليون ونص رقم العملية {REF}") == []
     assert g.problems(spec, "حولت 1500000 رقم العملية {REF}") == []           # the amount itself is allowed
     assert "invented_long_number" in g.problems(spec, "حولت رقم العملية {REF} والثاني 88213990")
     assert "ref_placeholder" in g.problems(spec, "حولت فلوس وما وصلت")
     assert "brand_name" in g.problems(spec, "شحنت رصيد زين رقم العملية {REF}")
+
+
+def test_generator_warqa_is_usd_notes():
+    g = _gen()
+    specs = g.make_specs("dev", 240, 1101)
+    warqa = [s for s in specs if s["usd_as_warqa"]]
+    assert warqa and all(s["amount_usd"] == s["usd_as_warqa"] * 100 and s["amount_iqd"] is None for s in warqa)
+    prompt = g.spec_for_prompt(warqa[0], 1)
+    assert "amount_usd" not in prompt and str(warqa[0]["usd_as_warqa"]) in prompt["edge_case"]["instruction"]
+    base = {"include_reference": False, "include_phone": False, "style": "short", "dialect": "baghdadi",
+            "amount_iqd": None, "amount_usd": 5000, "usd_as_warqa": 50}
+    assert g.problems(base, "حولت خمسين ورقة لاخوي وما وصلت") == []
+    assert "warqa_missing" in g.problems(base, "حولت خمسة الاف دولار وما وصلت")
+    iqd = {**base, "amount_iqd": 50000, "amount_usd": None, "usd_as_warqa": None}
+    assert "warqa_without_usd" in g.problems(iqd, "حولت خمسين ورقة وما وصلت")    # never dinars
+    assert g.problems(iqd, "حولت خمسين الف وما وصلت") == []
+    assert "ورقة" not in g.EDGE_TYPES["amount_slang"].split("Never")[0]
+
+
+def test_generator_mosuli_markers_and_dedup():
+    g = _gen()
+    spec = {"include_reference": False, "include_phone": False, "style": "short", "dialect": "mosuli",
+            "amount_iqd": None, "amount_usd": None}
+    assert "mosuli_gh_for_r" in g.problems(spec, "ما اعغفها شنو صاغ بالحساب من شهغ")
+    assert g.problems(spec, "قلت للوكيل ايش صار بالحساب، ما اعرف") == []
+    assert g.markers_in(g.normalise("هسة شلونك؟ وماكو شي")) == {"هسه", "شلون", "ماكو"}
+    assert g.markers_in(g.normalise("اكون ممنون")) == set()
+    a = g.normalise("حولت فلوس لاخوي من البارحة والحوالة ما وصلت لحد الان شنو الحل ضروري")
+    b = g.normalise("حولت فلوس لاخوي من البارحة والحوالة ما وصلت لحد هسه شنهو الحل يمعود")
+    assert g.is_dup(a, [b])
+    assert not g.is_dup(a, [g.normalise("نسيت الرمز السري مال الحساب وما اكدر ادخل للتطبيق")])
 
 
 # --- F15: no word raises priority ---

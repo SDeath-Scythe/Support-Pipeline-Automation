@@ -1,29 +1,33 @@
 """Generate the synthetic ticket dataset: dev 240, mvp_test 80, heldout 80.
 
-    python scripts/generate_tickets.py build --split dev      --seed 1001 --n 240
-    python scripts/generate_tickets.py build --split mvp_test --seed 2002 --n 80
-    python scripts/generate_tickets.py build --split heldout  --seed 3003 --n 80   # its own run
-    python scripts/generate_tickets.py handcheck --seed 4004    # data/review/handcheck_80.csv
+    python scripts/generate_tickets.py build --split dev      --seed 1101 --n 240
+    python scripts/generate_tickets.py build --split mvp_test --seed 2202 --n 80
+    python scripts/generate_tickets.py build --split heldout  --seed 3303 --n 80   # its own run
+    python scripts/generate_tickets.py handcheck --seed 4404    # data/review/handcheck_80.csv
     python scripts/generate_tickets.py stats                    # coverage tables, no ticket text
 
 How a split is built:
 1. A spec list is drawn deterministically from the seed: subcategory (category mix of a real
    L1 day, at least 3 per subcategory), dialect, style, difficulty, an optional tagged edge
-   case, whether the ticket gives a reference / phone, and the exact amount to state.
+   case, whether the ticket gives a reference / phone, and the exact amount to state ("ورقة" is
+   a 100 USD note, so a spec with `usd_as_warqa: 50` has gold amount_usd 5,000).
 2. The `generator` role (Opus) writes ~10 tickets per call and returns JSON only. It writes the
    placeholders {REF} and {PHONE}; code fills them, so gold reference / phone are exactly what
    was inserted. Amounts are given in the spec, so gold amounts are exact too.
 3. Code validates (schema, taxonomy, placeholders, reference really in the text, no invented
-   long numbers, no brand names, style sanity) and drops near-duplicates (normalised similarity
-   > 0.85 against every other ticket in any split and the probe sets). Failed specs are
-   regenerated (new `variation`) until the split is full.
+   long numbers, no brand names, style sanity, "ورقة" only for dollar notes, no Mosuli غ for ر),
+   drops near-duplicates of any ticket in any split or data/probes/ (normalised characters
+   > 0.8 similar, or content words > 0.5 similar, which catches the same sentence in another
+   dialect), and keeps every dialect marker word under MARKER_CAP of the split. Failed specs
+   are regenerated (new `variation`) until the split is full.
 4. Priority and outcome come from code: the taxonomy and routing rules with the recommended
-   flags on (F7: "هسه" alone does not raise priority).
+   flags on. F15: no word raises priority; only an amount >= 1,000,000 IQD raises it one level.
 5. A blind audit: the `evaluator` role (Opus) labels every ticket without seeing its gold label.
    Disagreements never change gold; they go into `review_reason` for a person to check.
 
 The script prints statistics only, never ticket text, so the heldout split stays unread.
-Model replies are saved under runs/generation/<split>/ (git-ignored) so a re-run resumes.
+Model replies are saved under runs/generation/<split>-s<seed>/ (git-ignored) so a re-run resumes.
+The build fails if any marker word is in more than MARKER_FAIL of a split.
 """
 
 from __future__ import annotations
@@ -45,9 +49,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-# Priority uses the routing rules with the recommended flags on (only F7 affects routing).
-os.environ["PIPELINE_FIXES"] = ("draft_check,recheck_cross_team,fee_followup,no_now_urgency,"
-                                "ask_if_missing,no_specific_followup,fraud_secondary_cleanup")
+# Priority uses the routing rules with the recommended flags on (only F15 affects routing).
+# F16 (warqa_usd) only changes the classifier rules the blind audit is given ("ورقة" = 100 USD).
+os.environ["PIPELINE_FIXES"] = ("draft_check,recheck_cross_team,fee_followup,no_urgency_words,"
+                                "ask_if_missing,no_specific_followup,fraud_secondary_cleanup,warqa_usd")
 
 from pipeline import classify as cls  # noqa: E402
 from pipeline.clean import clean  # noqa: E402
@@ -61,8 +66,12 @@ SPLITS = {"dev": "dev", "mvp_test": "mvp", "heldout": "hold"}     # split -> id 
 MIN_PER_SUB = 3
 BATCH = 10
 WORKERS = 4
-MAX_ROUNDS = 5
-DUP_THRESHOLD = 0.85
+MAX_ROUNDS = 6
+DUP_THRESHOLD = 0.8            # normalised characters (the author's rule)
+DUP_TOKEN_THRESHOLD = 0.5      # content words, dialect words folded: the same sentence in another dialect
+DUP_TOKEN_MIN = 5              # ... only when both tickets have at least this many content words
+MARKER_CAP = 0.10              # a ticket is rejected if it would take a marker word above this share
+MARKER_FAIL = 0.15             # the build fails above this share
 
 CATEGORY_WEIGHTS = {"transfers": 0.25, "account_access": 0.15, "agents_cash": 0.15, "bills_topup": 0.12,
                     "general": 0.10, "cards": 0.08, "verification": 0.08, "fraud_security": 0.07}
@@ -119,7 +128,7 @@ EDGE_TYPES = {
     "phone_instead_of_reference": "Asked for the transaction number, the customer gives a phone number ({PHONE}) instead "
                                   "of a reference, and no reference.",
     "amount_slang": "Write the amount in Iraqi slang, dropping the thousand or using words "
-                    "(خمسين ورقة، ربع مليون، نص مليون، مليون ونص).",
+                    "(خمسين الف، ربع مليون، نص مليون، مليون ونص). Never write ورقة for dinars.",
     "usd_amount": "The amount is in US dollars (دولار، $); write it as dollars, never convert it.",
     "fraud_hidden_second": "Start with the second_issue as the customer's main complaint, and mention the fraud "
                            "situation (the issue) only briefly, second, almost in passing.",
@@ -131,6 +140,29 @@ SECONDARY_POOL = ["fees_limits_question", "limit_upgrade", "delivery_or_activati
                   "rejected_or_pending", "topup_failed", "bill_not_reflected", "card_payment_failed"]
 SLANG_AMOUNTS = [50_000, 100_000, 250_000, 500_000, 1_500_000, 750_000]
 USD_AMOUNTS = [20, 50, 100, 150, 200, 300, 500]
+WARQA_COUNTS = [2, 3, 5, 10, 20, 50]     # "ورقة" = one 100 USD note, so amount_usd = count x 100
+WARQA_SUBS = {"not_received", "wrong_recipient", "cash_in_not_credited"}
+WARQA_SHARE = 0.08     # of the amount tickets in WARQA_SUBS, besides half of the usd_amount edge cases
+WARQA_INSTRUCTION = ("The amount is in 100-dollar notes: write exactly {n} ورقة (one ورقة = 100 USD), "
+                     "the way Iraqis count dollars. Do not convert it and do not write دولار.")
+_WARQA = re.compile(r"(^|\s)(ال)?ورق(ه|ات|تين)?(\s|$)")   # on normalised text
+# Dialect marker words, matched on normalised text (with an optional و/ف/ب/ل in front).
+# Prefix forms (ديـ) and letters (چ، گ) are not words and are not counted.
+MARKERS = {
+    "هسه": r"هس(ه|ع)", "شكو": r"شكو", "شلون": r"شلون\w*", "اكو": r"اكو", "ماكو": r"ماكو", "كلش": r"كلش",
+    "هواي": r"هواي", "شنهو": r"شنهو", "شنو": r"شنو", "يمعود": r"يمعود", "هيج": r"هي(ج|چ)", "ايش": r"ايش",
+    "چان": r"(چان|جان)", "بلكي": r"بلكي", "لعد": r"لعد", "ويا": r"ويا(ي|ك|ه|هم|نا)?", "خوش": r"خوش",
+    "عيني": r"(عيني|عيوني)", "اغاتي": r"اغاتي", "يابه": r"(يابه|يابا)", "صارلي": r"صارل(ي|ه|ها|نا|كم)",
+    "شگد": r"(شگد|شكد|چم|جم)", "گلت": r"(گلت|گال|گلي|كلت)", "ليش": r"ليش",
+}   # not counted: اريد, which is also standard Arabic (أريد) once hamza is normalised
+_MARKER_RE = {m: re.compile(rf"(^|\s)[وفبل]?{p}(\s|$)") for m, p in MARKERS.items()}
+# Words people use to sound urgent: shown in the frequency table only (F15: they do not set priority).
+URGENCY = {"ضروري": r"ضروري\w*", "عاجل": r"(عاجل|بالعاجل)", "بسرعه": r"(بسرعه|بسرعة|سريع)"}
+_URGENCY_RE = {m: re.compile(rf"(^|\s)[وفبل]?{p}(\s|$)") for m, p in URGENCY.items()}
+# Mosuli forms with غ written for ر, which the author says is wrong ("اعغفها", "شهغ", "انتظغ").
+GH_FOR_R = ["اعغف", "شهغ", "انتظغ", "غقم", "غصيد", "اغجع", "غجع", "اغسل", "غسل", "صاغ", "شغك", "كغت",
+            "مصغف", "ديناغ", "خبغ", "اغيد", "يغيد", "تحويغ", "اغبع", "غبع", "مغه", "مغتين", "فلوغ", "سغق", "غاح",
+            "غوح", "حغام", "تغجع", "يغجع", "غسال", "اغسل", "دغب", "قغيب", "كغيم", "غقمي", "بغنامج"]
 AMOUNT_RANGES = {  # IQD, realistic per issue
     "not_received": [25_000, 50_000, 75_000, 100_000, 150_000, 200_000, 300_000, 500_000, 1_000_000, 2_000_000],
     "wrong_recipient": [20_000, 50_000, 100_000, 150_000, 250_000, 400_000, 1_200_000],
@@ -235,12 +267,20 @@ def make_specs(split: str, n: int, seed: int) -> list[dict]:
         s["include_phone"] = edge == "phone_instead_of_reference" or (
             (sub == "topup_failed" and rng.random() < 0.4) or (sub == "wrong_recipient" and rng.random() < 0.3))
         s["amount_iqd"] = s["amount_usd"] = None
-        if edge == "usd_amount":
+        s["usd_as_warqa"] = None
+        if edge == "usd_amount" and sub in WARQA_SUBS and rng.random() < 0.5:
+            s["usd_as_warqa"] = rng.choice(WARQA_COUNTS)
+            s["amount_usd"] = s["usd_as_warqa"] * 100
+        elif edge == "usd_amount":
             s["amount_usd"] = rng.choice(USD_AMOUNTS)
         elif edge == "amount_slang":
             s["amount_iqd"] = rng.choice(SLANG_AMOUNTS)
         elif sub in AMOUNT_SUBS and rng.random() > 0.08:
-            s["amount_iqd"] = rng.choice(AMOUNT_RANGES[sub])
+            if sub in WARQA_SUBS and rng.random() < WARQA_SHARE:     # dollars counted in notes, untagged
+                s["usd_as_warqa"] = rng.choice(WARQA_COUNTS)
+                s["amount_usd"] = s["usd_as_warqa"] * 100
+            else:
+                s["amount_iqd"] = rng.choice(AMOUNT_RANGES[sub])
         s["urgency"] = rng.random() < 0.12
     return specs
 
@@ -262,7 +302,11 @@ def spec_for_prompt(s: dict, variation: int) -> dict:
         out["edge_case"] = {"type": s["edge_case"], "instruction": EDGE_TYPES[s["edge_case"]]}
     if s["amount_iqd"] is not None:
         out["amount_iqd"] = s["amount_iqd"]
-    if s["amount_usd"] is not None:
+    if s.get("usd_as_warqa"):
+        out["usd_as_warqa"] = s["usd_as_warqa"]
+        if s["edge_case"]:
+            out["edge_case"]["instruction"] = WARQA_INSTRUCTION.format(n=s["usd_as_warqa"])
+    elif s["amount_usd"] is not None:
         out["amount_usd"] = s["amount_usd"]
     return out
 
@@ -280,8 +324,8 @@ class Counters:
 
 
 def model_batch(split: str, kind: str, name: str, role: str, system: str, user: str, counters: Counters):
-    """One model call, saved to runs/generation/<split>/ so re-runs resume instead of re-paying."""
-    path = ROOT / "runs/generation" / split / f"{kind}_{name}.json"
+    """One model call, saved to runs/generation/<split>-s<seed>/ so re-runs resume instead of re-paying."""
+    path = ROOT / "runs/generation" / split / f"{kind}_{name}.json"     # split here is "<split>-s<seed>"
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     reply = call(role, system, user)
@@ -360,9 +404,29 @@ def problems(spec: dict, text: str) -> list[str]:
     n = len(rest)
     if (spec["style"] == "short" and n > 200) or (spec["style"] == "long" and n < 90) or n > 1200:
         out.append("length_vs_style")
-    if spec["amount_usd"] is not None and not re.search(r"دولار|\$|usd|dollar|dolar", low):
+    norm = normalise(rest)
+    has_warqa = bool(_WARQA.search(norm))
+    if spec.get("usd_as_warqa"):
+        if not has_warqa:
+            out.append("warqa_missing")
+    elif has_warqa:
+        out.append("warqa_without_usd")         # "ورقة" is a 100 USD note, never dinars
+    elif spec["amount_usd"] is not None and not re.search(r"دولار|\$|usd|dollar|dolar", low):
         out.append("usd_not_stated")
+    if spec["dialect"] == "mosuli" and gh_for_r(norm):
+        out.append("mosuli_gh_for_r")
     return out
+
+
+def gh_for_r(norm: str) -> bool:
+    """A Mosuli ticket that spells ر as غ: a known form, or several غ and no ر at all."""
+    if any(f in word for word in norm.split() for f in GH_FOR_R):
+        return True
+    return norm.count("غ") >= 2 and "ر" not in norm and len(norm) > 40
+
+
+def markers_in(norm: str) -> set[str]:
+    return {m for m, rx in _MARKER_RE.items() if rx.search(norm)}
 
 
 def gold(spec: dict, text: str, ref: str | None, phone: str | None, date, split: str, batch: str) -> dict:
@@ -380,8 +444,8 @@ def gold(spec: dict, text: str, ref: str | None, phone: str | None, date, split:
     else:
         outcome = "drafted"
     reasons = []
-    if re.search("هسه", text):
-        reasons.append("contains هسه: check priority (F7 on, so it does not raise priority alone)")
+    if spec.get("usd_as_warqa"):
+        reasons.append(f"ورقة: check amount_usd = {spec['usd_as_warqa']} x 100 = {spec['amount_usd']}")
     if spec["secondary_subcategory"]:
         reasons.append(f"two issues: check secondary ({spec['secondary_subcategory']})")
     return {"id": spec["spec_id"], "text": text, "category": spec["category"], "subcategory": spec["subcategory"],
@@ -391,6 +455,16 @@ def gold(spec: dict, text: str, ref: str | None, phone: str | None, date, split:
             "priority": priority, "outcome": outcome, "dialect": spec["dialect"], "style": spec["style"],
             "difficulty": spec["difficulty"], "edge_case": spec["edge_case"], "split": split, "batch": batch,
             "generator_model": models()["generator"]["model"], "review_reason": reasons}
+
+
+def tokens(norm: str) -> list[str]:
+    """Content words with common dialect variants folded, so a sentence copied into another
+    dialect still matches (dev-0083 / dev-0138 in the first build were 0.70 on characters)."""
+    return [FOLD.get(w, w) for w in norm.split() if len(w) > 2]
+
+
+FOLD = {"شنهو": "شنو", "ايش": "شنو", "اگدر": "اكدر", "اقدر": "اكدر", "هلا": "هلو", "مرحبا": "هلو",
+        "هواي": "كلش", "كتير": "كلش"}
 
 
 def existing_texts(exclude_split: str) -> list[str]:
@@ -407,11 +481,21 @@ def existing_texts(exclude_split: str) -> list[str]:
     return out
 
 
+def similarity(a: str, b: str) -> tuple[float, float]:
+    """(character ratio, content-word ratio) of two normalised texts; word ratio is 0 when
+    either has fewer than DUP_TOKEN_MIN content words."""
+    char = SequenceMatcher(None, a, b).ratio()
+    ta, tb = tokens(a), tokens(b)
+    word = SequenceMatcher(None, ta, tb).ratio() if min(len(ta), len(tb)) >= DUP_TOKEN_MIN else 0.0
+    return char, word
+
+
 def is_dup(norm: str, pool: list[str]) -> bool:
     for other in pool:
-        if abs(len(other) - len(norm)) > 0.3 * max(len(norm), 1) + 10:
+        if abs(len(other) - len(norm)) > 0.5 * max(len(norm), 1) + 10:
             continue
-        if SequenceMatcher(None, norm, other).ratio() > DUP_THRESHOLD:
+        char, word = similarity(norm, other)
+        if char > DUP_THRESHOLD or word > DUP_TOKEN_THRESHOLD:
             return True
     return False
 
@@ -448,6 +532,9 @@ def audit_disputes(record: dict, label: dict) -> list[str]:
 
 def build(split: str, seed: int, n: int) -> None:
     counters = Counters()
+    cache = f"{split}-s{seed}"                        # new seed, new batches: old replies are never reused
+    marker_counts = Counter()
+    cap = math.floor(MARKER_CAP * n)
     rng = random.Random(seed * 7 + 1)                # numbers for {REF} / {PHONE}
     specs = make_specs(split, n, seed)
     system = (ROOT / "scripts/prompts/generate_tickets.md").read_text(encoding="utf-8")
@@ -464,7 +551,7 @@ def build(split: str, seed: int, n: int) -> None:
             b, chunk = args
             user = json.dumps([spec_for_prompt(s, rnd) for s in chunk], ensure_ascii=False, indent=1)
             try:
-                return b, model_batch(split, "gen", f"r{rnd}_b{b:02d}", "generator", system, user, counters)
+                return b, model_batch(cache, "gen", f"r{rnd}_b{b:02d}", "generator", system, user, counters)
             except Exception as e:  # noqa: BLE001 - a failed batch is simply retried next round
                 return b, {"error": str(e)[:200]}
 
@@ -491,9 +578,14 @@ def build(split: str, seed: int, n: int) -> None:
                     rejects["ref_not_in_text"] += 1
                     continue
                 norm = normalise(filled)
+                found = markers_in(norm)
+                if any(marker_counts[m] + 1 > cap for m in found):
+                    rejects["marker_over_cap"] += 1
+                    continue
                 if is_dup(norm, pool):
                     rejects["near_duplicate"] += 1
                     continue
+                marker_counts.update(found)
                 pool.append(norm)
                 accepted[spec["spec_id"]] = gold(spec, filled, ref, phone, item.get("date"), split, f"r{rnd}_b{b:02d}")
         print(f"round {rnd}: {len(accepted)}/{n} accepted")
@@ -507,7 +599,7 @@ def build(split: str, seed: int, n: int) -> None:
         b, chunk = args
         user = json.dumps([{"id": r["id"], "text": r["text"]} for r in chunk], ensure_ascii=False, indent=1)
         try:
-            return model_batch(split, "audit", f"b{b:02d}", "evaluator", asys, user, counters)
+            return model_batch(cache, "audit", f"b{b:02d}", "evaluator", asys, user, counters)
         except Exception as e:  # noqa: BLE001
             return {"error": str(e)[:200]}
 
@@ -525,6 +617,9 @@ def build(split: str, seed: int, n: int) -> None:
             unaudited += 1
             r["review_reason"].append("audit: no label returned")
 
+    worst = max(marker_counts.values(), default=0) / max(len(records), 1)
+    if worst > MARKER_FAIL:
+        raise SystemExit(f"build failed: a marker word is in {worst:.0%} of tickets (limit {MARKER_FAIL:.0%})")
     out = ROOT / "data" / split / "tickets.jsonl"
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
@@ -532,14 +627,15 @@ def build(split: str, seed: int, n: int) -> None:
             f.write(json.dumps({**r, "review_reason": "; ".join(r["review_reason"]) or None}, ensure_ascii=False) + "\n")
     info = {"split": split, "seed": seed, "requested": n, "accepted": len(records),
             "model_calls_this_run": dict(counters.calls),
-            "model_calls_total": {"generator": len(list((ROOT / "runs/generation" / split).glob("gen_*.json"))),
-                                  "evaluator": len(list((ROOT / "runs/generation" / split).glob("audit_*.json")))},
+            "model_calls_total": {"generator": len(list((ROOT / "runs/generation" / cache).glob("gen_*.json"))),
+                                  "evaluator": len(list((ROOT / "runs/generation" / cache).glob("audit_*.json")))},
             "rejected": dict(rejects), "unaudited": unaudited,
             "audit_disputed": sum(any(x.startswith("audit:") for x in r["review_reason"]) for r in records)}
     (ROOT / "data" / split / "build_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False) + "\n",
                                                             encoding="utf-8")
     print(json.dumps(info, indent=1, ensure_ascii=False))
-    print_stats([split])
+    if not print_stats([split]):
+        raise SystemExit("build failed: marker word over the limit")
 
 
 # ---------------------------------------------------------------- stats and handcheck
@@ -556,12 +652,30 @@ def table(title: str, rows: dict[str, Counter], keys: list[str]) -> None:
         print(f"  {str(k):24}" + "".join(f"{rows[s].get(k, 0):>10}" for s in rows))
 
 
-def print_stats(splits: list[str]) -> None:
-    """Counts only. Never prints ticket text."""
+def marker_table(data: dict[str, list[dict]]) -> bool:
+    """Share of tickets per split that contain each marker word; False if one is over MARKER_FAIL."""
+    ok = True
+    print(f"\nMarker words (% of tickets; cap {MARKER_CAP:.0%} at acceptance, build fails above {MARKER_FAIL:.0%})")
+    print(f"  {'':24}" + "".join(f"{s:>10}" for s in data))
+    found = {s: [markers_in(normalise(r["text"])) for r in v] for s, v in data.items()}
+    for m in MARKERS:
+        shares = {s: sum(m in f for f in found[s]) / len(found[s]) for s in data}
+        ok &= all(x <= MARKER_FAIL for x in shares.values())
+        flag = "  OVER" if any(x > MARKER_FAIL for x in shares.values()) else ""
+        print(f"  {m:24}" + "".join(f"{shares[s]:>10.1%}" for s in data) + flag)
+    print("  urgency words (info only, F15: they do not change priority)")
+    for m, rx in _URGENCY_RE.items():
+        print(f"  {m:24}" + "".join(f"{sum(bool(rx.search(normalise(r['text']))) for r in v) / len(v):>10.1%}"
+                                    for v in data.values()))
+    return ok
+
+
+def print_stats(splits: list[str]) -> bool:
+    """Counts only. Never prints ticket text. Returns False if a marker word is over MARKER_FAIL."""
     data = {s: load(s) for s in splits if load(s)}
     if not data:
         print("no tickets yet")
-        return
+        return True
     tax = taxonomy()
     table("Tickets", {s: Counter({"total": len(v)}) for s, v in data.items()}, ["total"])
     table("Category", {s: Counter(r["category"] for r in v) for s, v in data.items()}, list(tax.categories))
@@ -599,40 +713,59 @@ def print_stats(splits: list[str]) -> None:
             reasons[s]["any review_reason"] += bool(rr)
             reasons[s]["audit disputed"] += "audit:" in rr
             reasons[s]["two issues"] += "two issues" in rr
-            reasons[s]["contains هسه"] += "هسه" in rr
-    table("Review reasons", reasons, ["any review_reason", "audit disputed", "two issues", "contains هسه"])
+            reasons[s]["ورقة (USD notes)"] += "ورقة" in rr
+    table("Review reasons", reasons, ["any review_reason", "audit disputed", "two issues", "ورقة (USD notes)"])
+    table("Amounts in USD", {s: Counter({"amount_usd": sum(r["amount_usd"] is not None for r in v),
+                                         "as ورقة": sum(bool(_WARQA.search(normalise(r["text"]))) for r in v)})
+                             for s, v in data.items()}, ["amount_usd", "as ورقة"])
+    return marker_table(data)
+
+
+HANDCHECK_SPLITS = ["dev", "mvp_test"]            # never heldout
+MIN_RANDOM = 30
+
+
+def handcheck_must(r: dict) -> str | None:
+    """Why a ticket has to be on the sheet, or None."""
+    rr = r["review_reason"] or ""
+    if "audit:" in rr:
+        return "audit dispute"
+    if r["secondary_subcategory"]:
+        return "two issues"
+    if r["amount_usd"] is not None or _WARQA.search(normalise(r["text"])):
+        return "ورقة / USD"
+    return None
+
+
+def pick_spread(pool: list[dict], k: int, picked: list[dict], rng: random.Random) -> list[dict]:
+    """k random tickets, each time from the subcategory and then the dialect least present so far."""
+    pool = pool[:]
+    rng.shuffle(pool)
+    subs = Counter(r["subcategory"] for r in picked)
+    dial = Counter(r["dialect"] for r in picked)
+    out = []
+    for _ in range(min(k, len(pool))):
+        r = min(pool, key=lambda x: (subs[x["subcategory"]], dial[x["dialect"]]))
+        pool.remove(r)
+        out.append(r)
+        subs[r["subcategory"]] += 1
+        dial[r["dialect"]] += 1
+    return out
 
 
 def handcheck(seed: int, n: int = 80) -> None:
-    """80 rows for a person to check: every audit dispute and two-issue ticket first, then the
-    other review_reason tickets ("contains هسه") and, if room is left, random tickets, both spread
-    across the splits in proportion to their size."""
+    """The sheet for a person to check, from dev and mvp_test only: every audit dispute, every
+    two-issue ticket and every ticket with "ورقة" or a USD amount, then at least MIN_RANDOM random
+    tickets spread across subcategories and dialects. If the must-check tickets leave fewer than
+    MIN_RANDOM places, the sheet grows past n rather than drop any of them."""
     rng = random.Random(seed)
-    rows = [r for s in SPLITS for r in load(s)]
-    share = {s: len(load(s)) / max(len(rows), 1) for s in SPLITS}
-
-    def must(r):
-        rr = r["review_reason"] or ""
-        return "audit:" in rr or "two issues" in rr
-
-    def spread(pool: list[dict], k: int) -> list[dict]:
-        by = {s: [r for r in pool if r["split"] == s] for s in SPLITS}
-        for v in by.values():
-            rng.shuffle(v)
-        quota = {s: min(len(by[s]), int(k * share[s])) for s in SPLITS}
-        while sum(quota.values()) < min(k, len(pool)):   # hand out the rounding remainder
-            s = max((x for x in SPLITS if quota[x] < len(by[x])), key=lambda x: k * share[x] - quota[x])
-            quota[s] += 1
-        return [r for s in SPLITS for r in by[s][:quota[s]]]
-
-    first = sorted([r for r in rows if must(r)], key=lambda r: (0 if "audit:" in r["review_reason"] else 1, r["id"]))
-    other_review = [r for r in rows if r["review_reason"] and not must(r)]
-    picked = first[:n]
-    picked += spread(other_review, n - len(picked))
-    review_total = len(first) + len(other_review)
-    review_in = sum(bool(r["review_reason"]) for r in picked)
-    if len(picked) < n:
-        picked += spread([r for r in rows if not r["review_reason"]], n - len(picked))
+    rows = [r for s in HANDCHECK_SPLITS for r in load(s)]
+    must = sorted([r for r in rows if handcheck_must(r)], key=lambda r: (r["split"] != "dev", r["id"]))
+    rest = [r for r in rows if not handcheck_must(r)]
+    k = max(n - len(must), MIN_RANDOM)
+    picked = must + pick_spread(rest, k, must, rng)
+    order = {r["id"]: i for i, r in enumerate(sorted(picked, key=lambda r: rng.random()))}
+    picked.sort(key=lambda r: order[r["id"]])           # shuffled, so the checker does not see the groups
     out = ROOT / "data/review/handcheck_80.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8", newline="") as f:
@@ -644,10 +777,13 @@ def handcheck(seed: int, n: int = 80) -> None:
                       else f"{r['amount_usd']} USD" if r["amount_usd"] is not None else "")
             w.writerow([r["id"], r["split"], r["text"], r["category"], r["subcategory"], r["secondary_subcategory"] or "",
                         r["reference"] or "", amount, r["priority"], r["outcome"], r["review_reason"] or "", "", "", ""])
-    by_split = Counter(r["split"] for r in picked)
-    print(f"handcheck: {len(picked)} rows; by split {dict(by_split)}; review_reason tickets: {review_total} in total, "
-          f"{review_in} included (all {len(first)} audit / two-issue ones first), {review_total - review_in} did not fit; "
-          f"random fill: {len(picked) - review_in}")
+    why = Counter(handcheck_must(r) for r in must)
+    rand = [r for r in picked if not handcheck_must(r)]
+    print(f"handcheck: {len(picked)} rows; by split {dict(Counter(r['split'] for r in picked))}")
+    print(f"  must-check: {len(must)} {dict(why)}; random: {len(rand)}")
+    print(f"  random by dialect {dict(Counter(r['dialect'] for r in rand))}; "
+          f"subcategories covered by random {len({r['subcategory'] for r in rand})}, "
+          f"by the whole sheet {len({r['subcategory'] for r in picked})} of {len(taxonomy().subcategories)}")
 
 
 def main() -> None:
@@ -658,7 +794,7 @@ def main() -> None:
     b.add_argument("--seed", type=int, required=True)
     b.add_argument("--n", type=int, required=True)
     h = sub.add_parser("handcheck")
-    h.add_argument("--seed", type=int, default=4004)
+    h.add_argument("--seed", type=int, default=4404)
     sub.add_parser("stats")
     p = sub.add_parser("plan", help="print the spec counts for a split without calling a model")
     p.add_argument("--split", required=True, choices=list(SPLITS))
