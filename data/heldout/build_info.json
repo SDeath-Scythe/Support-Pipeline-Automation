@@ -1,0 +1,21 @@
+{
+ "split": "heldout",
+ "seed": 3303,
+ "requested": 80,
+ "accepted": 80,
+ "model_calls_this_run": {
+  "generator": 14,
+  "evaluator": 8
+ },
+ "model_calls_total": {
+  "generator": 14,
+  "evaluator": 8
+ },
+ "rejected": {
+  "near_duplicate": 15,
+  "marker_over_cap": 7,
+  "brand_name": 1
+ },
+ "unaudited": 0,
+ "audit_disputed": 3
+}
