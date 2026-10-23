@@ -24,6 +24,7 @@ You get a list of specs. Write exactly one ticket per spec and return them all i
 - `include_phone`: if true, write the placeholder {PHONE} exactly once where the customer gives a phone number (the number money or credit was sent to). If false, do not write {PHONE} and do not invent any phone number.
 - `urgency`: if true, the customer sounds urgent with a word like ضروري or عاجل or بسرعة.
 - `avoid_words` (optional): words other tickets already use too often. Do not use them in this ticket.
+- `too_similar_to` (optional): your earlier draft for this spec, which was too close to an existing ticket. Write a clearly different ticket: another situation or detail, other words, another sentence shape.
 - `variation`: a number; when it is above 1, write a different ticket from any you would write for the same spec.
 
 ## Rules

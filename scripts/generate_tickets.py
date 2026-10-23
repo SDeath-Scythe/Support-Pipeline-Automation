@@ -67,7 +67,7 @@ SPLITS = {"dev": "dev", "mvp_test": "mvp", "heldout": "hold"}     # split -> id 
 MIN_PER_SUB = 3
 BATCH = 10
 WORKERS = 4
-MAX_ROUNDS = 9
+MAX_ROUNDS = 12
 DUP_THRESHOLD = 0.8            # normalised characters (the author's rule)
 DUP_TOKEN_THRESHOLD = 0.5      # content words, dialect words folded: the same sentence in another dialect
 DUP_TOKEN_MIN = 5              # ... only when both tickets have at least this many content words
@@ -293,7 +293,7 @@ def make_specs(split: str, n: int, seed: int) -> list[dict]:
 
 # ---------------------------------------------------------------- generation
 
-def spec_for_prompt(s: dict, variation: int, avoid: list[str] | None = None) -> dict:
+def spec_for_prompt(s: dict, variation: int, avoid: list[str] | None = None, similar: str | None = None) -> dict:
     tax = taxonomy()
     sub = tax.get(s["subcategory"])
     out = {"spec_id": s["spec_id"],
@@ -303,6 +303,8 @@ def spec_for_prompt(s: dict, variation: int, avoid: list[str] | None = None) -> 
            "urgency": s["urgency"], "variation": variation}
     if avoid:
         out["avoid_words"] = avoid
+    if similar:
+        out["too_similar_to"] = similar
     if s["secondary_subcategory"]:
         sec = s["secondary_subcategory"]
         out["second_issue"] = {"key": sec, "label": tax.get(sec).label, "description": DESCRIPTIONS[sec]}
@@ -552,6 +554,7 @@ def build(split: str, seed: int, n: int) -> None:
     pool = existing_texts(split)
     accepted: dict[str, dict] = {}
     rejects = Counter()
+    similar: dict[str, str] = {}      # spec -> its last draft rejected as a near-duplicate (sent back from round 7)
     for rnd in range(1, MAX_ROUNDS + 1):
         pending = [s for s in specs if s["spec_id"] not in accepted]
         if not pending:
@@ -561,7 +564,8 @@ def build(split: str, seed: int, n: int) -> None:
 
         def run(args, rnd=rnd):
             b, chunk = args
-            user = json.dumps([spec_for_prompt(s, rnd, avoid) for s in chunk], ensure_ascii=False, indent=1)
+            user = json.dumps([spec_for_prompt(s, rnd, avoid, similar.get(s["spec_id"]) if rnd > 6 else None)
+                               for s in chunk], ensure_ascii=False, indent=1)
             try:
                 return b, model_batch(cache, "gen", f"r{rnd}_b{b:02d}", "generator", system, user, counters)
             except Exception as e:  # noqa: BLE001 - a failed batch is simply retried next round
@@ -597,6 +601,7 @@ def build(split: str, seed: int, n: int) -> None:
                     continue
                 if is_dup(norm, pool):
                     rejects["near_duplicate"] += 1
+                    similar[spec["spec_id"]] = text
                     continue
                 marker_counts.update(found)
                 pool.append(norm)
