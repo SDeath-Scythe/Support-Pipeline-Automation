@@ -17,5 +17,69 @@
   "marker_over_cap": 45
  },
  "unaudited": 0,
- "audit_disputed": 5
+ "audit_disputed": 5,
+ "repairs": [
+  {
+   "replaced": [
+    "dev-0011",
+    "dev-0012",
+    "dev-0046",
+    "dev-0048",
+    "dev-0051",
+    "dev-0080",
+    "dev-0103",
+    "dev-0118",
+    "dev-0133",
+    "dev-0152",
+    "dev-0210",
+    "dev-0225"
+   ],
+   "not_replaced": [],
+   "reasons": {
+    "dev-0011": "unrelated second issue (bill_not_reflected -> app_bug)",
+    "dev-0012": "dialect drift (gulf)",
+    "dev-0046": "unrelated second issue (limit_upgrade -> rejected_or_pending)",
+    "dev-0048": "unrelated second issue (fees_limits_question -> blocked_account); stock phrase وبعد سؤال",
+    "dev-0051": "unrelated second issue (fees_limits_question -> app_bug); stock phrase وبعد سؤال; hand-check: contradictory second question",
+    "dev-0080": "story repeat (dollar rate)",
+    "dev-0103": "unrelated second issue (limit_upgrade -> fees_limits_question); stock phrase وبعد سؤال",
+    "dev-0118": "hand-check: support-request number written as the reference",
+    "dev-0133": "unrelated second issue (topup_failed -> app_bug)",
+    "dev-0152": "unrelated second issue (app_bug -> overcharged_fee); stock phrase وبعد سؤال",
+    "dev-0210": "dialect drift (levantine); dialect drift (gulf)",
+    "dev-0225": "story repeat (dollar rate); hand-check: story repeat (dollar rate)"
+   },
+   "rejected": {
+    "marker_over_cap": 3
+   },
+   "model_calls": {
+    "generator": 5,
+    "evaluator": 2
+   },
+   "gold_changed": {
+    "priority": 3,
+    "outcome": 10
+   },
+   "audit_disputed": 3
+  },
+  {
+   "replaced": [
+    "dev-0143"
+   ],
+   "not_replaced": [],
+   "reasons": {
+    "dev-0143": "story repeat (dollar rate)"
+   },
+   "rejected": {},
+   "model_calls": {
+    "generator": 1,
+    "evaluator": 1
+   },
+   "gold_changed": {
+    "priority": 0,
+    "outcome": 0
+   },
+   "audit_disputed": 0
+  }
+ ]
 }

@@ -108,6 +108,36 @@ Cap 10% at acceptance, build fails above 15%. Words not listed (شكو، بلك�
 | بسرعة | 4.2% | 6.2% | 3.8% |
 | عاجل | 1.2% | 0.0% | 0.0% |
 
+### Repair after the hand-check (28 Oct 2026)
+
+The author's hand-check (80 rows: 71 correct, 9 with a wrong label) found three things code didn't check. Instead of rebuilding, only the tickets that break a rule were replaced (`generate_tickets.py repair`); every other ticket keeps its text, including all 71 the author approved.
+
+1. **One issue per ticket.** Most people raise one problem, not two unrelated ones. A second issue is now always drawn from `RELATED`, pairs that come from the same situation (same transfer, agent visit or app session), and the generator is told the link. Tickets whose second issue wasn't related were rewritten.
+2. **Iraqi dialect only.** Code now rejects Levantine, Gulf, Egyptian and standard-Arabic forms (`DRIFT`: بدي، هيك، كتير، بقدر، شو، وايد، كذا، مش، عايز، لقد، سوف، الذي…). كيف (Mosuli) and ابي (Basra) are allowed. The 2026 Mizan benchmark for Iraqi Arabic names "fusha in disguise" as the main failure of model-written dialect data; this build has no standard-Arabic hits.
+3. **No repeated stories.** The off-topic edge case had produced "dollar rate + weather" five times. Off-topic tickets now get their own topic, handed out in order (`OFF_TOPIC_TOPICS`), and one dollar-rate ticket is kept (dev-0068). A replacement ticket is shown the other tickets of its type and told to describe a different situation.
+
+Also from the hand-check: a support-request number is never a transaction reference, and `login_otp` means the same phone and SIM (a new phone or SIM is `sim_change`).
+
+| | dev | mvp_test | heldout |
+|---|---|---|---|
+| Replaced | 13 | 6 | 5 |
+| Unrelated second issue | 7 | 2 | 2 |
+| Dialect drift | 2 | 1 | 2 |
+| Story repeat / hand-check | 4 | 3 | 1 |
+
+mvp-0003 (drift) was replaced twice: the first replacement told a phone-change story, which is `sim_change`, not its `login_otp` label.
+
+Each split's `build_info.json` lists every replaced ID with its reason under `repairs`. Heldout was repaired by code only; its text was not read. The new tickets were blind-audited; disputes are in `review_reason`, which also says `repaired: <reason>`.
+
+**Gold labels were recomputed for all 400 tickets** with the author's rules F18 (`reference_when_needed`: no transaction number is required when the recipient's phone identifies the transfer, or for a reversal request) and F19 (`usd_large_amount`: ≥ 750 USD raises priority like ≥ 1,000,000 IQD; dollars are never converted). This matches the author's 8 label corrections on the sheet. After the repair:
+
+| | dev | mvp_test | heldout |
+|---|---|---|---|
+| Outcome: drafted / flagged / escalated | 208 / 15 / 17 | 68 / 6 / 6 | 67 / 7 / 6 |
+| Priority: P1 / P2 / P3 | 31 / 87 / 122 | 10 / 28 / 42 | 13 / 25 / 42 |
+
+The 14 replaced rows on the hand-check sheet have the new text, and their «صحيح؟» is cleared for re-checking.
+
 ### Hand-check sheet (`review/handcheck_80.csv`, seed 4404)
 
 80 rows: 63 dev, 17 mvp_test, no heldout. All 26 must-check tickets (5 audit disputes, 12 two-issue, 9 with ورقة or a USD amount) plus 54 random tickets chosen to spread across subcategories and dialects (random: 21 southern, 19 Mosuli, 14 Baghdadi). All 23 subcategories appear. Rows are shuffled.
@@ -120,6 +150,7 @@ Regenerate (model replies are cached under `runs/generation/<split>-s<seed>/`, s
 python scripts/generate_tickets.py build --split dev      --seed 1101 --n 240
 python scripts/generate_tickets.py build --split mvp_test --seed 2202 --n 80
 python scripts/generate_tickets.py build --split heldout  --seed 3303 --n 80   # separate run; prints statistics only
+python scripts/generate_tickets.py repair --split dev --dry-run               # then without --dry-run; same for each split
 python scripts/generate_tickets.py handcheck --seed 4404
 python scripts/generate_tickets.py stats                                       # coverage tables, no ticket text
 ```

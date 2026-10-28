@@ -17,5 +17,80 @@
   "marker_over_cap": 7
  },
  "unaudited": 0,
- "audit_disputed": 0
+ "audit_disputed": 0,
+ "repairs": [
+  {
+   "replaced": [
+    "mvp-0002",
+    "mvp-0003",
+    "mvp-0045",
+    "mvp-0046",
+    "mvp-0061",
+    "mvp-0071"
+   ],
+   "not_replaced": [],
+   "reasons": {
+    "mvp-0002": "story repeat (dollar rate); hand-check: story repeat (dollar rate)",
+    "mvp-0003": "dialect drift (gulf)",
+    "mvp-0045": "unrelated second issue (delivery_or_activation -> card_payment_failed)",
+    "mvp-0046": "hand-check: story repeat (stolen phone, new SIM)",
+    "mvp-0061": "unrelated second issue (rejected_or_pending -> fees_limits_question); stock phrase وبعد سؤال",
+    "mvp-0071": "story repeat (dollar rate)"
+   },
+   "rejected": {
+    "brand_name": 1
+   },
+   "model_calls": {
+    "generator": 2,
+    "evaluator": 1
+   },
+   "gold_changed": {
+    "priority": 0,
+    "outcome": 3
+   },
+   "audit_disputed": 2
+  },
+  {
+   "replaced": [
+    "mvp-0002",
+    "mvp-0003",
+    "mvp-0071"
+   ],
+   "not_replaced": [],
+   "reasons": {
+    "mvp-0002": "story repeat (dollar rate)",
+    "mvp-0003": "phone change story is a sim_change, not login_otp",
+    "mvp-0071": "story repeat (passport office, as dev-0080)"
+   },
+   "rejected": {},
+   "model_calls": {
+    "generator": 1,
+    "evaluator": 1
+   },
+   "gold_changed": {
+    "priority": 0,
+    "outcome": 0
+   },
+   "audit_disputed": 1
+  },
+  {
+   "replaced": [
+    "mvp-0003"
+   ],
+   "not_replaced": [],
+   "reasons": {
+    "mvp-0003": "phone change story is a sim_change, not login_otp"
+   },
+   "rejected": {},
+   "model_calls": {
+    "generator": 1,
+    "evaluator": 1
+   },
+   "gold_changed": {
+    "priority": 0,
+    "outcome": 0
+   },
+   "audit_disputed": 0
+  }
+ ]
 }

@@ -17,5 +17,36 @@
   "brand_name": 1
  },
  "unaudited": 0,
- "audit_disputed": 3
+ "audit_disputed": 3,
+ "repairs": [
+  {
+   "replaced": [
+    "hold-0007",
+    "hold-0043",
+    "hold-0044",
+    "hold-0048",
+    "hold-0076"
+   ],
+   "not_replaced": [],
+   "reasons": {
+    "hold-0007": "dialect drift (gulf)",
+    "hold-0043": "unrelated second issue (delivery_or_activation -> fees_limits_question); stock phrase وبعد سؤال",
+    "hold-0044": "dialect drift (gulf)",
+    "hold-0048": "unrelated second issue (delivery_or_activation -> card_payment_failed)",
+    "hold-0076": "story repeat (dollar rate)"
+   },
+   "rejected": {
+    "warqa_without_usd": 9
+   },
+   "model_calls": {
+    "generator": 10,
+    "evaluator": 1
+   },
+   "gold_changed": {
+    "priority": 2,
+    "outcome": 3
+   },
+   "audit_disputed": 2
+  }
+ ]
 }

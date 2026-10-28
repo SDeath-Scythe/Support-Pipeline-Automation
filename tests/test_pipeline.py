@@ -935,3 +935,28 @@ def test_f19_usd_large_amount(monkeypatch):
     monkeypatch.setenv("PIPELINE_FIXES", "usd_large_amount")
     assert route(e, "حولت 20 ورقة")[1] == "P1"
     assert route(ex(subcategory="not_received", amount_iqd=None, amount_usd=500), "x")[1] == "P2"
+
+
+def test_generator_second_issues_are_related():
+    g = _gen()
+    for split, seed, n in (("dev", 1101, 240), ("mvp_test", 2202, 80), ("heldout", 3303, 80)):
+        for s in g.make_specs(split, n, seed):
+            if s["secondary_subcategory"]:
+                assert (s["subcategory"], s["secondary_subcategory"]) in g.RELATED
+                assert s["relation"]
+
+
+def test_generator_off_topic_topics_unique_across_splits():
+    g = _gen()
+    topics = [s["topic"] for split, seed, n in (("dev", 1101, 240), ("mvp_test", 2202, 80), ("heldout", 3303, 80))
+              for s in g.make_specs(split, n, seed) if s["edge_case"] == "off_topic"]
+    assert topics and len(topics) == len(set(topics))
+
+
+def test_generator_dialect_drift():
+    g = _gen()
+    assert g.dialect_drift(g.normalise("نسيت الرمز ومابقدر ادخل")) == ["levantine"]
+    assert g.dialect_drift(g.normalise("جربت كذا مرة")) == ["gulf"]
+    assert g.dialect_drift(g.normalise("لقد حاولت")) == ["msa"]
+    assert g.dialect_drift(g.normalise("ما اكدر افوت، جربت هواي مرات")) == []
+    assert g.dialect_drift(g.normalise("كيف ارجع الرمز")) == []        # كيف is Mosuli too

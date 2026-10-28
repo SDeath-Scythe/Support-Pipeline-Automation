@@ -2,6 +2,8 @@
 
 **Period:** 20–23 Oct 2026 · **Branch:** `claude/eager-tesla-x1dcxj` (nothing on `main`) · **Commits:** all after `cb5b89c` · **Tests:** 25 → 51, all passing
 
+> **New here? Start with [`CONTEXT.md`](CONTEXT.md)**: goals, deadlines, rules, decisions and where the project stands now. This file is the detailed experiment report from 20–23 Oct.
+
 This document hands over everything done in one working session with the Claude Code assistant: what was tested, what was learned, what was built, why each choice was made, and what to do next. It covers the whole session, from the first smoke test to the final hold-out check. The detailed numbers live in [`docs/experiments/LOG.md`](docs/experiments/LOG.md) and the per-config pages; this file is the guided tour.
 
 ---
