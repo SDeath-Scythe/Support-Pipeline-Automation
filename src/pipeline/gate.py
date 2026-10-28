@@ -11,6 +11,7 @@ import re
 from .clean import clean
 from .config import load_yaml, taxonomy, thresholds
 from .fixes import enabled
+from .requirements import missing_required
 from .schemas import Extraction, GateResult
 
 
@@ -62,12 +63,11 @@ def check(extraction: Extraction, cleaned_text: str) -> GateResult:
         reasons.append("Extracted reference does not appear in the ticket")
         score = min(score, t["missing_field_cap"])
 
-    for field in sub.required_fields:
-        amount = extraction.amount_iqd if extraction.amount_iqd is not None else extraction.amount_usd
-        value = {"reference": extraction.reference, "amount": amount}.get(field)
-        if value in (None, ""):
-            flags.append(f"missing:{field}")
-            score = min(score, t["missing_field_cap"])
+    # F18 (reference_when_needed) lives in missing_required: no reference needed when the team can
+    # find the transaction another way. With the flag off this is exactly the old required-fields loop.
+    for field in missing_required(extraction, sub.required_fields):
+        flags.append(f"missing:{field}")
+        score = min(score, t["missing_field_cap"])
 
     if score < t["recheck_from"]:
         reasons.append(f"Low confidence ({score:.2f})")

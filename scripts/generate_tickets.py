@@ -53,13 +53,15 @@ sys.path.insert(0, str(ROOT / "src"))
 # Priority uses the routing rules with the recommended flags on (only F15 affects routing).
 # F16 (warqa_usd) only changes the classifier rules the blind audit is given ("ورقة" = 100 USD).
 os.environ["PIPELINE_FIXES"] = ("draft_check,recheck_cross_team,fee_followup,no_urgency_words,"
-                                "ask_if_missing,no_specific_followup,fraud_secondary_cleanup,warqa_usd")
+                                "ask_if_missing,no_specific_followup,fraud_secondary_cleanup,warqa_usd,"
+                                "reference_when_needed,usd_large_amount")
 
 from pipeline import classify as cls  # noqa: E402
 from pipeline.clean import clean  # noqa: E402
 from pipeline.config import models, taxonomy  # noqa: E402
 from pipeline.gate import _key, reference_in_text  # noqa: E402
 from pipeline.llm import call  # noqa: E402
+from pipeline.requirements import missing_required  # noqa: E402
 from pipeline.route import route  # noqa: E402
 from pipeline.schemas import Extraction  # noqa: E402
 
@@ -446,10 +448,9 @@ def gold(spec: dict, text: str, ref: str | None, phone: str | None, date, split:
                     secondary_subcategory=spec["secondary_subcategory"], reference=ref, recipient_phone=phone,
                     amount_iqd=spec["amount_iqd"], amount_usd=spec["amount_usd"], confidence=1.0)
     _, priority = route(ex, clean(text))
-    have = {"reference": bool(ref), "amount": spec["amount_iqd"] is not None or spec["amount_usd"] is not None}
     if sub.always_escalate:
         outcome = "escalated"
-    elif any(not have.get(f, True) for f in sub.required_fields):
+    elif missing_required(ex, sub.required_fields):
         outcome = "flagged"
     else:
         outcome = "drafted"

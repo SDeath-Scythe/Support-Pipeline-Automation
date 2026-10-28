@@ -901,3 +901,37 @@ def test_handoff_invalid_category_is_not_presented_as_a_topic(monkeypatch):
     note = run.process("شكد رسوم التحويل لحساب بمصرف؟")["handoff_ar"]
     assert "غير محسوم" in note and "غير واضح" not in note
     assert "التصنيف ما يطابق قائمة الأقسام" in note
+
+
+# --- F18: reference only when needed / F19: dollar amounts count as large ---
+
+def test_f18_recipient_phone_replaces_reference(monkeypatch):
+    t = clean("دزيت ورقتين على 07865076865 وصاحبي يحلف ما وصله شي")
+    e = ex(subcategory="not_received", reference=None, recipient_phone="07865076865", amount_iqd=None,
+           amount_usd=200, confidence=0.9)
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert "missing:reference" in check(e, t).flags
+    monkeypatch.setenv("PIPELINE_FIXES", "reference_when_needed")
+    g = check(e, t)
+    assert "missing:reference" not in g.flags and g.confidence == 0.9
+
+
+def test_f18_reversal_never_needs_reference_but_not_received_still_does(monkeypatch):
+    from pipeline.draft import ask_for
+
+    monkeypatch.setenv("PIPELINE_FIXES", "reference_when_needed")
+    dup = ex(subcategory="reversal_request", reference=None, amount_iqd=100000, confidence=0.9)
+    assert "missing:reference" not in check(dup, clean("دزيت مية الف مرتين بالغلط")).flags
+    assert "reference" not in ask_for(dup)
+    plain = ex(subcategory="not_received", reference=None, amount_iqd=50000, confidence=0.9)
+    assert "missing:reference" in check(plain, clean("حولت خمسين الف وما وصلت")).flags
+    assert "reference" in ask_for(plain)
+
+
+def test_f19_usd_large_amount(monkeypatch):
+    e = ex(subcategory="not_received", reference="95120323", amount_iqd=None, amount_usd=2000)
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert route(e, "حولت 20 ورقة")[1] == "P2"
+    monkeypatch.setenv("PIPELINE_FIXES", "usd_large_amount")
+    assert route(e, "حولت 20 ورقة")[1] == "P1"
+    assert route(ex(subcategory="not_received", amount_iqd=None, amount_usd=500), "x")[1] == "P2"

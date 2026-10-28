@@ -22,6 +22,8 @@ FIXES = {
     "lookalike_hints": "F13: sharper classifier hints for the look-alike subcategories",
     "fraud_secondary_rule": "F14: rule 1 defers to rule 5, so a consequence of the fraud is not a secondary issue",
     "fraud_secondary_cleanup": "F14b: rule, not prompt: a fraud ticket's secondary is cleared when it is only a consequence (account access or another fraud type)",
+    "reference_when_needed": "F18: a transaction number is required only when the team can't find the transaction without it (recipient's number is enough; reversals never need it)",
+    "usd_large_amount": "F19: dollar amounts >= large_amount_usd ($750) raise priority like >= 1,000,000 IQD",
     "handoff_note": "F17: escalated tickets get a short Arabic note for the receiving team, built from the extracted fields (no model call)",
     "ask_if_missing": "F11: the drafter asks for unverifiable details only if the ticket does not give them",
     "no_specific_followup": "F12: the drafter must not promise to send a specific answer, date or result",

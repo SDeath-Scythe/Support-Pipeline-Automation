@@ -38,7 +38,12 @@ def route(extraction: Extraction, cleaned_text: str) -> tuple[str, str]:
     priority = sub.default_priority
 
     large = thresholds()["priority"]["large_amount_iqd"]
-    if extraction.amount_iqd is not None and extraction.amount_iqd >= large:
+    # F19 (usd_large_amount), from the project author: dollar amounts count too. $750 is about
+    # 1,000,000 IQD. The amount itself is never converted; only the threshold is per currency.
+    large_usd = thresholds()["priority"].get("large_amount_usd")
+    usd_large = (enabled("usd_large_amount") and large_usd is not None and extraction.amount_usd is not None
+                 and extraction.amount_usd >= large_usd)
+    if (extraction.amount_iqd is not None and extraction.amount_iqd >= large) or usd_large:
         priority = _raise_one(priority)
     elif any(re.search(w, cleaned_text) for w in urgent_words()):
         priority = _raise_one(priority)

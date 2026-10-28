@@ -50,6 +50,8 @@ CODES = {
     "F15": "no_urgency_words",
     "F16": "warqa_usd",
     "F17": "handoff_note",
+    "F18": "reference_when_needed",
+    "F19": "usd_large_amount",
 }
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"

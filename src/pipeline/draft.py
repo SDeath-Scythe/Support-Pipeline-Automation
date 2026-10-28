@@ -12,6 +12,7 @@ from pathlib import Path
 from .config import load_yaml, taxonomy
 from .fixes import enabled
 from .llm import call
+from .requirements import reference_needed
 from .schemas import Extraction
 
 _PROMPT = Path(__file__).parent / "prompts" / "draft_system.md"
@@ -73,7 +74,10 @@ def _have(ex: Extraction, field: str) -> bool:
 def ask_for(ex: Extraction) -> list[str]:
     """Fields the policy says the customer should send that the ticket doesn't contain."""
     sub = policy()["subcategories"].get(ex.subcategory) or {}
-    return [f for f in sub.get("customer_should_send", []) if not _have(ex, f)]
+    wanted = sub.get("customer_should_send", [])
+    if not reference_needed(ex):   # F18: the team can find the transaction without it
+        wanted = [f for f in wanted if f != "reference"]
+    return [f for f in wanted if not _have(ex, f)]
 
 
 def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:

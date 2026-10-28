@@ -10,3 +10,4 @@ confidence:
 
 priority:
   large_amount_iqd: 1000000   # amounts at or above this raise priority one level
+  large_amount_usd: 750       # F19: the same rule for dollar amounts (about 1,000,000 IQD)

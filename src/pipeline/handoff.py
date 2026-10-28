@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from .config import taxonomy, thresholds
 from .draft import FIELD_AR, _have, ask_for
+from .requirements import missing_required
 from .schemas import Extraction
 
 # Fields the pipeline can check in a ticket (others, like a shop name, it can't see).
@@ -45,7 +46,7 @@ def _missing(ex: Extraction) -> list[str]:
     sub = taxonomy().subcategories.get(ex.subcategory)
     if sub is None or sub.always_escalate:
         return []
-    wanted = list(sub.required_fields) + [f for f in ask_for(ex) if f in _CHECKABLE]
+    wanted = missing_required(ex, sub.required_fields) + [f for f in ask_for(ex) if f in _CHECKABLE]
     seen, out = set(), []
     for f in wanted:
         if f not in seen and not _have(ex, f):
