@@ -66,6 +66,7 @@ These are standing instructions from the author. Follow them unless he says othe
 |---|---|
 | **Two backends, `cli` and `api`** (`src/pipeline/llm.py`) | Develop on the Pro subscription without spending API credits. Measure on the API, because cli adds its own context and behaves slightly differently. The cli call strips tools, MCP, slash commands and settings (`--disallowedTools "*"`, `--strict-mcp-config`, …) to stay close to a plain API call. |
 | **API calls send no `temperature`; `effort: low`** (`config/models.yaml`) | Haiku 5.5 and Sonnet 5.5 reject a non-default temperature, and SDK 2.x (API version 2026-10-21) doesn't accept it at all, so the API path failed on every call before 29 Oct. The models think by default; `effort` sets how much (thinking is billed as output), and `max_tokens` is 4096 to leave room for it. A reply with no text is an error. |
+| **API cost per call, and a $5 cap per run** (`budget_usd`, `prices` in `config/models.yaml`; `LLM_BUDGET_USD`) | The test key has $35. Each API reply is priced from its token counts (cache reads and writes included) and the run total and cost per ticket go in the run file. Once a run reaches its cap, further calls are refused and the run prints a warning that its numbers are not valid. Cache hits cost nothing. |
 | **Response cache** (`LLM_CACHE_DIR`, per-role salt) | Re-running a config costs nothing. A salt (`--salt drafter=d1`) gets fresh replies for one role, to measure noise. Non-cli backends are part of the cache key. |
 | **Confidence = the model's own number, checked by a second model** | Asking three times costs three times as much. The model's confidence was already well ordered (95/95 right at ≥ 0.90). The safety net is the Sonnet re-check below 0.75. |
 | **Every change is a flag, tested with and without** (`src/pipeline/fixes.py`, `scripts/experiment.py`) | Several changes that looked like improvements were noise, or broke something else. Each fix runs on fixed tickets with and without, with replicates, then is confirmed on tickets it never saw. |
@@ -141,7 +142,8 @@ Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/e
   - dev-0152: the auditor swapped main and second issue (agent refused vs agent overcharged)
   - dev-0048: the auditor saw no second issue
 - [x] API path fixed and checked against a local stand-in endpoint (no real call yet)
-- [ ] Any run on the **API**: first a 10-ticket pilot on the $35 test key, to measure cost per ticket
+- [x] API cost tracking and a per-run spend cap (29 Oct)
+- [ ] Any run on the **API**: first a 10-ticket pilot on the $35 test key, to measure cost per ticket. Blocked: `ANTHROPIC_API_KEY` was not visible in the 29 Oct sessions
 - [ ] Calibrating `pass_above` (0.75) and `recheck_from` (0.60) on the API
 - [ ] Making the recommended flags the real code path, and deleting the dropped ones
 - [ ] Demo pages (batch progress and a results report), the MVP test run, slides

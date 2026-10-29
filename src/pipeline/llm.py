@@ -70,6 +70,36 @@ class BackendError(RuntimeError):
     """Raised when a step needs a backend that is not active."""
 
 
+class BudgetExceeded(RuntimeError):
+    """Raised instead of an API call once this run has spent its budget (see models.yaml)."""
+
+
+# Dollars spent on the API by this process (cache hits cost nothing and are not counted).
+_spend_lock = threading.Lock()
+_spent = {"usd": 0.0}
+
+
+def spent_usd() -> float:
+    return _spent["usd"]
+
+
+def budget_usd() -> float:
+    """The run's API budget in dollars; 0 means no cap."""
+    env = os.getenv("LLM_BUDGET_USD")
+    return float(env) if env not in (None, "") else float(load_yaml("models.yaml").get("budget_usd", 0) or 0)
+
+
+def price_usd(model: str, usage) -> float | None:
+    """Cost of one API response from its usage block, or None if the model has no price."""
+    p = (load_yaml("models.yaml").get("prices") or {}).get(model)
+    if not p:
+        return None
+    tokens = {"input": usage.input_tokens, "output": usage.output_tokens,
+              "cache_write": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+              "cache_read": getattr(usage, "cache_read_input_tokens", 0) or 0}
+    return sum(tokens[k] * p[k] for k in tokens) / 1_000_000
+
+
 def backend() -> str:
     """The active backend: LLM_BACKEND env var first, then config/models.yaml."""
     name = (os.getenv("LLM_BACKEND") or llm_backend()).strip().lower()
@@ -106,6 +136,10 @@ def _call_api(cfg: dict, system: str, user: str) -> str:
     # 2026-10-21 rejects it on every model (models.yaml keeps it for the free-model profiles).
     # These models think by default; `effort` sets how much, and thinking counts toward max_tokens.
     extra = {"output_config": {"effort": cfg["effort"]}} if cfg.get("effort") else {}
+    cap = budget_usd()
+    if cap and spent_usd() >= cap:
+        raise BudgetExceeded(f"API budget of ${cap:.2f} reached (spent ${spent_usd():.4f}). "
+                             "Raise LLM_BUDGET_USD to continue.")
     resp = _get_client().messages.create(
         model=cfg["model"],
         max_tokens=cfg["max_tokens"],
@@ -116,7 +150,12 @@ def _call_api(cfg: dict, system: str, user: str) -> str:
     u = resp.usage
     _usage.value = {"input_tokens": u.input_tokens + (getattr(u, "cache_read_input_tokens", 0) or 0)
                     + (getattr(u, "cache_creation_input_tokens", 0) or 0), "output_tokens": u.output_tokens}
-    text = "".join(block.text for block in resp.content if block.type == "text")
+    cost = price_usd(cfg["model"], u)
+    if cost is not None:
+        _usage.value["cost_usd"] = round(cost, 6)
+        with _spend_lock:
+            _spent["usd"] += cost
+    text ="".join(block.text for block in resp.content if block.type == "text")
     if not text:
         raise RuntimeError(f"No reply text from {cfg['model']} (stop_reason={resp.stop_reason})")
     return text
@@ -298,6 +337,8 @@ def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
     for _ in range(retries + 1):
         try:
             return _cached(cfg, system, user, send, role, tag)
+        except BudgetExceeded:
+            raise
         except Exception as e:  # noqa: BLE001 - surfaced to caller after retry
             last_error = e
     where = f"{route['provider']}/{route['model']}" if route else f"the {backend()} backend"

@@ -988,3 +988,41 @@ def test_api_request_has_effort_and_no_temperature(monkeypatch):
     blocks[:] = [NS(type="thinking", thinking="")]
     with pytest.raises(RuntimeError, match="stop_reason"):
         llm._call_api(cfg, "SYS", "ticket")
+
+
+def test_api_cost_and_budget_cap(monkeypatch):
+    """Each API call is priced from its usage block; once the run's budget is spent, the next
+    call is refused before it is sent, and call() does not retry or hide that."""
+    from types import SimpleNamespace as NS
+
+    import pytest
+
+    from pipeline import llm
+
+    calls = []
+
+    def create(**kw):
+        calls.append(kw)
+        return NS(content=[NS(type="text", text="OK")], stop_reason="end_turn",
+                  usage=NS(input_tokens=1000, output_tokens=2000, cache_read_input_tokens=0,
+                           cache_creation_input_tokens=0))
+
+    monkeypatch.setattr(llm, "_get_client", lambda: NS(messages=NS(create=create)))
+    monkeypatch.setattr(llm, "_spent", {"usd": 0.0})
+    monkeypatch.setenv("LLM_BUDGET_USD", "0.03")
+    monkeypatch.setenv("LLM_BACKEND", "api")
+    monkeypatch.delenv("LLM_CACHE_DIR", raising=False)
+    monkeypatch.delenv("LLM_PROFILE", raising=False)
+
+    # Sonnet 5.5: 1000 x $2 + 2000 x $10 per million = $0.022
+    assert llm.call("drafter", "SYS", "ticket") == "OK"
+    assert llm.last_usage()["cost_usd"] == pytest.approx(0.022)
+    assert llm.spent_usd() == pytest.approx(0.022)
+    llm.call("drafter", "SYS", "ticket")                   # 0.022 < 0.03: still allowed
+    with pytest.raises(llm.BudgetExceeded):
+        llm.call("drafter", "SYS", "ticket")               # 0.044 >= 0.03: refused
+    assert len(calls) == 2
+
+    usage = NS(input_tokens=10, output_tokens=0, cache_read_input_tokens=1000, cache_creation_input_tokens=0)
+    assert llm.price_usd("claude-haiku-5-5", usage) == pytest.approx((10 * 0.10 + 1000 * 0.01) / 1e6)
+    assert llm.price_usd("unknown-model", usage) is None
