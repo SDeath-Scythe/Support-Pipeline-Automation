@@ -90,7 +90,8 @@ def note(ex: Extraction | None, flags: list[str], *, confidence: float | None = 
     secondary = main.secondary_subcategory or cleared_secondary
     if secondary and secondary != main.subcategory and _label(secondary) and not unsure:
         tax = taxonomy()
-        is_effect = main.category == "fraud_security" and tax.get(secondary).category == "account_access"
+        # A fraud ticket's account lock or unknown charge is part of the same incident (F14b), not a request.
+        is_effect = main.category == "fraud_security" and tax.get(secondary).category in ("account_access", "fraud_security")
         lines.append(f"{'أثر على الحساب' if is_effect else 'طلب ثاني'}: {tax.get(secondary).label_ar}")
 
     facts = _facts(main)

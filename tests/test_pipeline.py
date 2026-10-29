@@ -1220,3 +1220,13 @@ def test_draft_check_secret_warning_with_wa_or_three_words_back():
     assert problems("ما نطلب منك ترسل الرمز أبداً.", "…") == []
     assert problems("رجاءً دزلنا الرمز اللي وصلك.", "…") == ["asks_secret"]
     assert problems("لا تقلق، دزلنا الرمز اللي وصلك.", "…") == ["asks_secret"]   # negation in another clause
+
+
+def test_handoff_labels_an_unknown_charge_after_a_scam_as_an_effect():
+    from pipeline.handoff import note
+    from pipeline.schemas import Extraction
+
+    ex = Extraction(category="fraud_security", subcategory="suspected_scam",
+                    secondary_subcategory="unauthorized_charge", confidence=0.95)
+    text = note(ex, ["fraud"])
+    assert "أثر على الحساب: خصم غير معروف" in text and "طلب ثاني" not in text
