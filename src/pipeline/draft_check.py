@@ -10,7 +10,9 @@ import re
 
 from .clean import clean
 
-_AR = "؀-ۿ"
+# Arabic letters only: not punctuation ("،" "؟" "؛"), digits or tatweel ("بالـcard"), which can
+# sit next to an English word the customer used (the API pilot flagged "declined،").
+_AR = "\u0621-\u063f\u0641-\u064a\u066e-\u06d3"
 
 # A Latin letter glued to an Arabic one, e.g. "hلا".
 _GLUED = re.compile(rf"[A-Za-z][{_AR}]|[{_AR}][A-Za-z]")

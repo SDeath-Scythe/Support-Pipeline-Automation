@@ -394,6 +394,17 @@ def test_draft_check_v2_avoids_round1_false_alarms():
     assert problems("وتتوقع تكون العمولة 1,000.", "المفروض الف وحدة") == []
 
 
+def test_draft_check_latin_word_next_to_arabic_punctuation_is_fine():
+    """API pilot dev-0077: the customer wrote "declined" and the draft echoed it before an Arabic
+    comma. Punctuation and tatweel are not letters, so that is not a glued Latin letter."""
+    from pipeline.draft_check import problems
+
+    ticket = "طلعلي declined، بس الـbalance انقص. دفعت بالـcard"
+    assert problems("فهمت إن العملية طلعت declined، والرصيد انخصم.", ticket) == []
+    assert problems("الدفع بالـcard ما مشى؟", ticket) == []
+    assert problems("هلا declinedبيك", ticket) == ["stray_latin"]      # glued to a letter: still caught
+
+
 # --- usage logging ---
 
 def test_usage_recorded_from_cli_and_cache(monkeypatch, tmp_path):
