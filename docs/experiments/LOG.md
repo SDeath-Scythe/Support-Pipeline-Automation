@@ -4,6 +4,16 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 29 Oct: F11b and F21 tested; the MVP configuration is locked
+
+On top of rec+F16+F20, dev 233 with a replicate ($0.33 for both):
+
+- **F21 `team_summary`: adopt.** All 18 escalated tickets got a one-line Arabic summary in the team note that says what happened (dev-0197: «انطى الرمز لواحد اتصل بيه وكال من خدمة الزبائن، والزبون يسأل شنو يسوي هسه»), which is what the author asked for. A few lines slip into formal Arabic («ادعت العميلة», «لم يتمكن»); acceptable for an internal note. A small Haiku call on escalated tickets only; a line with a number not in the ticket is dropped.
+- **F11b `ask_if_unnamed`: do not adopt.** The 68 drafts it changed, graded on cli (rubric with the loanword fix): asks right 49 → 59 in one replicate but 54 → 55 in the other; bad drafts 1 → 4 and 2 → 5 in **both**. The reworded instruction led the drafter to give advice it may not state ("no need to pay again until it is checked", dev-0132, dev-0207) and once to write two versions with an English meta line. The F11 weakness (dev-0199) stays a known limitation.
+- **Thresholds stay 0.75 / 0.60.** With F20, recheck_from 0.65 moves no ticket on dev, and pass_above 0.85 trades one fixed ticket (dev-0145) for one needless escalation (dev-0116) for +$0.00009 per ticket.
+
+**Locked: `PIPELINE_FIXES=mvp`** (`src/pipeline/fixes.py`): F2, F3c, F6b, F11, F12, F14b, F15, F16, F17, F18, F19, F20, F21; thresholds 0.75 / 0.60; unknown charges stay with the fraud and security team (P1, escalated). Next: mvp_test and heldout, once each.
+
 ## 29 Oct: round 2 review, F20 (duplicate payments), calibration with F20
 
 **Author's round 2** (`data/review/dev_round2_answers.json`, 16 tickets from dev/recF16; the cli grader's verdicts stored beside his, hidden from him during the review):
