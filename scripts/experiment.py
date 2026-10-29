@@ -65,6 +65,19 @@ def flags_for(config: str) -> list[str]:
     return [CODES[c] for c in config.split("+")]
 
 
+def set_key(path) -> str:
+    """The name runs and reports are filed under: data/dev/tickets.jsonl -> "dev",
+    data/probes/fixes_30.jsonl -> "fixes_30". (Every split's file is tickets.jsonl, so the
+    file name alone would put dev, mvp_test and heldout runs in the same place.)"""
+    p = Path(path)
+    return p.parent.name if p.stem == "tickets" else p.stem
+
+
+def gold_file(set_name: str) -> Path:
+    split = ROOT / "data" / set_name / "tickets.jsonl"
+    return split if split.exists() else ROOT / "data/probes" / f"{set_name}.jsonl"
+
+
 def run_path(set_name: str, label: str) -> Path:
     return ROOT / "runs/exp" / set_name / f"{label}.json"
 
@@ -77,7 +90,7 @@ def load_run(set_name: str, label: str) -> dict:
     """A saved run, with gold labels taken from the current set file (so a corrected label
     applies to runs made before the correction; the model outputs are untouched)."""
     run = json.loads(run_path(set_name, label).read_text(encoding="utf-8"))
-    src = ROOT / "data/probes" / f"{set_name}.jsonl"
+    src = gold_file(set_name)
     if src.exists():
         gold = {d["id"]: d for d in map(json.loads, src.read_text(encoding="utf-8").splitlines()) if d}
         for row in run["tickets"]:
@@ -98,7 +111,7 @@ def cmd_run(args) -> None:
     else:
         env["LLM_CACHE_DIR"] = str(CACHE)
     subprocess.run([sys.executable, str(ROOT / "scripts/run_batch.py"), str(src), "--workers", str(args.workers),
-                    "--out", str(run_path(src.stem, label))], env=env, check=True)
+                    "--out", str(run_path(set_key(src), label))], env=env, check=True)
 
 
 # ---------------------------------------------------------------- judge
@@ -279,7 +292,7 @@ def scored(set_name: str, label: str) -> tuple[dict, list[dict], dict]:
 
 
 def cmd_report(args) -> None:
-    set_name = Path(args.set).stem
+    set_name = set_key(args.set)
     label = args.label or args.config
     m, rows, meta = scored(set_name, label)
     out_dir = docs_dir(set_name)
@@ -383,15 +396,15 @@ def write_summary(set_name: str) -> None:
 
 
 def cmd_summary(args) -> None:
-    write_summary(Path(args.set).stem)
-    print((docs_dir(Path(args.set).stem) / "summary.md").read_text(encoding="utf-8"))
+    write_summary(set_key(args.set))
+    print((docs_dir(set_key(args.set)) / "summary.md").read_text(encoding="utf-8"))
 
 
 def cmd_pool(args) -> None:
     """Compare draft quality pooled over replicate runs (A vs B), e.g. three baseline
     draft replicates vs three replicates of a drafter fix. Classification is held fixed
     by the cache, so only the drafts differ."""
-    set_name = Path(args.set).stem
+    set_name = set_key(args.set)
 
     def pooled(labels):
         rows = []
@@ -428,7 +441,7 @@ def cmd_pool(args) -> None:
 
 
 def cmd_judge_noise(args) -> None:
-    set_name = Path(args.set).stem
+    set_name = set_key(args.set)
     run = load_run(set_name, args.config)
     a, b = judge_all(run), judge_all(run, salt="\n\n(second review)")
     ids = [i for i in a if a[i] and b.get(i) and "error" not in a[i] and "error" not in b[i]]
@@ -445,10 +458,119 @@ def cmd_judge_noise(args) -> None:
     print("\n".join(lines))
 
 
+# ---------------------------------------------------------------- judge on cli vs api
+
+def _agree(a: dict, b: dict, ids: list[str]) -> dict:
+    """How often two gradings of the same drafts agree."""
+    n = len(ids)
+    return {
+        "score_same": (sum(a[i]["score"] == b[i]["score"] for i in ids), n),
+        "score_within1": (sum(abs(a[i]["score"] - b[i]["score"]) <= 1 for i in ids), n),
+        "bad_same": (sum(bad(a[i]) == bad(b[i]) for i in ids), n),
+        "checks_same": (sum(bool(a[i].get(k)) == bool(b[i].get(k)) for i in ids for k in JUDGE_CHECKS),
+                        n * len(JUDGE_CHECKS)),
+    }
+
+
+def cmd_judge_compare(args) -> None:
+    """Grade the same drafts `--reps` times on each backend and compare the judges.
+
+    The cli judge is free; if it agrees with the API judge about as well as the API judge agrees
+    with itself, the cli judge can be the default. Each repeat is a fresh reply (cache salt
+    evaluator=gN); repeat 1 has no salt, so it is the grading `report` would reuse.
+    """
+    from pipeline.llm import spent_usd
+
+    set_name = set_key(args.set)
+    label = args.label or args.config
+    run = load_run(set_name, label)
+    backends = [b.strip() for b in args.backends.split(",") if b.strip()]
+    saved = {k: os.environ.get(k) for k in ("LLM_BACKEND", "LLM_CACHE_SALT")}
+    grades: dict[tuple[str, int], dict] = {}
+    try:
+        for be in backends:
+            for rep in range(1, args.reps + 1):
+                os.environ["LLM_BACKEND"] = be
+                os.environ["LLM_CACHE_SALT"] = "" if rep == 1 else f"evaluator=g{rep}"
+                print(f"grading on {be}, repeat {rep} ...", flush=True)
+                grades[(be, rep)] = judge_all(run)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    ok = lambda j: j is not None and "error" not in j and "score" in j  # noqa: E731
+    ids = [i for i in next(iter(grades.values())) if all(ok(g.get(i)) for g in grades.values())]
+    failed = sorted({i for g in grades.values() for i, j in g.items() if j is not None and not ok(j)})
+    if not ids:
+        raise SystemExit("No draft was graded on every backend and repeat.")
+
+    def fmt_pair(p):
+        return f"{p[0]}/{p[1]} ({100 * p[0] / p[1]:.0f}%)"
+
+    lines = [f"# Judge on {' vs '.join(backends)}: {label} on {set_name}", "",
+             f"{len(ids)} drafts, each graded {args.reps} times per backend by the `evaluator` role "
+             f"(fresh reply each time). Run backend: `{run['meta']['backend']}`."
+             + (f" Not graded on every repeat (left out): {', '.join(failed)}." if failed else ""), "",
+             "## Mean score per grading", "", "| Backend | " + " | ".join(f"rep {r}" for r in range(1, args.reps + 1))
+             + " | all |", "|---|" + "---|" * (args.reps + 1)]
+    for be in backends:
+        means = [sum(grades[(be, r)][i]["score"] for i in ids) / len(ids) for r in range(1, args.reps + 1)]
+        bads = [sum(bad(grades[(be, r)][i]) for i in ids) for r in range(1, args.reps + 1)]
+        lines.append(f"| {be} | " + " | ".join(f"{m:.2f} ({b} bad)" for m, b in zip(means, bads))
+                     + f" | {sum(means) / len(means):.2f} |")
+
+    rows = []   # (name, agreement dict)
+    for be in backends:            # within one backend: the judge against itself
+        for r1 in range(1, args.reps + 1):
+            for r2 in range(r1 + 1, args.reps + 1):
+                rows.append((f"{be} rep {r1} vs {be} rep {r2}", _agree(grades[(be, r1)], grades[(be, r2)], ids)))
+    for i, b1 in enumerate(backends):   # across backends, every pairing of repeats
+        for b2 in backends[i + 1:]:
+            for r1 in range(1, args.reps + 1):
+                for r2 in range(1, args.reps + 1):
+                    rows.append((f"{b1} rep {r1} vs {b2} rep {r2}", _agree(grades[(b1, r1)], grades[(b2, r2)], ids)))
+    lines += ["", "## Agreement", "", "| Pair | Score identical | Score within 1 | Same bad/ok verdict | Same check answers |",
+              "|---|---|---|---|---|"]
+    lines += [f"| {n} | " + " | ".join(fmt_pair(a[k]) for k in ("score_same", "score_within1", "bad_same", "checks_same"))
+              + " |" for n, a in rows]
+
+    def pooled(prefix_pairs):
+        sel = [a for n, a in rows if prefix_pairs(n)]
+        return {k: (sum(a[k][0] for a in sel), sum(a[k][1] for a in sel)) for k in sel[0]} if sel else None
+
+    lines += ["", "## Pooled", "", "| Comparison | Score identical | Score within 1 | Same bad/ok verdict | Same check answers |",
+              "|---|---|---|---|---|"]
+    for be in backends:
+        p = pooled(lambda n, be=be: n.count(be) == 2 and n.startswith(be + " "))
+        if p:
+            lines.append(f"| within {be} | " + " | ".join(fmt_pair(p[k]) for k in p) + " |")
+    if len(backends) > 1:
+        p = pooled(lambda n: all(n.count(b) == 1 for b in backends[:2]))
+        lines.append(f"| {backends[0]} vs {backends[1]} | " + " | ".join(fmt_pair(p[k]) for k in p) + " |")
+
+        per = {be: {i: sum(grades[(be, r)][i]["score"] for r in range(1, args.reps + 1)) / args.reps for i in ids}
+               for be in backends[:2]}
+        diffs = [(i, per[backends[0]][i] - per[backends[1]][i]) for i in ids]
+        mad = sum(abs(d) for _, d in diffs) / len(diffs)
+        lines += ["", f"Mean |{backends[0]} − {backends[1]}| per-draft average score: **{mad:.2f}**. "
+                  f"Drafts where the averages differ by more than 1: "
+                  + (", ".join(f"{i} ({d:+.1f})" for i, d in diffs if abs(d) > 1) or "none") + "."]
+    lines += ["", f"API spend for this grading: ${spent_usd():.4f} (cached replies cost nothing)."]
+
+    out = docs_dir(set_name) / f"judge_backends-{label}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n".join(lines))
+    print(f"\nSaved {out}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("run", "report", "judge-noise", "summary", "pool"):
+    for name in ("run", "report", "judge-noise", "judge-compare", "summary", "pool"):
         p = sub.add_parser(name)
         if name == "pool":
             p.add_argument("--a", required=True, help="comma-separated run labels")
@@ -463,9 +585,12 @@ def main() -> None:
         p.add_argument("--backend", default=os.getenv("LLM_BACKEND", "cli"))
         p.add_argument("--nocache", action="store_true", help="fresh model calls (noise check)")
         p.add_argument("--salt", help='fresh replies for some roles only, e.g. "drafter=d1"')
+        if name == "judge-compare":
+            p.add_argument("--backends", default="cli,api", help="judge backends to compare")
+            p.add_argument("--reps", type=int, default=3, help="gradings per backend")
     args = ap.parse_args()
-    {"run": cmd_run, "report": cmd_report, "judge-noise": cmd_judge_noise, "summary": cmd_summary,
-     "pool": cmd_pool}[args.cmd](args)
+    {"run": cmd_run, "report": cmd_report, "judge-noise": cmd_judge_noise, "judge-compare": cmd_judge_compare,
+     "summary": cmd_summary, "pool": cmd_pool}[args.cmd](args)
 
 
 if __name__ == "__main__":

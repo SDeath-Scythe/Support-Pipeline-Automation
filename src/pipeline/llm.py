@@ -5,7 +5,7 @@ config/models.yaml, so any model can be swapped by editing one line.
 
 Two backends, same prompts and same code path:
 
-- `api`  Anthropic API with ANTHROPIC_API_KEY. Required for anything that produces
+- `api`  Anthropic API with ANTHROPIC_API_KEY (or SUPPORT_PIPELINE_API_KEY). Required for anything that produces
          a number (accuracy, calibration, thresholds, the MVP and demo runs).
 - `cli`  Claude Code in headless mode (`claude -p`) on your own Claude plan.
          Free for development: wiring, smoke tests, reading outputs by eye.
@@ -49,8 +49,12 @@ load_dotenv()
 
 BACKENDS = ("api", "cli")
 
+# Where the API key can come from, in order. SUPPORT_PIPELINE_API_KEY is the name the author's
+# Claude Code environment uses; ANTHROPIC_API_KEY (or .env) works as before.
+API_KEY_VARS = ("ANTHROPIC_API_KEY", "SUPPORT_PIPELINE_API_KEY")
+
 # Keys that would make Claude Code bill the API instead of the Claude plan.
-_API_ENV_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+_API_ENV_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "SUPPORT_PIPELINE_API_KEY")
 
 _client = None
 
@@ -116,8 +120,13 @@ def require_api(purpose: str) -> None:
     if backend() != "api":
         raise BackendError(
             f"{purpose} must run on the API backend so the numbers match the real pipeline. "
-            "Set LLM_BACKEND=api (and ANTHROPIC_API_KEY in .env)."
+            "Set LLM_BACKEND=api (and ANTHROPIC_API_KEY or SUPPORT_PIPELINE_API_KEY)."
         )
+
+
+def api_key() -> str | None:
+    """The API key from the first of API_KEY_VARS that is set."""
+    return next((os.environ[v] for v in API_KEY_VARS if os.getenv(v)), None)
 
 
 def _get_client():
@@ -125,9 +134,11 @@ def _get_client():
     if _client is None:
         import anthropic
 
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            raise RuntimeError("ANTHROPIC_API_KEY is not set. Copy .env.example to .env and add your key.")
-        _client = anthropic.Anthropic()
+        key = api_key()
+        if not key:
+            raise RuntimeError(f"No API key: set one of {', '.join(API_KEY_VARS)} "
+                               "(or copy .env.example to .env and add it).")
+        _client = anthropic.Anthropic(api_key=key)
     return _client
 
 
@@ -148,8 +159,11 @@ def _call_api(cfg: dict, system: str, user: str) -> str:
         **extra,
     )
     u = resp.usage
-    _usage.value = {"input_tokens": u.input_tokens + (getattr(u, "cache_read_input_tokens", 0) or 0)
-                    + (getattr(u, "cache_creation_input_tokens", 0) or 0), "output_tokens": u.output_tokens}
+    cache_read = getattr(u, "cache_read_input_tokens", 0) or 0
+    cache_write = getattr(u, "cache_creation_input_tokens", 0) or 0
+    # input_tokens counts every prompt token; the cache split shows whether prompt caching works.
+    _usage.value = {"input_tokens": u.input_tokens + cache_read + cache_write, "output_tokens": u.output_tokens,
+                    "cache_read_tokens": cache_read, "cache_write_tokens": cache_write}
     cost = price_usd(cfg["model"], u)
     if cost is not None:
         _usage.value["cost_usd"] = round(cost, 6)

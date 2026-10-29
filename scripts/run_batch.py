@@ -54,8 +54,16 @@ def main() -> None:
           f"{', fixes: ' + ', '.join(fixes) if fixes else ''}")
     started = datetime.now()
     t0 = time.time()
+    rows = []
+    if backend() == "api" and len(tickets) > 1:
+        # One ticket first, so the API's prompt cache holds the system prompts before the parallel
+        # calls start; otherwise every worker's first call pays to write the same cache entry.
+        rows.append(run_one(tickets[0]))
+        tickets_left = tickets[1:]
+    else:
+        tickets_left = tickets
     with ThreadPoolExecutor(args.workers) as pool:
-        rows = list(pool.map(run_one, tickets))
+        rows += list(pool.map(run_one, tickets_left))
 
     usage = [e["data"].get("usage") or {} for r in rows for e in r["events"] if e["status"] == "done"]
     usage = [u for u in usage if u]
@@ -64,6 +72,9 @@ def main() -> None:
         "cached_calls": sum(bool(u.get("cached")) for u in usage),
         "input_tokens": sum(u.get("input_tokens", 0) for u in usage),
         "output_tokens": sum(u.get("output_tokens", 0) for u in usage),
+        # api only: prompt-cache split of the fresh calls (0 when a prompt is under the model's minimum)
+        "cache_read_tokens": sum(u.get("cache_read_tokens", 0) for u in usage if not u.get("cached")),
+        "cache_write_tokens": sum(u.get("cache_write_tokens", 0) for u in usage if not u.get("cached")),
         # cache hits replay a stored cost but spend nothing, so they are left out
         "cost_usd": round(sum(u.get("cost_usd") or 0 for u in usage if not u.get("cached")), 4),
     }
@@ -73,6 +84,9 @@ def main() -> None:
         totals["budget_hit"] = any("BudgetExceeded" in json.dumps(r["events"], ensure_ascii=False) for r in rows)
     print(f"Model calls {totals['model_calls']} ({totals['cached_calls']} from cache), "
           f"tokens in {totals['input_tokens']:,} / out {totals['output_tokens']:,}, reported cost ${totals['cost_usd']}")
+    if backend() == "api":
+        print(f"Prompt cache: read {totals['cache_read_tokens']:,} / written {totals['cache_write_tokens']:,} tokens, "
+              f"${totals['cost_per_ticket_usd']} per ticket")
     if totals.get("budget_hit"):
         print(f"WARNING: the ${totals['budget_usd']:.2f} budget was reached; tickets after it were not classified "
               "and this run's numbers are not valid. Raise LLM_BUDGET_USD and re-run (cached calls are free).")

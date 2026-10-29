@@ -1026,3 +1026,62 @@ def test_api_cost_and_budget_cap(monkeypatch):
     usage = NS(input_tokens=10, output_tokens=0, cache_read_input_tokens=1000, cache_creation_input_tokens=0)
     assert llm.price_usd("claude-haiku-5-5", usage) == pytest.approx((10 * 0.10 + 1000 * 0.01) / 1e6)
     assert llm.price_usd("unknown-model", usage) is None
+
+
+def test_api_key_from_either_variable(monkeypatch):
+    """SUPPORT_PIPELINE_API_KEY works when ANTHROPIC_API_KEY is unset; ANTHROPIC_API_KEY wins
+    when both are set. The cli backend strips both, so it never bills the API."""
+    import json
+    import subprocess
+
+    from pipeline import llm
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("SUPPORT_PIPELINE_API_KEY", raising=False)
+    assert llm.api_key() is None
+    monkeypatch.setenv("SUPPORT_PIPELINE_API_KEY", "sk-support")
+    assert llm.api_key() == "sk-support"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic")
+    assert llm.api_key() == "sk-anthropic"
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["env"] = kw["env"]
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"is_error": False, "result": "ok"}), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    llm._call_cli({"model": "claude-haiku-5-5"}, "SYS", "ticket")
+    assert "SUPPORT_PIPELINE_API_KEY" not in seen["env"] and "ANTHROPIC_API_KEY" not in seen["env"]
+
+
+def test_api_usage_records_prompt_cache_split(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from pipeline import llm
+
+    def create(**kw):
+        return NS(content=[NS(type="text", text="OK")], stop_reason="end_turn",
+                  usage=NS(input_tokens=50, output_tokens=20, cache_read_input_tokens=1400,
+                           cache_creation_input_tokens=0))
+
+    monkeypatch.setattr(llm, "_get_client", lambda: NS(messages=NS(create=create)))
+    monkeypatch.setattr(llm, "_spent", {"usd": 0.0})
+    llm._call_api({"model": "claude-haiku-5-5", "max_tokens": 4096, "effort": "low"}, "SYS", "ticket")
+    u = llm.last_usage()
+    assert u["input_tokens"] == 1450 and u["cache_read_tokens"] == 1400 and u["cache_write_tokens"] == 0
+
+
+def test_experiment_files_each_split_under_its_own_name():
+    import importlib.util
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("experiment", root / "scripts/experiment.py")
+    exp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(exp)
+    assert exp.set_key("data/dev/tickets.jsonl") == "dev"
+    assert exp.set_key(root / "data/mvp_test/tickets.jsonl") == "mvp_test"
+    assert exp.set_key("data/probes/fixes_30.jsonl") == "fixes_30"
+    assert exp.gold_file("dev") == root / "data/dev/tickets.jsonl"
+    assert exp.gold_file("fixes_30") == root / "data/probes/fixes_30.jsonl"
