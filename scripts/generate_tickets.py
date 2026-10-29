@@ -65,7 +65,10 @@ from pipeline.requirements import missing_required  # noqa: E402
 from pipeline.route import route  # noqa: E402
 from pipeline.schemas import Extraction  # noqa: E402
 
-SPLITS = {"dev": "dev", "mvp_test": "mvp", "heldout": "hold"}     # split -> id prefix
+SPLITS = {"dev": "dev", "mvp_test": "mvp", "heldout": "hold",     # split -> id prefix
+          # 29 Oct: fresh test splits after mvp_test and heldout were spent. test2 is hand-checked by the
+          # author before it is run; heldout2 stays sealed (statistics only) until the progress review.
+          "test2": "t2", "heldout2": "h2"}
 MIN_PER_SUB = 3
 BATCH = 10
 WORKERS = 4
@@ -181,7 +184,7 @@ RELATED = {
 }
 # Off-topic tickets each get their own topic, handed out in order with a different start per split so
 # no two share one (the first build made them all "dollar rate + weather"; dev-0068 keeps the dollar).
-OFF_TOPIC_START = {"dev": 0, "mvp_test": 5, "heldout": 7}
+OFF_TOPIC_START = {"dev": 0, "mvp_test": 5, "heldout": 7, "test2": 9, "heldout2": 11}
 OFF_TOPIC_TOPICS = ["whether the company is hiring", "a football match",
                     "which phone is good to buy", "the working hours of the passport or ID office",
                     "whether it will rain tomorrow", "a recipe or cooking question", "the price of gold today",
