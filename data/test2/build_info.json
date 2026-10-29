@@ -1,0 +1,23 @@
+{
+ "split": "test2",
+ "seed": 5505,
+ "requested": 80,
+ "accepted": 80,
+ "model_calls_this_run": {
+  "generator": 16,
+  "evaluator": 8
+ },
+ "model_calls_total": {
+  "generator": 16,
+  "evaluator": 8
+ },
+ "rejected": {
+  "near_duplicate": 18,
+  "marker_over_cap": 15,
+  "warqa_without_usd": 1,
+  "dialect_drift_gulf": 1,
+  "brand_name": 1
+ },
+ "unaudited": 0,
+ "audit_disputed": 2
+}

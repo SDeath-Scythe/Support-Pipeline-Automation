@@ -1,0 +1,23 @@
+{
+ "split": "heldout2",
+ "seed": 6606,
+ "requested": 80,
+ "accepted": 80,
+ "model_calls_this_run": {
+  "generator": 17,
+  "evaluator": 8
+ },
+ "model_calls_total": {
+  "generator": 17,
+  "evaluator": 8
+ },
+ "rejected": {
+  "near_duplicate": 23,
+  "brand_name": 4,
+  "dialect_drift_gulf": 1,
+  "marker_over_cap": 11,
+  "dialect_drift_levantine": 1
+ },
+ "unaudited": 0,
+ "audit_disputed": 2
+}
