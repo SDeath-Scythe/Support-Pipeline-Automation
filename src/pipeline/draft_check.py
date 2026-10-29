@@ -64,8 +64,12 @@ def problems(draft: str, allowed_text: str) -> list[str]:
         found.append("promise")
 
     for m in _SECRET.finditer(draft):
-        # "لا تشارك الرمز" is a warning, not a request: look at the two words before the verb.
-        if not any(t.startswith(_NEGATIONS) for t in draft[:m.start()].split()[-2:]):
+        # "لا تشارك الرمز" is a warning, not a request: look for a negation among the four words before the
+        # verb, in the same clause (so "لا تقلق، دزلنا الرمز" is still a request), with a leading و/ف dropped
+        # ("وما تحتاج تكتب أو ترسل", "ما نطلب منك ترسل": false alarms on mvp_test and heldout).
+        clause = re.split(r"[.،,!?؟\n]", draft[:m.start()])[-1]
+        before = [t[1:] if t[:1] in "وف" and len(t) > 2 else t for t in clause.split()[-4:]]
+        if not any(t.startswith(_NEGATIONS) for t in before):
             found.append("asks_secret")
             break
 

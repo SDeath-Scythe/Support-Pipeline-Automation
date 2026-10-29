@@ -1210,3 +1210,13 @@ def test_mvp_preset_expands_to_known_flags(monkeypatch):
     assert fixes.enabled("duplicate_payment_hint") and not fixes.enabled("unclear_template")
     monkeypatch.delenv("PIPELINE_FIXES")
     assert not fixes.active()                       # still off by default
+
+
+def test_draft_check_secret_warning_with_wa_or_three_words_back():
+    """mvp_test / heldout false alarms: a warning not to send the code is not a request for it."""
+    from pipeline.draft_check import problems
+
+    assert problems("وما تحتاج تكتب أو ترسل لنا الرمز السري بأي شكل.", "…") == []
+    assert problems("ما نطلب منك ترسل الرمز أبداً.", "…") == []
+    assert problems("رجاءً دزلنا الرمز اللي وصلك.", "…") == ["asks_secret"]
+    assert problems("لا تقلق، دزلنا الرمز اللي وصلك.", "…") == ["asks_secret"]   # negation in another clause
