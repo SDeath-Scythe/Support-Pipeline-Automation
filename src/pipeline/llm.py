@@ -102,17 +102,24 @@ def _get_client():
 
 
 def _call_api(cfg: dict, system: str, user: str) -> str:
+    # No temperature: Haiku 5.5 and Sonnet 5.5 reject a non-default value, and API version
+    # 2026-10-21 rejects it on every model (models.yaml keeps it for the free-model profiles).
+    # These models think by default; `effort` sets how much, and thinking counts toward max_tokens.
+    extra = {"output_config": {"effort": cfg["effort"]}} if cfg.get("effort") else {}
     resp = _get_client().messages.create(
         model=cfg["model"],
         max_tokens=cfg["max_tokens"],
-        temperature=cfg["temperature"],
         system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": user}],
+        **extra,
     )
     u = resp.usage
     _usage.value = {"input_tokens": u.input_tokens + (getattr(u, "cache_read_input_tokens", 0) or 0)
                     + (getattr(u, "cache_creation_input_tokens", 0) or 0), "output_tokens": u.output_tokens}
-    return "".join(block.text for block in resp.content if block.type == "text")
+    text = "".join(block.text for block in resp.content if block.type == "text")
+    if not text:
+        raise RuntimeError(f"No reply text from {cfg['model']} (stop_reason={resp.stop_reason})")
+    return text
 
 
 def _cli_command(model: str, system: str) -> list[str]:
@@ -285,6 +292,8 @@ def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
     _usage.value = {}
     send = _call_openai if route else (_call_api if backend() == "api" else _call_cli)
     tag = f"openai:{route['provider']}" if route else (None if backend() == "cli" else backend())
+    if tag == "api" and cfg.get("effort"):
+        tag = f"api,effort={cfg['effort']}"      # a new effort level gets fresh replies
     last_error: Exception | None = None
     for _ in range(retries + 1):
         try:

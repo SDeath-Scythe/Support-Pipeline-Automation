@@ -960,3 +960,31 @@ def test_generator_dialect_drift():
     assert g.dialect_drift(g.normalise("لقد حاولت")) == ["msa"]
     assert g.dialect_drift(g.normalise("ما اكدر افوت، جربت هواي مرات")) == []
     assert g.dialect_drift(g.normalise("كيف ارجع الرمز")) == []        # كيف is Mosuli too
+
+
+def test_api_request_has_effort_and_no_temperature(monkeypatch):
+    """Haiku 5.5 / Sonnet 5.5 reject temperature; effort comes from models.yaml; thinking-only
+    replies (no text block) are an error, not an empty answer."""
+    from types import SimpleNamespace as NS
+
+    import pytest
+
+    from pipeline import llm
+
+    sent = {}
+    blocks = [NS(type="thinking", thinking=""), NS(type="text", text="OK")]
+
+    def create(**kw):
+        sent.update(kw)
+        return NS(content=blocks, stop_reason="end_turn",
+                  usage=NS(input_tokens=1, output_tokens=1, cache_read_input_tokens=0,
+                           cache_creation_input_tokens=0))
+
+    monkeypatch.setattr(llm, "_get_client", lambda: NS(messages=NS(create=create)))
+    cfg = {"model": "claude-haiku-5-5", "max_tokens": 4096, "effort": "low", "temperature": 0.0}
+    assert llm._call_api(cfg, "SYS", "ticket") == "OK"
+    assert "temperature" not in sent and sent["output_config"] == {"effort": "low"}
+
+    blocks[:] = [NS(type="thinking", thinking="")]
+    with pytest.raises(RuntimeError, match="stop_reason"):
+        llm._call_api(cfg, "SYS", "ticket")

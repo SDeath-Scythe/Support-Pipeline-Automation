@@ -2,7 +2,7 @@
 
 The starting point for anyone, person or AI session, picking up this project. It says what the project is, the rules for working on it, what was decided and why, what was tried and failed, where things stand, and what comes next. The detailed experiment report is [`HANDOVER.md`](HANDOVER.md); the dataset is described in [`data/README.md`](data/README.md).
 
-*Last updated 28 Oct 2026, on branch `claude/handoff-and-policy`.*
+*Last updated 29 Oct 2026, on branch `ccr-f6b2836c-leerma` (= `claude/handoff-and-policy` plus the API fix below).*
 
 ---
 
@@ -65,6 +65,7 @@ These are standing instructions from the author. Follow them unless he says othe
 | Decision | Why |
 |---|---|
 | **Two backends, `cli` and `api`** (`src/pipeline/llm.py`) | Develop on the Pro subscription without spending API credits. Measure on the API, because cli adds its own context and behaves slightly differently. The cli call strips tools, MCP, slash commands and settings (`--disallowedTools "*"`, `--strict-mcp-config`, …) to stay close to a plain API call. |
+| **API calls send no `temperature`; `effort: low`** (`config/models.yaml`) | Haiku 5.5 and Sonnet 5.5 reject a non-default temperature, and SDK 2.x (API version 2026-10-21) doesn't accept it at all, so the API path failed on every call before 29 Oct. The models think by default; `effort` sets how much (thinking is billed as output), and `max_tokens` is 4096 to leave room for it. A reply with no text is an error. |
 | **Response cache** (`LLM_CACHE_DIR`, per-role salt) | Re-running a config costs nothing. A salt (`--salt drafter=d1`) gets fresh replies for one role, to measure noise. Non-cli backends are part of the cache key. |
 | **Confidence = the model's own number, checked by a second model** | Asking three times costs three times as much. The model's confidence was already well ordered (95/95 right at ≥ 0.90). The safety net is the Sonnet re-check below 0.75. |
 | **Every change is a flag, tested with and without** (`src/pipeline/fixes.py`, `scripts/experiment.py`) | Several changes that looked like improvements were noise, or broke something else. Each fix runs on fixed tickets with and without, with replicates, then is confirmed on tickets it never saw. |
@@ -128,7 +129,7 @@ Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/e
 
 **Done:**
 - [x] Pipeline, viewer, cli/api switch, response cache, token/cost logging
-- [x] Experiment harness; flags F2–F19; tests pass (75, via `pytest`)
+- [x] Experiment harness; flags F2–F19; tests pass (76, via `pytest`)
 - [x] Recommended flag set confirmed on a sealed 30-ticket hold-out (on cli)
 - [x] F17 handoff note, F18, F19; `policy.yaml` header explains why it's empty
 - [x] 400 tickets: dev 240, mvp_test 80, heldout 80 (seeds 1101/2202/3303)
@@ -139,7 +140,8 @@ Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/e
 - [ ] The author re-checks the **14 replaced rows** on the sheet (their «صحيح؟» is empty). Two worth a look:
   - dev-0152: the auditor swapped main and second issue (agent refused vs agent overcharged)
   - dev-0048: the auditor saw no second issue
-- [ ] Any run on the **API**
+- [x] API path fixed and checked against a local stand-in endpoint (no real call yet)
+- [ ] Any run on the **API**: first a 10-ticket pilot on the $35 test key, to measure cost per ticket
 - [ ] Calibrating `pass_above` (0.75) and `recheck_from` (0.60) on the API
 - [ ] Making the recommended flags the real code path, and deleting the dropped ones
 - [ ] Demo pages (batch progress and a results report), the MVP test run, slides
@@ -171,7 +173,7 @@ Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/e
 
 ```bash
 pip install -r requirements.txt
-pytest                                                    # 75 tests, no model calls
+pytest                                                    # 76 tests, no model calls
 python app/server.py                                      # viewer: http://localhost:8000
 LLM_BACKEND=cli python scripts/run_batch.py ...            # dev runs on the Pro plan
 python scripts/experiment.py run <config> --set <file> [--backend api]

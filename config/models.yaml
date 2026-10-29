@@ -9,18 +9,24 @@
 #        thresholds, the MVP run and the demo.
 backend: cli
 
+# api: `temperature` is not sent (these models reject it); it is used only by the free-model
+# profiles. The models think before answering: `effort` (low | medium | high) sets how much,
+# and the thinking counts toward max_tokens, so max_tokens leaves room for it.
 roles:
   classifier:
     model: claude-haiku-5-5
-    max_tokens: 1024
+    max_tokens: 4096
+    effort: low
     temperature: 0.0
   drafter:
     model: claude-sonnet-5-5
-    max_tokens: 1024
+    max_tokens: 4096
+    effort: low
     temperature: 0.3
   rechecker:
     model: claude-sonnet-5-5
-    max_tokens: 1024
+    max_tokens: 4096
+    effort: low
     temperature: 0.0
   generator:      # dev only
     model: claude-opus-5-5
@@ -29,6 +35,6 @@ roles:
     timeout_s: 600  # writes ~10 tickets per call (scripts/generate_tickets.py)
   evaluator:      # dev only
     model: claude-opus-5-5
-    max_tokens: 2048
+    max_tokens: 8192  # room for thinking (Opus 5.5 always thinks)
     timeout_s: 600  # labels ~10 tickets per call in the dataset audit
     temperature: 0.0
