@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pipeline.config import load_yaml, taxonomy  # noqa: E402
 from pipeline.draft import FIELD_AR  # noqa: E402
+from pipeline.fixes import PRESETS  # noqa: E402
 from pipeline.gate import _key  # noqa: E402
 from pipeline.requirements import REFERENCE_ALTERNATIVES, REFERENCE_NOT_NEEDED  # noqa: E402
 
@@ -66,6 +67,8 @@ JUDGE_CHECKS = ["understood", "grounded", "no_promise", "asks_right", "safe", "t
 def flags_for(config: str) -> list[str]:
     if config.startswith("baseline"):
         return []
+    if config in PRESETS:        # e.g. "mvp": the locked configuration
+        return list(PRESETS[config])
     return [CODES[c] for c in config.split("+")]
 
 

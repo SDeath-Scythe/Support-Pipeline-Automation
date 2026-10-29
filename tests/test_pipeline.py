@@ -1199,3 +1199,14 @@ def test_ask_if_unnamed_wording(monkeypatch):
     assert "the restaurant" not in user_prompt(clean("دفعت بالمطعم"), ex, "cards")
     monkeypatch.setenv("PIPELINE_FIXES", "ask_if_missing,ask_if_unnamed")
     assert "does not count: ask for its name" in user_prompt(clean("دفعت بالمطعم"), ex, "cards")
+
+
+def test_mvp_preset_expands_to_known_flags(monkeypatch):
+    from pipeline import fixes
+
+    monkeypatch.setenv("PIPELINE_FIXES", "mvp")
+    on = fixes.active()
+    assert on == set(fixes.PRESETS["mvp"]) and on <= fixes.FIXES.keys()
+    assert fixes.enabled("duplicate_payment_hint") and not fixes.enabled("unclear_template")
+    monkeypatch.delenv("PIPELINE_FIXES")
+    assert not fixes.active()                       # still off by default

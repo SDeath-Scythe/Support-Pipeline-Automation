@@ -39,8 +39,19 @@ FIXES = {
 }
 
 
+# The configuration locked for the MVP runs on 29 Oct, after the API runs on dev and the author's two
+# reviews (docs/experiments/LOG.md). PIPELINE_FIXES=mvp turns these on; flags stay off by default.
+PRESETS = {
+    "mvp": ("draft_check", "recheck_cross_team", "fee_followup", "ask_if_missing", "no_specific_followup",
+            "fraud_secondary_cleanup", "no_urgency_words", "warqa_usd", "handoff_note", "reference_when_needed",
+            "usd_large_amount", "duplicate_payment_hint", "team_summary"),
+}
+
+
 def active() -> frozenset[str]:
     names = {n.strip() for n in os.getenv("PIPELINE_FIXES", "").split(",") if n.strip()}
+    for preset in names & PRESETS.keys():
+        names = (names - {preset}) | set(PRESETS[preset])
     unknown = names - FIXES.keys()
     if unknown:
         raise ValueError(f"Unknown fix(es) in PIPELINE_FIXES: {', '.join(sorted(unknown))}")
