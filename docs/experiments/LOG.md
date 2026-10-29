@@ -4,6 +4,26 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 29 Oct: round 2 review, F20 (duplicate payments), calibration with F20
+
+**Author's round 2** (`data/review/dev_round2_answers.json`, 16 tickets from dev/recF16; the cli grader's verdicts stored beside his, hidden from him during the review):
+- Drafts: **10 of 13 send as is, 3 after small edits, 0 rewrite.** Asks for the right things 9/13; missing a question on 4 (dev-0199: the restaurant's name, the known F11 weakness).
+- The grader mostly agrees, but marks drafts down for English words Iraqi customers use themselves (PIN, QR, error): the author would send dev-0075 as is, which the grader called bad. 16 of the 25 "bad" drafts on dev failed only `clean`, so the grader's bad-draft count is too high.
+- Fraud team note (dev-0197) should say what happened ("he gave the code to the scammer"); F17 lists fields only.
+- Dialect in the generated tickets: Iraqis say «اريد», not «ابي»; «من الاستعجال», not «من العجلة».
+- Decisions: recheck_from 0.65 yes ("we should test"); test F20 yes; unknown charges → transfers team (the author is still unsure; not applied).
+
+**F20 `duplicate_payment_hint`** (one hint line on `reversal_request`: the same amount sent twice by mistake, or a cancelled deal; money to the wrong person is `wrong_recipient`), dev 233 with a replicate, on top of rec+F16:
+
+| | Type used correct | First model correct | Wrong type → draft | Fraud → draft | Review rate |
+|---|---|---|---|---|---|
+| rec+F16 / -r1 | 228 / 228 | 227 / 227 | 4 / 4 | 0 / 0 | 19% / 19% |
+| **rec+F16+F20 / -r1** | **231 / 232** | **229 / 229** | **1 / 0** | 0 / 0 | 18% / 19% |
+
+All three double payments (dev-0109, 0138, 0190) fixed in both replicates; every other changed ticket also moved to the gold answer. Cost $0.27. **Adopt F20.**
+
+**Calibration with F20** ([dev/calibration-recF16F20.md](dev/calibration-recF16F20.md), re-check on all 233, $0.41): confidence ≥ 0.85 → 213/213 correct. `recheck_from` 0.60 vs 0.65 now makes **no difference** (no ticket left between them). `pass_above` 0.85 removes the last wrong type marked ready (1 → 0) for 10 more re-checks per 233 tickets (≈ $0.05) and review 17% → 18%: one ticket, so weak evidence.
+
 ## 29 Oct: the author's label check (18 dev tickets)
 
 The first check of gold labels by a person: the author, on a review page, for the 14 dev tickets where the recommended runs disagreed with gold most consistently, plus 4 random agreeing tickets. Answers: `data/review/dev_label_check_answers.json`.
