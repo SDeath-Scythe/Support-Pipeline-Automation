@@ -77,9 +77,9 @@ These are standing instructions from the author. Follow them unless he says othe
 | **F17 handoff note:** code only, no model call | Escalated tickets used to reach the team with just a flag label. The note lists the topic, extracted facts, what's missing and why it was escalated, and invents nothing. If the two models disagree on the type, it says the type is undecided rather than picking one. |
 | **F18: ask for a reference only when needed** | Author's rule. For not received / wrong recipient, the recipient's phone finds the transfer. A reversal (duplicate payment) is found in the history, so it never needs a reference. |
 | **F19: ≥ 750 USD raises priority** | Author's choice: about 1,000,000 IQD. Dollars are never converted, only compared. |
-| **Synthetic data, but grounded by the author** | Most competitors will generate tickets with a model and grade them with the same model family. The 2026 Iraqi-Arabic benchmark *Mizan* warns of "fusha in disguise" (standard Arabic with dialect words sprinkled in) and of same-family bias. Our grounding: the author's rules as code checks, his hand-check deciding the gold labels, dialect-drift rejection, and (optionally) a set of real phrasings scored separately. |
-| **One main issue per ticket; a second only when related** | That's how real tickets look, and how industry triage works (Zendesk reads one intent per ticket). The author confirmed it in the hand-check. |
-| **Patch the dataset, don't rebuild it** | A rebuild would throw away the 71 tickets he approved. `generate_tickets.py repair` replaces only the tickets that break a rule. |
+| **Synthetic data, but grounded by the author** | Most competitors will generate tickets with a model and grade them with the same model family. The 2026 Iraqi-Arabic benchmark *Mizan* warns of "fusha in disguise" (standard Arabic with dialect words sprinkled in) and of same-family bias. Our grounding: the author's rules as code checks, dialect-drift rejection, and still to do: a person checking gold labels, and (optionally) a set of real phrasings scored separately. **The 80-row review sheet was filled in by an AI model, not the author, so no gold label has been checked by a person yet.** |
+| **One main issue per ticket; a second only when related** | That's how real tickets look, and how industry triage works (Zendesk reads one intent per ticket). It is also one of the author's rules (section 3). |
+| **Patch the dataset, don't rebuild it** | A rebuild would throw away the 71 tickets the review sheet marked correct (that review was done by an AI model, not the author). `generate_tickets.py repair` replaces only the tickets that break a rule. |
 
 ## 5. Feature flags
 
@@ -135,13 +135,11 @@ Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/e
 - [x] Recommended flag set confirmed on a sealed 30-ticket hold-out (on cli)
 - [x] F17 handoff note, F18, F19; `policy.yaml` header explains why it's empty
 - [x] 400 tickets: dev 240, mvp_test 80, heldout 80 (seeds 1101/2202/3303)
-- [x] Hand-check of 80 tickets (Google Sheet "Support Pipeline – Hand Check (80 tickets)", copy in `data/review/handcheck_80.csv`). The author's rules were applied: 71 correct, 9 corrected.
+- [x] Review sheet of 80 tickets (Google Sheet "Support Pipeline – Hand Check (80 tickets)", blank copy in `data/review/handcheck_80.csv`), **filled in by an AI model** applying the author's rules: 71 marked correct, 9 corrected. Not checked by a person.
 - [x] Dataset repaired: 24 tickets replaced, and gold priority/outcome recomputed for all 400 under F18/F19
 
 **Not done:**
-- [ ] The author re-checks the **14 replaced rows** on the sheet (their «صحيح؟» is empty). Two worth a look:
-  - dev-0152: the auditor swapped main and second issue (agent refused vs agent overcharged)
-  - dev-0048: the auditor saw no second issue
+- [ ] **A person checks gold labels.** None has been checked by a person (the review sheet was filled in by an AI model). Cheapest useful check: the author reviews the dev tickets where the API pipeline disagrees with gold, plus a random ~30.
 - [x] API path fixed and checked against a local stand-in endpoint (no real call yet)
 - [x] API cost tracking and a per-run spend cap (29 Oct)
 - [x] First API runs (29 Oct): 10-ticket pilot, then a 30-ticket dev sample. About $0.002–0.003 per ticket; subcategory 29/30 (see `docs/experiments/LOG.md`)
@@ -152,7 +150,7 @@ Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/e
 
 ## 8. Next steps, in order
 
-1. **Author: re-check the 14 replaced rows** on the sheet (about 10 minutes).
+1. **Author: check gold labels by hand**, at least the tickets where the pipeline disagrees with gold (no label has been checked by a person yet).
 2. **API baseline vs recommended** (in the session that has the key). `--set` reads the `data/<split>/tickets.jsonl` format (same fields as the probe sets). The gold priority and outcome already follow the author's rules (F15, F18, F19), so baseline loses points on those by design. That gap is the point of those flags.
    ```bash
    python scripts/experiment.py run baseline --backend api --set data/dev/tickets.jsonl

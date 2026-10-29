@@ -108,35 +108,35 @@ Cap 10% at acceptance, build fails above 15%. Words not listed (شكو، بلك�
 | بسرعة | 4.2% | 6.2% | 3.8% |
 | عاجل | 1.2% | 0.0% | 0.0% |
 
-### Repair after the hand-check (28 Oct 2026)
+### Repair after the review sheet (28 Oct 2026)
 
-The author's hand-check (80 rows: 71 correct, 9 with a wrong label) found three things code didn't check. Instead of rebuilding, only the tickets that break a rule were replaced (`generate_tickets.py repair`); every other ticket keeps its text, including all 71 the author approved.
+**The 80-row review sheet was filled in by an AI model applying the author's rules, not by the author** (80 rows: 71 marked correct, 9 with a wrong label). No ticket's gold label has been checked by a person yet. The review found three things code didn't check. Instead of rebuilding, only the tickets that break a rule were replaced (`generate_tickets.py repair`); every other ticket keeps its text, including the 71 the review marked correct.
 
 1. **One issue per ticket.** Most people raise one problem, not two unrelated ones. A second issue is now always drawn from `RELATED`, pairs that come from the same situation (same transfer, agent visit or app session), and the generator is told the link. Tickets whose second issue wasn't related were rewritten.
 2. **Iraqi dialect only.** Code now rejects Levantine, Gulf, Egyptian and standard-Arabic forms (`DRIFT`: بدي، هيك، كتير، بقدر، شو، وايد، كذا، مش، عايز، لقد، سوف، الذي…). كيف (Mosuli) and ابي (Basra) are allowed. The 2026 Mizan benchmark for Iraqi Arabic names "fusha in disguise" as the main failure of model-written dialect data; this build has no standard-Arabic hits.
 3. **No repeated stories.** The off-topic edge case had produced "dollar rate + weather" five times. Off-topic tickets now get their own topic, handed out in order (`OFF_TOPIC_TOPICS`), and one dollar-rate ticket is kept (dev-0068). A replacement ticket is shown the other tickets of its type and told to describe a different situation.
 
-Also from the hand-check: a support-request number is never a transaction reference, and `login_otp` means the same phone and SIM (a new phone or SIM is `sim_change`).
+Also from the review sheet: a support-request number is never a transaction reference, and `login_otp` means the same phone and SIM (a new phone or SIM is `sim_change`).
 
 | | dev | mvp_test | heldout |
 |---|---|---|---|
 | Replaced | 13 | 6 | 5 |
 | Unrelated second issue | 7 | 2 | 2 |
 | Dialect drift | 2 | 1 | 2 |
-| Story repeat / hand-check | 4 | 3 | 1 |
+| Story repeat / review sheet | 4 | 3 | 1 |
 
 mvp-0003 (drift) was replaced twice: the first replacement told a phone-change story, which is `sim_change`, not its `login_otp` label.
 
 Each split's `build_info.json` lists every replaced ID with its reason under `repairs`. Heldout was repaired by code only; its text was not read. The new tickets were blind-audited; disputes are in `review_reason`, which also says `repaired: <reason>`.
 
-**Gold labels were recomputed for all 400 tickets** with the author's rules F18 (`reference_when_needed`: no transaction number is required when the recipient's phone identifies the transfer, or for a reversal request) and F19 (`usd_large_amount`: ≥ 750 USD raises priority like ≥ 1,000,000 IQD; dollars are never converted). This matches the author's 8 label corrections on the sheet. After the repair:
+**Gold labels were recomputed for all 400 tickets** with the author's rules F18 (`reference_when_needed`: no transaction number is required when the recipient's phone identifies the transfer, or for a reversal request) and F19 (`usd_large_amount`: ≥ 750 USD raises priority like ≥ 1,000,000 IQD; dollars are never converted). This matches the 8 label corrections on the review sheet. After the repair:
 
 | | dev | mvp_test | heldout |
 |---|---|---|---|
 | Outcome: drafted / flagged / escalated | 208 / 15 / 17 | 68 / 6 / 6 | 67 / 7 / 6 |
 | Priority: P1 / P2 / P3 | 31 / 87 / 122 | 10 / 28 / 42 | 13 / 25 / 42 |
 
-The 14 replaced rows on the hand-check sheet have the new text, and their «صحيح؟» is cleared for re-checking.
+The 14 replaced rows on the review sheet have the new text, and their «صحيح؟» is cleared for re-checking.
 
 ### Hand-check sheet (`review/handcheck_80.csv`, seed 4404)
 
