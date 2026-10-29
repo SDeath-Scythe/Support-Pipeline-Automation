@@ -2,7 +2,7 @@
 
 The starting point for anyone, person or AI session, picking up this project. It says what the project is, the rules for working on it, what was decided and why, what was tried and failed, where things stand, and what comes next. The detailed experiment report is [`HANDOVER.md`](HANDOVER.md); the dataset is described in [`data/README.md`](data/README.md).
 
-*Last updated 29 Oct 2026. All earlier branches were merged into `main` on 29 Oct; work continues on `claude/gracious-ramanujan-wwyhz1`.*
+*Last updated 29 Oct 2026 (after the MVP runs). All earlier branches were merged into `main` on 29 Oct; work continues on `claude/gracious-ramanujan-wwyhz1`.*
 
 ---
 
@@ -150,26 +150,17 @@ Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/e
 
 ## 8. Next steps, in order
 
-1. **Author: check gold labels by hand**, at least the tickets where the pipeline disagrees with gold (no label has been checked by a person yet).
-2. **API baseline vs recommended** (in the session that has the key). `--set` reads the `data/<split>/tickets.jsonl` format (same fields as the probe sets). The gold priority and outcome already follow the author's rules (F15, F18, F19), so baseline loses points on those by design. That gap is the point of those flags.
-   ```bash
-   python scripts/experiment.py run baseline --backend api --set data/dev/tickets.jsonl
-   python scripts/experiment.py run F2+F3c+F6b+F15+F11+F12+F14b+F17+F18+F19 --backend api --set data/dev/tickets.jsonl
-   python scripts/experiment.py run F2+F3c+F6b+F15+F11+F12+F14b+F16+F17+F18+F19 --backend api --set data/dev/tickets.jsonl --salt classifier=c1
-   ```
-   Run each with a replicate (`--salt`) to see the noise. F16 is judged on its own.
-3. **Calibrate on dev (API):**
-   - Set `pass_above` and `recheck_from` from the confidence-vs-correct table, aiming at about 30% or less human review with no wrong auto-drafts on fraud.
-   - Then confirm once on mvp_test.
-4. **Promote:**
-   - The winning flags become normal code.
-   - Delete the dropped flags and their code.
-   - Keep the harness.
-5. **Optional, strongest for judges:** 20–30 real phrasings from the author, friends or the support staff he spoke to. Anonymise them, label them by hand, and report them separately as `real_30`.
-6. **MVP run:**
-   - The final config on **heldout**, once, on the API.
-   - Report accuracy, review rate, priority, drafts, and cost per ticket.
-7. **Demo:** viewer pages for batch progress and the report; slides; mentor session (6–9 Nov); submit before **17 Nov**.
+*(Rewritten 29 Oct, after the MVP runs. Results: `docs/experiments/LOG.md`.)*
+
+Done on 29 Oct: API runs on dev (233), the author's two reviews (34 tickets; 2 labels fixed), F20 and F21 adopted, F11b rejected, configuration locked as `PIPELINE_FIXES=mvp` (thresholds 0.75 / 0.60), mvp_test and heldout run once each: type 98.7% on both, fraud never drafted, review rate 27% / 18%, about $0.0027 per ticket. About $5.40 of the $35 key spent.
+
+1. **Fresh test set** (mvp_test and heldout are now spent): generate about 160 new tickets on cli (no Arabizi, the new dialect bans), new seeds, in separate runs. The author hand-checks about 30 of them **before** the pipeline runs on them.
+2. **Optional, strongest for judges:** 20–30 real, anonymised phrasings, labelled by the author, reported separately as `real_30`.
+3. **Final run:** `mvp` on the fresh test set, once, on the API. Report accuracy, review rate, priority, drafts and cost per ticket.
+4. **Promote the `mvp` flags to the normal code path and delete the dropped flags**: only when the author says so (rule 3).
+5. **Demo:** viewer pages for batch progress and the report; slides; mentor session (6–9 Nov); submit before **17 Nov**.
+
+Known limits to state in the write-up: gold labels are model-written (34 checked by the author); the drafter sometimes misses asking for a shop or agent name (F11b, the fix tried, made drafts worse); unknown charges are routed to the fraud and security team (the author was unsure); the draft judge is a model, checked against the author on 13 drafts.
 
 ## 9. How to run
 
