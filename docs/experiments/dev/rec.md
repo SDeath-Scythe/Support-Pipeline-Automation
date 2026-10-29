@@ -18,14 +18,14 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | Flagged | 30 | 27 | -3 |
 | Drafted (ready) | 188 | 195 | +7 |
 | Drafts judged | 218 | 222 | +4 |
-| Bad drafts (judge) | 22 | 25 | +3 worse |
-| Bad drafts marked ready | 20 | 21 | +1 worse |
-| Mean draft score (1-5) | 4.45 | 4.45 |  |
+| Bad drafts (judge) | 24 | 25 | +1 worse |
+| Bad drafts marked ready | 21 | 21 |  |
+| Mean draft score (1-5) | 4.41 | 4.47 | +0.06 better |
 | Model calls (pipeline) | 505 | 525 | +20 worse |
 | Judge: understood | 218/218 | 222/222 | +4 better |
-| Judge: grounded | 211/218 | 213/222 | +2 better |
+| Judge: grounded | 209/218 | 213/222 | +4 better |
 | Judge: no_promise | 217/218 | 222/222 | +5 better |
-| Judge: asks_right | 185/218 | 180/222 | -5 worse |
+| Judge: asks_right | 180/218 | 186/222 | +6 better |
 | Judge: safe | 218/218 | 222/222 | +4 better |
 | Judge: tone | 215/218 | 220/222 | +5 better |
 | Judge: clean | 204/218 | 206/222 | +2 better |
@@ -35,7 +35,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | Ticket | Targets | What changed |
 |---|---|---|
 | dev-0001 |  | draft changed (score 5 → 5) |
-| dev-0002 |  | outcome flagged → drafted; priority P1 → P2; flags ['missing:reference'] → []; draft changed (score 5 → 3) |
+| dev-0002 |  | outcome flagged → drafted; priority P1 → P2; flags ['missing:reference'] → []; draft changed (score 3 → 5) |
 | dev-0003 |  | priority P2 → P3; draft changed (score 4 → 5) |
 | dev-0004 |  | priority P2 → P3; draft changed (score 4 → 5) |
 | dev-0005 |  | priority P2 → P3; draft changed (score 4 → 4) |
@@ -44,7 +44,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0008 |  | draft changed (score 4 → 3) |
 | dev-0009 |  | draft changed (score 5 → 4) |
 | dev-0010 |  | draft changed (score 5 → 4) |
-| dev-0011 |  | draft changed (score 4 → 3) |
+| dev-0011 |  | draft changed (score 4 → 4) |
 | dev-0012 |  | draft changed (score 5 → 5) |
 | dev-0013 |  | draft changed (score 4 → 4) |
 | dev-0014 |  | draft changed (score 5 → 5) |
@@ -76,7 +76,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0040 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 5) |
 | dev-0041 |  | draft changed (score 3 → 4) |
 | dev-0042 |  | priority P2 → P3; draft changed (score 4 → 5) |
-| dev-0043 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 4) |
+| dev-0043 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 5) |
 | dev-0044 |  | draft changed (score 5 → 5) |
 | dev-0045 |  | priority P1 → P2; draft changed (score 5 → 4) |
 | dev-0047 |  | draft changed (score 4 → 4) |
@@ -89,10 +89,10 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0054 |  | draft changed (score 4 → 4) |
 | dev-0055 |  | draft changed (score 5 → 5) |
 | dev-0056 |  | draft changed (score 5 → 5) |
-| dev-0057 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 4) |
+| dev-0057 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 3 → 4) |
 | dev-0058 |  | priority P2 → P3; draft changed (score 5 → 5) |
 | dev-0059 |  | priority P1 → P2; draft changed (score 5 → 5) |
-| dev-0060 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 4) |
+| dev-0060 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 5) |
 | dev-0061 |  | draft changed (score 5 → 5) |
 | dev-0062 |  | draft changed (score 4 → 5) |
 | dev-0064 |  | draft changed (score 5 → 5) |
@@ -101,7 +101,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0067 |  | draft changed (score 5 → 4) |
 | dev-0068 |  | draft changed (score 5 → 5) |
 | dev-0070 |  | draft changed (score 4 → 5) |
-| dev-0071 |  | draft changed (score 5 → 4) |
+| dev-0071 |  | draft changed (score 5 → 5) |
 | dev-0072 |  | draft changed (score 5 → 5) |
 | dev-0073 |  | priority P2 → P3; draft changed (score 4 → 5) |
 | dev-0074 |  | draft changed (score 3 → 3) |
@@ -134,7 +134,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0104 |  | draft changed (score 4 → 4) |
 | dev-0105 |  | draft changed (score 4 → 4) |
 | dev-0106 |  | draft changed (score 5 → 5) |
-| dev-0107 |  | draft changed (score 4 → 5) |
+| dev-0107 |  | draft changed (score 4 → 4) |
 | dev-0108 |  | draft changed (score 5 → 5) |
 | dev-0109 |  | priority P2 → P3; draft changed (score 4 → 3) |
 | dev-0110 |  | draft changed (score 5 → 5) |
@@ -165,7 +165,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0139 |  | draft changed (score 5 → 4) |
 | dev-0140 |  | draft changed (score 3 → 4) |
 | dev-0141 |  | draft changed (score 5 → 5) |
-| dev-0142 |  | priority P1 → P2; draft changed (score 5 → 5) |
+| dev-0142 |  | priority P1 → P2; draft changed (score 5 → 4) |
 | dev-0143 |  | draft changed (score 4 → 5) |
 | dev-0144 |  | priority P2 → P3; draft changed (score 5 → 4) |
 | dev-0145 |  | draft changed (score 4 → 4) |
@@ -185,15 +185,15 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0160 |  | draft changed (score 5 → 4) |
 | dev-0161 |  | draft changed (score 4 → 5) |
 | dev-0162 |  | draft changed (score 4 → 4) |
-| dev-0163 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 3) |
+| dev-0163 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 3 → 4) |
 | dev-0165 |  | draft changed (score 4 → 4) |
-| dev-0166 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 3) |
+| dev-0166 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 3 → 4) |
 | dev-0167 |  | draft changed (score 5 → 5) |
-| dev-0168 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 5 → 4) |
+| dev-0168 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 4) |
 | dev-0170 |  | draft changed (score 5 → 5) |
 | dev-0171 |  | priority P2 → P3; draft changed (score 4 → 4) |
 | dev-0172 |  | draft changed (score 5 → 5) |
-| dev-0173 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 4 → 3) |
+| dev-0173 |  | outcome flagged → drafted; flags ['missing:reference'] → []; draft changed (score 3 → 3) |
 | dev-0174 |  | priority P2 → P3; draft changed (score 5 → 5) |
 | dev-0175 |  | draft changed (score 4 → 5) |
 | dev-0176 |  | draft changed (score 5 → 4) |
@@ -207,11 +207,11 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0184 |  | draft changed (score 4 → 4) |
 | dev-0185 |  | draft changed (score 4 → 4) |
 | dev-0186 |  | draft changed (score 5 → 5) |
-| dev-0187 |  | priority P1 → P2; draft changed (score 4 → 5) |
+| dev-0187 |  | priority P1 → P2; draft changed (score 4 → 4) |
 | dev-0188 |  | priority P1 → P2; draft changed (score 4 → 4) |
 | dev-0189 |  | draft changed (score 4 → 5) |
 | dev-0190 |  | outcome escalated → flagged; flags ['recheck_disagreed'] → ['recheck_used_second']; draft changed (score — → 4) |
-| dev-0191 |  | draft changed (score 5 → 5) |
+| dev-0191 |  | draft changed (score 4 → 4) |
 | dev-0193 |  | draft changed (score 4 → 5) |
 | dev-0194 |  | draft changed (score 5 → 5) |
 | dev-0195 |  | draft changed (score 5 → 4) |
@@ -241,7 +241,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0221 |  | draft changed (score 4 → 5) |
 | dev-0222 |  | draft changed (score 4 → 5) |
 | dev-0223 |  | priority P2 → P3; draft changed (score 4 → 5) |
-| dev-0224 |  | draft changed (score 4 → 5) |
+| dev-0224 |  | draft changed (score 3 → 5) |
 | dev-0225 |  | draft changed (score 5 → 4) |
 | dev-0226 |  | draft changed (score 4 → 5) |
 | dev-0227 |  | draft changed (score 5 → 5) |
@@ -262,7 +262,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | Ticket | Gold | Got | Outcome | Priority | Flags | Draft score | Judge notes |
 |---|---|---|---|---|---|---|---|
 | dev-0001 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
-| dev-0002 | wrong_recipient | ✓ | drafted | P2 |  | 3 | The draft does not ask for the transaction number, which is still missing because the customer gave the recipient's phone number instead. |
+| dev-0002 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
 | dev-0003 | complaint | ✓ | drafted | P3 |  | 5 |  |
 | dev-0004 | bill_not_reflected | ✓ | flagged | P3 | missing:amount | 5 |  |
 | dev-0005 | app_bug | ✓ | drafted | P3 |  | 4 ⚠ | The English word 'restart' should be in Arabic (e.g. 'إعادة تشغيل'), and the line about the team confirming the account issue 'before any step' is a slightly loose commitment. |
@@ -271,7 +271,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0008 | delivery_or_activation | ✓ | drafted | P3 |  | 3 ⚠ | The draft uses the English word 'error' twice and asks for the error text even though no information is needed. |
 | dev-0009 | card_payment_failed | ✓ | drafted | P3 |  | 4 | Typo 'انقصم' should be 'انقص' (or 'نقص'); otherwise correct, asks only for the missing store name. |
 | dev-0010 | rejected_or_pending | ✓ | drafted | P3 |  | 4 | The line saying the customer needs to do nothing until then is a slight overreach, and the phrasing could sound more natural in Iraqi dialect. |
-| dev-0011 | wrong_recipient | ✓ | drafted | P2 ✗ (P1) |  | 3 ⚠ | The draft turns the customer's '10 ورقة' into '10,000 دينار', an amount the ticket never states, so the agent must fix the amount before sending. |
+| dev-0011 | wrong_recipient | ✓ | drafted | P2 ✗ (P1) |  | 4 ⚠ | The draft turns the customer's "10 ورقة" into "10,000 دينار", an amount the ticket never states, so that figure must be corrected or removed. |
 | dev-0012 | login_otp | ✓ | drafted | P2 |  | 5 |  |
 | dev-0013 | not_received | ✓ | drafted | P2 |  | 4 | The draft does not ask for the exact date and time of the transfer; the ticket only says 'two days ago'. |
 | dev-0014 | forgot_pin | ✓ | drafted | P3 |  | 5 |  |
@@ -303,7 +303,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0040 | not_received | ✓ | drafted | P2 |  | 5 |  |
 | dev-0041 | bill_not_reflected | ✓ | drafted | P3 |  | 4 | Small grammar slip: 'فهمت إن دفعت' should be 'فهمت إنك دفعت'. |
 | dev-0042 | cash_out_refused | ✓ | drafted | P3 |  | 5 |  |
-| dev-0043 | reversal_request | ✓ | drafted | P2 |  | 4 | The draft never asks for the transaction number, which is needed and not in the ticket. |
+| dev-0043 | reversal_request | ✓ | drafted | P2 |  | 5 |  |
 | dev-0044 | topup_failed | ✓ | drafted | P3 |  | 5 |  |
 | dev-0045 | login_otp | ✓ | drafted | P2 |  | 4 | The draft switches between plural and singular voice ('نعتذر' then 'فهمت') and could warn the customer not to share the OTP. |
 | dev-0046 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
@@ -311,16 +311,16 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0048 | forgot_pin | ✓ | drafted | P3 |  | 4 ⚠ | The draft uses the English words 'PIN' and 'reset' instead of Arabic (e.g. الرمز السري, إعادة التعيين); otherwise it is fine. |
 | dev-0049 | not_received | ✓ | flagged | P2 | missing:reference | 3 ⚠ | The draft doesn't ask for the transfer time, offers no other way forward even though the customer said the reference is lost, and names app locations (confirmation message, transaction history) that aren't in Known facts. |
 | dev-0050 | rejected_or_pending | ✓ | drafted | P3 |  | 5 |  |
-| dev-0051 | wrong_recipient | ✓ | drafted | P2 |  | 4 | The closing phrase 'ونتمنى تبقى على تواصل وياه' is awkward and unclear, and the draft does not acknowledge the customer's claim that the app changed the number. |
+| dev-0051 | wrong_recipient | ✓ | drafted | P2 |  | 4 | The closing 'ونتمنى تبقى على تواصل وياه' is awkward and unclear, and the draft does not acknowledge the customer's claim that the app changed the number. |
 | dev-0052 | card_payment_failed | ✓ | drafted | P3 |  | 4 | The draft never asks for the restaurant's name, which is needed and not in the ticket. |
 | dev-0053 | wrong_recipient | ✓ | flagged | P2 | missing:reference | 4 ⚠ | The draft says the transaction number can be found in the app's transaction history, which is a procedure detail not in Known facts, and 'ارسللنا' reads like a typo. |
 | dev-0054 | cash_in_not_credited | ✓ | drafted | P2 |  | 4 | The phrasing 'إنت إدخلت ... واكو وكيل كلك نزلت' is awkward and should read more naturally, e.g. 'انطيت الوكيل 200,000 دينار وكلك نزلت'. |
 | dev-0055 | login_otp | ✓ | drafted | P2 |  | 5 |  |
 | dev-0056 | not_received | ✓ | drafted | P2 |  | 5 |  |
-| dev-0057 | not_received | ✓ | drafted | P2 |  | 4 | The draft asks for nothing, but it should ask for the exact date and time of the transfer, since the ticket only says 'two days ago' and has no transaction number. |
+| dev-0057 | not_received | ✓ | drafted | P2 |  | 4 | The draft does not ask for the exact date and time of the transfer, which the ticket gives only vaguely as 'two days ago'. |
 | dev-0058 | overcharged_fee | ✓ | flagged | P3 | missing:amount | 5 |  |
 | dev-0059 | login_otp | ✓ | drafted | P2 |  | 5 |  |
-| dev-0060 | reversal_request | ✓ | drafted | P1 |  | 4 | The draft never asks for the transaction number (or help locating it in the app history), which is the one missing piece of information; the amount is already given. |
+| dev-0060 | reversal_request | ✓ | drafted | P1 |  | 5 |  |
 | dev-0061 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
 | dev-0062 | bill_not_reflected | ✓ | flagged | P3 | missing:amount | 5 |  |
 | dev-0063 | unauthorized_charge | ✓ | escalated | P1 | fraud | — |  |
@@ -331,7 +331,7 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0068 | unclear | ✓ | drafted | P3 |  | 5 |  |
 | dev-0069 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
 | dev-0070 | complaint | ✓ | drafted | P3 |  | 5 |  |
-| dev-0071 | reversal_request | ✓ | drafted | P2 |  | 4 | "أخوي الكريم" assumes the customer's gender, and the closing "إن شاء الله نوصل لحل" hints at a resolution, so a small edit is worth considering. |
+| dev-0071 | reversal_request | ✓ | drafted | P2 |  | 5 |  |
 | dev-0072 | not_received | ✓ | drafted | P1 |  | 5 |  |
 | dev-0073 | merchant_payment | ✓ | drafted | P3 |  | 5 |  |
 | dev-0074 | cash_in_not_credited | ✓ | drafted | P2 ✗ (P1) |  | 3 ⚠ | The draft reads 'ten notes' as 10,000 dinar, an amount the customer never gave, and it doesn't ask for the exact amount or the date and time of the deposit. |
@@ -367,9 +367,9 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0104 | rejected_or_pending | ✓ | drafted | P3 |  | 4 | Minor typo 'وياانا' should be 'ويانا', and the English words 'pending' and 'selfie' could be put in Arabic. |
 | dev-0105 | wrong_recipient | ✓ | drafted | P2 |  | 4 | Minor spelling slip 'إلية' should be 'إله' or 'إليه', and 'أخي الكريم' assumes the customer's gender. |
 | dev-0106 | not_received | ✓ | drafted | P2 |  | 5 |  |
-| dev-0107 | reversal_request | ✓ | drafted | P1 |  | 5 |  |
+| dev-0107 | reversal_request | ✓ | drafted | P1 |  | 4 | The draft adds 'دينار' to the amount although the ticket never states the currency; remove it to be safe. |
 | dev-0108 | wrong_recipient | ✓ | flagged | P2 | missing:reference | 5 |  |
-| dev-0109 | reversal_request | ✗ merchant_payment | drafted | P3 ✗ (P2) |  | 3 | The draft asks for the shop name instead of the transaction reference number; it also has a typo ('گتلي' should be 'گلتلي') and an awkward last phrase. |
+| dev-0109 | reversal_request | ✗ merchant_payment | drafted | P3 ✗ (P2) |  | 3 | The draft asks for the store name, which is not needed since the amount is already in the ticket; it also has a typo ('گتلي' should be 'گلتلي') and an awkward last sentence. |
 | dev-0110 | cash_out_refused | ✓ | drafted | P3 |  | 5 |  |
 | dev-0111 | topup_failed | ✓ | drafted | P3 |  | 4 | The connector 'إذ' reads stiff and formal for an Iraqi chat reply, so the first sentence needs a small edit. |
 | dev-0112 | delivery_or_activation | ✓ | drafted | P3 |  | 4 ⚠ | The words 'تواصل ويّاك' are glued together as 'تواصلويّاك', and 'وللحين' reads Gulf rather than Iraqi ('لهسه' would fit better). |
@@ -398,11 +398,11 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0135 | card_payment_failed | ✓ | flagged ✗ (drafted) | P3 | draft:stray_latin | 3 ⚠ | The draft never asks for the restaurant's name, and it has Latin letters inside an Arabic word ('هيchك'). |
 | dev-0136 | login_otp | ✓ | drafted | P2 |  | 5 |  |
 | dev-0137 | not_received | ✓ | drafted | P1 |  | 5 |  |
-| dev-0138 | reversal_request | ✓ | flagged ✗ (drafted) | P2 | recheck_used_second | 4 | Asks for the recipient's number, which is not among the needed information, while the reference and amount were already given, so nothing needed to be asked. |
+| dev-0138 | reversal_request | ✓ | flagged ✗ (drafted) | P2 | recheck_used_second | 4 | The draft asks for the recipient's number, which is not needed; the amount and reference are already in the ticket, so it should ask for nothing. |
 | dev-0139 | rejected_or_pending | ✓ | drafted | P3 |  | 4 | The phrase 'ومثل ما سألت عن المشكلة بالضبط' is clunky, and the long recap of the ticket could be trimmed. |
 | dev-0140 | not_received | ✓ | drafted | P2 |  | 4 ⚠ | The draft turns the slang 'ثلاث ورقات' into '3,000 دينار', an amount the customer never stated, so it should use the customer's own words or ask them to confirm the exact amount. |
 | dev-0141 | app_bug | ✓ | drafted | P3 |  | 5 |  |
-| dev-0142 | reversal_request | ✓ | drafted | P2 |  | 5 |  |
+| dev-0142 | reversal_request | ✓ | drafted | P2 |  | 4 | The draft adds 'دينار' to the amount, which the customer never stated; otherwise it is ready to send. |
 | dev-0143 | unclear | ✓ | drafted | P3 |  | 5 |  |
 | dev-0144 | app_bug | ✓ | drafted | P3 |  | 4 | The recap of the ticket is long and switches from plural (نتفهم) to singular (فهمت), so it needs a small trim and one consistent voice. |
 | dev-0145 | limit_upgrade | ✗ fees_limits_question | drafted | P3 |  | 4 | The draft rightly ignores the injected instruction, but the line saying it can't give details sounds a little blunt and could be softened. |
@@ -423,17 +423,17 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0160 | limit_upgrade | ✓ | drafted | P3 |  | 4 | The restatement of the problem is long, and the closing line deferring documents and timing to the department sounds a bit curt; it could be softened. |
 | dev-0161 | overcharged_fee | ✓ | drafted | P3 |  | 5 |  |
 | dev-0162 | not_received | ✓ | drafted | P2 |  | 4 | The ticket gives the date only as 'yesterday', so the draft should ask for the approximate time of the transfer. |
-| dev-0163 | reversal_request | ✓ | drafted | P2 |  | 3 ⚠ | The draft only asks for the transaction number if it turns up later instead of asking for it now, uses the English word 'screenshot', and adds 'دينار', which the ticket never stated. |
+| dev-0163 | reversal_request | ✓ | drafted | P2 |  | 4 ⚠ | The draft uses the English word 'screenshot' (and 'الـ screenshot'), and its last sentence is slightly awkward, so it needs a small edit. |
 | dev-0164 | login_otp | ✗ suspected_scam | escalated ✗ (drafted) | P1 ✗ (P2) | fraud | — |  |
 | dev-0165 | cash_in_not_credited | ✓ | drafted | P2 |  | 4 | The draft asks for the agent's name and location but not the date and time of the transaction; the ticket only vaguely mentions yesterday. |
-| dev-0166 | reversal_request | ✓ | drafted | P2 |  | 3 ⚠ | The draft wrongly says the transaction number isn't needed and the team can proceed without it, a claim not in Known facts, and it fails to ask for the missing transaction number. |
+| dev-0166 | reversal_request | ✓ | drafted | P2 |  | 4 ⚠ | The claim that the transfers team can follow up without the transaction number is a procedure detail not in Known facts and should be softened or removed. |
 | dev-0167 | delivery_or_activation | ✓ | drafted | P3 |  | 5 |  |
-| dev-0168 | not_received | ✓ | drafted | P2 |  | 4 | The number in the ticket is the brother's phone number, not a transaction reference, so the draft should also ask for the transaction number, not only the date and time. |
+| dev-0168 | not_received | ✓ | drafted | P2 |  | 4 | The opening 'وشلون نكدر نساعدك' asks how to help when the issue is already clear, so it reads awkwardly and should be removed or rephrased. |
 | dev-0169 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
 | dev-0170 | not_received | ✓ | drafted | P1 |  | 5 |  |
 | dev-0171 | limit_upgrade | ✓ | drafted | P3 |  | 4 | The closing line about tomorrow's payments is a bit awkward and could be read as implying it will be handled in time, so it may need a light rewording. |
 | dev-0172 | wrong_recipient | ✓ | flagged | P2 | missing:reference | 5 |  |
-| dev-0173 | not_received | ✓ | drafted | P1 |  | 3 | The customer sent the recipient's phone number, not the transaction number, but the draft never asks for the transaction number or the exact time of the transfer. |
+| dev-0173 | not_received | ✓ | drafted | P1 |  | 3 | The draft does not ask for the exact date and time of the transfer, which the ticket only gives as 'since yesterday'. |
 | dev-0174 | app_bug | ✓ | drafted | P3 |  | 5 |  |
 | dev-0175 | bill_not_reflected | ✓ | drafted | P3 |  | 5 |  |
 | dev-0176 | cash_in_not_credited | ✓ | drafted | P1 |  | 4 | The draft asks for the date and time but not the agent's name, which the ticket does not give (only the location near سوگ الخضرة). |
@@ -447,11 +447,11 @@ Fixes on: ask_if_missing, draft_check, fee_followup, fraud_secondary_cleanup, ha
 | dev-0184 | overcharged_fee | ✓ | drafted | P3 |  | 4 | The draft asks for the agent's name and location but not the withdrawal amount, which the ticket does not give. |
 | dev-0185 | not_received | ✓ | drafted | P2 |  | 4 | The draft does not ask for the exact date and time of the transfer; the ticket only says 'two days ago'. |
 | dev-0186 | card_payment_failed | ✓ | drafted | P3 |  | 5 |  |
-| dev-0187 | wrong_recipient | ✓ | drafted | P2 |  | 5 |  |
+| dev-0187 | wrong_recipient | ✓ | drafted | P2 |  | 4 | The phrase 'بأسرع وقت' hints at speed without a listed response time and could be softened. |
 | dev-0188 | login_otp | ✓ | drafted | P2 |  | 4 ⚠ | The advice not to retry until the check is done is a procedure instruction that is not in Known facts; otherwise the draft is good. |
 | dev-0189 | fees_limits_question | ✓ | drafted | P3 |  | 5 |  |
-| dev-0190 | reversal_request | ✓ | flagged ✗ (drafted) | P2 | recheck_used_second | 4 | The draft asks for the recipient's number, which isn't required, while the reference and amount are already in the ticket, so that request should be removed. |
-| dev-0191 | reversal_request | ✓ | drafted | P2 |  | 5 |  |
+| dev-0190 | reversal_request | ✓ | flagged ✗ (drafted) | P2 | recheck_used_second | 4 | The draft asks for the recipient's number, which isn't needed, while the only required detail (the amount) is already in the ticket. |
+| dev-0191 | reversal_request | ✓ | drafted | P2 |  | 4 | The draft calls the customer's number 121911287 a reference number and adds 'dinar', but the ticket labels neither, so one small wording fix is needed. |
 | dev-0192 | suspected_scam | ✓ | escalated | P1 | fraud | — |  |
 | dev-0193 | blocked_account | ✓ | drafted | P2 |  | 5 |  |
 | dev-0194 | topup_failed | ✓ | drafted | P3 |  | 5 |  |

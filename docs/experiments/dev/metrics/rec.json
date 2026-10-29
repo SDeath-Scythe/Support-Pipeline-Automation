@@ -93,7 +93,7 @@
   "drafts": 222,
   "bad_drafts": 25,
   "bad_ready": 21,
-  "mean_score": 4.45,
+  "mean_score": 4.47,
   "model_calls": 525,
   "judge_understood": [
    222,
@@ -108,7 +108,7 @@
    222
   ],
   "judge_asks_right": [
-   180,
+   186,
    222
   ],
   "judge_safe": [
@@ -193,12 +193,12 @@
     "understood": true,
     "grounded": true,
     "no_promise": true,
-    "asks_right": false,
+    "asks_right": true,
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 3,
-    "problems": "The draft does not ask for the transaction number, which is still missing because the customer gave the recipient's phone number instead."
+    "score": 5,
+    "problems": ""
    },
    "bad": false,
    "bad_ready": false
@@ -550,8 +550,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 3,
-    "problems": "The draft turns the customer's '10 ورقة' into '10,000 دينار', an amount the ticket never states, so the agent must fix the amount before sending."
+    "score": 4,
+    "problems": "The draft turns the customer's \"10 ورقة\" into \"10,000 دينار\", an amount the ticket never states, so that figure must be corrected or removed."
    },
    "bad": true,
    "bad_ready": true
@@ -1805,12 +1805,12 @@
     "understood": true,
     "grounded": true,
     "no_promise": true,
-    "asks_right": false,
+    "asks_right": true,
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 4,
-    "problems": "The draft never asks for the transaction number, which is needed and not in the ticket."
+    "score": 5,
+    "problems": ""
    },
    "bad": false,
    "bad_ready": false
@@ -2116,7 +2116,7 @@
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "The closing phrase 'ونتمنى تبقى على تواصل وياه' is awkward and unclear, and the draft does not acknowledge the customer's claim that the app changed the number."
+    "problems": "The closing 'ونتمنى تبقى على تواصل وياه' is awkward and unclear, and the draft does not acknowledge the customer's claim that the app changed the number."
    },
    "bad": false,
    "bad_ready": false
@@ -2352,7 +2352,7 @@
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "The draft asks for nothing, but it should ask for the exact date and time of the transfer, since the ticket only says 'two days ago' and has no transaction number."
+    "problems": "The draft does not ask for the exact date and time of the transfer, which the ticket gives only vaguely as 'two days ago'."
    },
    "bad": false,
    "bad_ready": false
@@ -2466,12 +2466,12 @@
     "understood": true,
     "grounded": true,
     "no_promise": true,
-    "asks_right": false,
+    "asks_right": true,
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 4,
-    "problems": "The draft never asks for the transaction number (or help locating it in the app history), which is the one missing piece of information; the amount is already given."
+    "score": 5,
+    "problems": ""
    },
    "bad": false,
    "bad_ready": false
@@ -2887,8 +2887,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 4,
-    "problems": "\"أخوي الكريم\" assumes the customer's gender, and the closing \"إن شاء الله نوصل لحل\" hints at a resolution, so a small edit is worth considering."
+    "score": 5,
+    "problems": ""
    },
    "bad": false,
    "bad_ready": false
@@ -4272,8 +4272,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The draft adds 'دينار' to the amount although the ticket never states the currency; remove it to be safe."
    },
    "bad": false,
    "bad_ready": false
@@ -4353,7 +4353,7 @@
     "tone": true,
     "clean": true,
     "score": 3,
-    "problems": "The draft asks for the shop name instead of the transaction reference number; it also has a typo ('گتلي' should be 'گلتلي') and an awkward last phrase."
+    "problems": "The draft asks for the store name, which is not needed since the amount is already in the ticket; it also has a typo ('گتلي' should be 'گلتلي') and an awkward last sentence."
    },
    "bad": false,
    "bad_ready": false
@@ -5460,7 +5460,7 @@
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "Asks for the recipient's number, which is not among the needed information, while the reference and amount were already given, so nothing needed to be asked."
+    "problems": "The draft asks for the recipient's number, which is not needed; the amount and reference are already in the ticket, so it should ask for nothing."
    },
    "bad": false,
    "bad_ready": false
@@ -5615,8 +5615,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The draft adds 'دينار' to the amount, which the customer never stated; otherwise it is ready to send."
    },
    "bad": false,
    "bad_ready": false
@@ -6428,12 +6428,12 @@
     "understood": true,
     "grounded": true,
     "no_promise": true,
-    "asks_right": false,
+    "asks_right": true,
     "safe": true,
     "tone": true,
     "clean": false,
-    "score": 3,
-    "problems": "The draft only asks for the transaction number if it turns up later instead of asking for it now, uses the English word 'screenshot', and adds 'دينار', which the ticket never stated."
+    "score": 4,
+    "problems": "The draft uses the English word 'screenshot' (and 'الـ screenshot'), and its last sentence is slightly awkward, so it needs a small edit."
    },
    "bad": true,
    "bad_ready": true
@@ -6537,12 +6537,12 @@
     "understood": true,
     "grounded": false,
     "no_promise": true,
-    "asks_right": false,
+    "asks_right": true,
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 3,
-    "problems": "The draft wrongly says the transaction number isn't needed and the team can proceed without it, a claim not in Known facts, and it fails to ask for the missing transaction number."
+    "score": 4,
+    "problems": "The claim that the transfers team can follow up without the transaction number is a procedure detail not in Known facts and should be softened or removed."
    },
    "bad": true,
    "bad_ready": true
@@ -6615,12 +6615,12 @@
     "understood": true,
     "grounded": true,
     "no_promise": true,
-    "asks_right": false,
+    "asks_right": true,
     "safe": true,
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "The number in the ticket is the brother's phone number, not a transaction reference, so the draft should also ask for the transaction number, not only the date and time."
+    "problems": "The opening 'وشلون نكدر نساعدك' asks how to help when the issue is already clear, so it reads awkwardly and should be removed or rephrased."
    },
    "bad": false,
    "bad_ready": false
@@ -6809,7 +6809,7 @@
     "tone": true,
     "clean": true,
     "score": 3,
-    "problems": "The customer sent the recipient's phone number, not the transaction number, but the draft never asks for the transaction number or the exact time of the transfer."
+    "problems": "The draft does not ask for the exact date and time of the transfer, which the ticket only gives as 'since yesterday'."
    },
    "bad": false,
    "bad_ready": false
@@ -7356,8 +7356,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The phrase 'بأسرع وقت' hints at speed without a listed response time and could be softened."
    },
    "bad": false,
    "bad_ready": false
@@ -7476,7 +7476,7 @@
     "tone": true,
     "clean": true,
     "score": 4,
-    "problems": "The draft asks for the recipient's number, which isn't required, while the reference and amount are already in the ticket, so that request should be removed."
+    "problems": "The draft asks for the recipient's number, which isn't needed, while the only required detail (the amount) is already in the ticket."
    },
    "bad": false,
    "bad_ready": false
@@ -7514,8 +7514,8 @@
     "safe": true,
     "tone": true,
     "clean": true,
-    "score": 5,
-    "problems": ""
+    "score": 4,
+    "problems": "The draft calls the customer's number 121911287 a reference number and adds 'dinar', but the ticket labels neither, so one small wording fix is needed."
    },
    "bad": false,
    "bad_ready": false
