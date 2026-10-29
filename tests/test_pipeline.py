@@ -1134,3 +1134,20 @@ def test_attempt_gets_its_own_cache_slot(monkeypatch, tmp_path):
     assert llm.call("classifier", "S", "U") == "first"
     assert llm.call("classifier", "S", "U", attempt=1) == "second"
     assert llm.call("classifier", "S", "U") == "first"          # attempt 0 still cached as before
+
+
+def test_judge_needed_info_follows_reference_rule():
+    """The judge must not mark a draft down for not asking for a transaction number the author's
+    rule (F18) says isn't needed: reversals, or a transfer where the recipient's phone is given."""
+    import importlib.util
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("experiment", root / "scripts/experiment.py")
+    exp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(exp)
+    ref = "رقم العملية"
+    assert ref not in exp.needed_info({"subcategory": "reversal_request"})
+    assert ref not in exp.needed_info({"subcategory": "not_received", "recipient_phone": "07812345678"})
+    assert ref in exp.needed_info({"subcategory": "not_received", "recipient_phone": None})
+    assert "اسم المتجر" in exp.needed_info({"subcategory": "card_payment_failed"})

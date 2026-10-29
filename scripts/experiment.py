@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from pipeline.config import load_yaml, taxonomy  # noqa: E402
 from pipeline.draft import FIELD_AR  # noqa: E402
 from pipeline.gate import _key  # noqa: E402
+from pipeline.requirements import REFERENCE_ALTERNATIVES, REFERENCE_NOT_NEEDED  # noqa: E402
 
 CODES = {
     "F2": "draft_check",
@@ -120,11 +121,21 @@ def _ev(row: dict, stage: str) -> dict | None:
     return next((e for e in row["events"] if e["stage"] == stage and e["status"] != "running"), None)
 
 
-def needed_info(sub: str) -> list[str]:
+def needed_info(gold: dict) -> list[str]:
+    """What the company needs from the customer for this ticket, by the author's rules.
+
+    F18 (the author's rule, applied whatever flags the run used): no transaction number when the
+    team can find the transfer without it (the recipient's phone is given, or it is a reversal).
+    Before 29 Oct the judge asked for it anyway and marked correct drafts down for not asking.
+    """
+    sub = gold["subcategory"]
     tax = taxonomy()
     fields = list(tax.get(sub).required_fields) if sub in tax.subcategories else []
     policy = (load_yaml("policy.yaml")["subcategories"].get(sub) or {}).get("customer_should_send", [])
-    return [FIELD_AR.get(f, f) for f in dict.fromkeys(fields + policy)]
+    fields = list(dict.fromkeys(fields + policy))
+    if sub in REFERENCE_NOT_NEEDED or any(gold.get(alt) for alt in REFERENCE_ALTERNATIVES.get(sub, ())):
+        fields = [f for f in fields if f != "reference"]
+    return [FIELD_AR.get(f, f) for f in fields]
 
 
 def judge_prompt(row: dict, salt: str = "") -> str | None:
@@ -146,7 +157,7 @@ def judge_prompt(row: dict, salt: str = "") -> str | None:
             team = line.removeprefix("Handled by:").strip()
     if team:   # the drafter is told the team, so naming it is grounded
         facts += f"; the issue is handled by {team}"
-    needed = needed_info(gold["subcategory"])
+    needed = needed_info(gold)
     return "\n".join([
         f"<ticket>\n{gold['text']}\n</ticket>",
         f"Correct issue: {issue}",
