@@ -71,10 +71,26 @@ def _clean_secondary(ex: Extraction) -> Extraction:
     return ex
 
 
+def _add_usage(a: dict, b: dict) -> dict:
+    """Usage of two calls for one step. Tokens add up; cost counts only calls actually made
+    (a cache hit replays a stored cost but spends nothing), so the step is "cached" only if both were."""
+    out = {k: (a.get(k) or 0) + (b.get(k) or 0) for k in (a.keys() | b.keys()) - {"cached", "cost_usd"}}
+    cost = sum(u.get("cost_usd") or 0 for u in (a, b) if not u.get("cached"))
+    return {**out, "cost_usd": round(cost, 6), "cached": bool(a.get("cached") and b.get("cached")), "retried": True}
+
+
 def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str, Any]]:
     t0 = time.time()
     reply = call(role, system, user)
-    ex = cls.parse(reply)
+    usage = last_usage()
+    try:
+        ex = cls.parse(reply)
+    except ValueError:
+        # A reply that isn't valid JSON (on the API, Haiku sometimes adds a stray ")" before the
+        # closing "}") gets one fresh try before the ticket is escalated as a model error.
+        reply = call(role, system, user, attempt=1)
+        usage = _add_usage(usage, last_usage())
+        ex = cls.parse(reply)
     cleared = None
     if enabled("fraud_secondary_cleanup"):
         before = ex.secondary_subcategory
@@ -88,7 +104,7 @@ def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str
         "user_prompt": user,
         "reply": reply,
         "extraction": ex.model_dump(),
-        "usage": last_usage(),
+        "usage": usage,
         **({"cleared_secondary": cleared} if cleared else {}),
     }
 

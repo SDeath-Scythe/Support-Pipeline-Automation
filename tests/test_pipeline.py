@@ -1096,3 +1096,41 @@ def test_experiment_files_each_split_under_its_own_name():
     assert exp.set_key("data/probes/fixes_30.jsonl") == "fixes_30"
     assert exp.gold_file("dev") == root / "data/dev/tickets.jsonl"
     assert exp.gold_file("fixes_30") == root / "data/probes/fixes_30.jsonl"
+
+
+def test_unparseable_classifier_reply_gets_one_fresh_try(monkeypatch):
+    """API pilot: Haiku sometimes adds a stray ")" before the closing "}". The step asks once more
+    (attempt=1, its own cache slot) instead of escalating the ticket as a model error."""
+    from pipeline import draft as drf
+    from pipeline import run
+
+    bad = '{"category": "general", "subcategory": "app_bug", "confidence": 0.92, "rationale": "crash.")}'
+    good = '{"category": "general", "subcategory": "app_bug", "confidence": 0.92, "rationale": "crash."}'
+    attempts = []
+
+    def fake_call(role, system, user, attempt=0):
+        attempts.append((role, attempt))
+        return bad if attempt == 0 else good
+
+    monkeypatch.setattr(run, "call", fake_call)
+    monkeypatch.setattr(drf, "call", lambda role, system, user: "هلا بيك")
+    result = run.process("التطبيق يسكر وحده")
+    assert result["outcome"] == "drafted"
+    assert attempts == [("classifier", 0), ("classifier", 1)]
+
+    monkeypatch.setattr(run, "call", lambda role, system, user, attempt=0: bad)   # still broken: escalate
+    assert run.process("التطبيق يسكر وحده")["flags"] == ["model_error"]
+
+
+def test_attempt_gets_its_own_cache_slot(monkeypatch, tmp_path):
+    from pipeline import llm
+
+    replies = iter(["first", "second"])
+    monkeypatch.setenv("LLM_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_BACKEND", "cli")
+    monkeypatch.delenv("LLM_PROFILE", raising=False)
+    monkeypatch.delenv("LLM_CACHE_SALT", raising=False)
+    monkeypatch.setattr(llm, "_call_cli", lambda cfg, s, u: next(replies))
+    assert llm.call("classifier", "S", "U") == "first"
+    assert llm.call("classifier", "S", "U", attempt=1) == "second"
+    assert llm.call("classifier", "S", "U") == "first"          # attempt 0 still cached as before

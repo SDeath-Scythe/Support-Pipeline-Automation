@@ -224,7 +224,7 @@ def _salt(role: str | None) -> str:
 
 
 def _cached(cfg: dict, system: str, user: str, send, role: str | None = None,
-            backend_tag: str | None = None) -> str:
+            backend_tag: str | None = None, attempt: int = 0) -> str:
     """Return the stored reply for this exact call, or make it once and store it.
 
     A lock directory per key stops two parallel runs paying for the same call twice.
@@ -235,6 +235,7 @@ def _cached(cfg: dict, system: str, user: str, send, role: str | None = None,
     if not cache_dir:
         return send(cfg, system, user)
     parts = ([cfg["model"], system, user] + ([_salt(role)] if _salt(role) else [])
+             + ([f"attempt={attempt}"] if attempt else [])
              + ([f"backend={backend_tag}"] if backend_tag else []))
     key = hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()
     path = Path(cache_dir) / f"{key}.json"
@@ -335,10 +336,12 @@ def _call_openai(cfg: dict, system: str, user: str) -> str:
     return text
 
 
-def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
+def call(role: str, system: str, user: str, *, retries: int = 1, attempt: int = 0) -> str:
     """Send one message for `role` and return the text reply.
 
     Retries once on failure; the caller escalates the ticket if it still fails.
+    `attempt` > 0 asks for a fresh reply to the same prompt (its own cache slot), e.g. when the
+    first reply could not be parsed.
     """
     route = profile_route(role)
     cfg = route or models()[role]
@@ -350,7 +353,7 @@ def call(role: str, system: str, user: str, *, retries: int = 1) -> str:
     last_error: Exception | None = None
     for _ in range(retries + 1):
         try:
-            return _cached(cfg, system, user, send, role, tag)
+            return _cached(cfg, system, user, send, role, tag, attempt)
         except BudgetExceeded:
             raise
         except Exception as e:  # noqa: BLE001 - surfaced to caller after retry
