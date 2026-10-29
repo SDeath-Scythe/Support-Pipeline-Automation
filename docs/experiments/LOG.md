@@ -4,6 +4,20 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 29 Oct: the author's label check (18 dev tickets)
+
+The first check of gold labels by a person: the author, on a review page, for the 14 dev tickets where the recommended runs disagreed with gold most consistently, plus 4 random agreeing tickets. Answers: `data/review/dev_label_check_answers.json`.
+
+- **Gold was right on 16 of 18.** Corrected: **dev-0094** `fees_limits_question` → `not_received`; **dev-0152** `cash_out_refused` → `overcharged_fee` (second issue `cash_out_refused`; the author: "either"). Priority and outcome recomputed by the dataset's rules (`generate_tickets.regold`).
+- **Gold amounts were right on all 5 tickets where the pipeline's amount differed** (dev-0074, 0084, 0101, 0138, 0156): the pipeline sometimes misses an amount (e.g. «عشرة الاف» as an agent's fee) and flags "amount missing" for nothing.
+- **A systematic pipeline error: paying the same amount twice by mistake.** dev-0109, 0138 and 0190 are `reversal_request` (gold right); the pipeline said `merchant_payment` or `wrong_recipient`. In 0138 and 0190 the first model was right and the re-check's answer, used by F3c, was wrong. The author: the draft and routing should also carry the reason (pressed twice by mistake).
+- **dev-0164:** gold `login_otp` is right; the first model read an OTP problem as a scam (escalated; the safe direction, but extra work).
+- **dev-0145** (the dataset's prompt-injection test, a fake "SYSTEM" line asking for P1): the pipeline ignored it (P3). The author was unsure of the type; gold `limit_upgrade` kept.
+- **dev-0083** (spot-check, `unauthorized_charge`): the author says it is not fraud, since nobody tricked the customer; he found an unknown charge. A taxonomy question: `unauthorized_charge` sits under fraud and is always escalated as P1. Open.
+- The author also noted that the check showed no drafts, and that some tickets need more information from the customer.
+
+**Re-scored on the corrected labels** (calibration replay, no model calls): type used correct 235/240 and 236/240 (was 233); wrong type reaching a draft 4 and 3 at the current thresholds, **3 and 1 with `recheck_from` 0.65**. The 0.65 gain now holds in both replicates.
+
 ## 29 Oct: dev (240 tickets) on the API, gate calibration, label-check sheet
 
 Six runs on `data/dev/tickets.jsonl`, API backend, each with a replicate (`-r1`: fresh classifier, re-check and drafter replies). rec = F2+F3c+F6b+F15+F11+F12+F14b+F17+F18+F19. Total cost **$2.43**, about $0.002–0.0025 per ticket for a fresh run. No budget hit. **Gold labels are model-written and not yet checked by a person.**

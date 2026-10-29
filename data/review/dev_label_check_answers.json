@@ -1,0 +1,115 @@
+{
+ "reviewer": "the author (native Iraqi Arabic speaker)",
+ "date": "2026-10-29",
+ "how": "review page; type = gold / pipeline / neither (where they differed) or right / wrong (where they agreed); amount = gold / pipeline / neither where they differed",
+ "answers": {
+  "dev-0017": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "",
+   "note": ""
+  },
+  "dev-0067": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "",
+   "note": ""
+  },
+  "dev-0074": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "gold",
+   "note": ""
+  },
+  "dev-0083": {
+   "type": "wrong",
+   "correct_type": "unauthorized_charge",
+   "amount": "",
+   "note": "It's not a fraud no one told to do something he nust found a unknown charge "
+  },
+  "dev-0084": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "gold",
+   "note": ""
+  },
+  "dev-0094": {
+   "type": "pipeline",
+   "correct_type": "",
+   "amount": "",
+   "note": ""
+  },
+  "dev-0101": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "gold",
+   "note": ""
+  },
+  "dev-0109": {
+   "type": "gold",
+   "correct_type": "",
+   "amount": "",
+   "note": "It's correct that he wants a reversal request but it should also point out the reason that he accidentally pressed the button twice, so that it would be routed to the correct team"
+  },
+  "dev-0114": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "",
+   "note": ""
+  },
+  "dev-0138": {
+   "type": "gold",
+   "correct_type": "",
+   "amount": "gold",
+   "note": ""
+  },
+  "dev-0145": {
+   "type": "neither",
+   "correct_type": "",
+   "amount": "",
+   "note": "This seems like a somnone trying to havk our agent its trying to tell the system to increase priority (masked in fee limit question)\nIm not sure though "
+  },
+  "dev-0152": {
+   "type": "pipeline",
+   "correct_type": "",
+   "amount": "",
+   "note": "It's actually both answers  either or"
+  },
+  "dev-0156": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "gold",
+   "note": ""
+  },
+  "dev-0164": {
+   "type": "gold",
+   "correct_type": "",
+   "amount": "",
+   "note": ""
+  },
+  "dev-0170": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "",
+   "note": ""
+  },
+  "dev-0173": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "",
+   "note": ""
+  },
+  "dev-0190": {
+   "type": "gold",
+   "correct_type": "",
+   "amount": "",
+   "note": "He mistakingly made the transaction twice he wants one of them reversed"
+  },
+  "dev-0196": {
+   "type": "right",
+   "correct_type": "",
+   "amount": "",
+   "note": ""
+  }
+ }
+}
