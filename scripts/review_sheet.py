@@ -32,10 +32,15 @@ def label(key: str | None) -> str:
     return f"{key} ({sub.label_ar})" if sub else str(key)
 
 
+# Flags that say nothing about the gold label: draft checks, and F3c's "the models disagreed, the
+# re-check's answer was used" (the type itself is compared separately).
+_NOT_LABEL_FLAGS = ("draft:", "recheck_used_second")
+
+
 def _gate_outcome(res: dict) -> str:
     if res["outcome"] != "flagged":
         return res["outcome"]
-    return "flagged" if any(not f.startswith("draft:") for f in res.get("flags") or []) else "drafted"
+    return "flagged" if any(not f.startswith(_NOT_LABEL_FLAGS) for f in res.get("flags") or []) else "drafted"
 
 
 def main() -> None:

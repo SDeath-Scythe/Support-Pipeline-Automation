@@ -4,6 +4,28 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 29 Oct: dev (240 tickets) on the API, gate calibration, label-check sheet
+
+Six runs on `data/dev/tickets.jsonl`, API backend, each with a replicate (`-r1`: fresh classifier, re-check and drafter replies). rec = F2+F3c+F6b+F15+F11+F12+F14b+F17+F18+F19. Total cost **$2.43**, about $0.002–0.0025 per ticket for a fresh run. No budget hit. **Gold labels are model-written and not yet checked by a person.**
+
+| Run | Type used correct | Outcome | Priority | Amount | USD amounts | Wrong type → draft | Fraud → draft | Review rate |
+|---|---|---|---|---|---|---|---|---|
+| baseline / -r1 | 233 / 233 | 220 / 222 | 193 / 193 | 231 / 233 | 2/8 / 4/8 | 4 / 3 | 0 / 0 | 22% / 21% |
+| rec / -r1 | 233 / 234 | 227 / 228 | 234 / 235 | 231 / 233 | 2/8 / 4/8 | 6 / 5 | 0 / 0 | 19% / 18% |
+| rec+F16 / -r1 | 233 / 233 | 226 / 226 | 236 / 237 | 234 / 236 | 6/8 / 7/8 | 6 / 6 | 0 / 0 | 19% / 19% |
+
+- **Priority** is the big baseline/rec gap, by design: gold follows the author's rules F15, F18, F19.
+- **F16 (ورقة = 100 USD) passes its replicate test:** USD amounts 2–4/8 → 6–7/8, amounts overall +3. One low-confidence ticket per replicate changed type (dev-0088, dev-0210, different tickets), and the re-check corrected both, so the type count is unchanged. **Recommend adopting F16.**
+- **Classifier JSON:** Haiku sometimes ends its JSON with a stray `)` (4/240 in one replicate, all escalated as model errors). A reply that doesn't parse now gets one fresh try; all 4 recovered.
+
+**Gate calibration** ([dev/calibration-rec.md](dev/calibration-rec.md), [dev/calibration-rec-r1.md](dev/calibration-rec-r1.md)): the re-check model was asked about all 240 tickets ($0.43 per run), then the gate was replayed for every threshold pair (the replay reproduces each run's own outcomes 240/240).
+- The first model's confidence is well ordered: ≥ 0.90 → 175/175 and 180/180 correct.
+- Review rate is 17–19% at every setting (target ≤ ~30%): it comes from fraud and missing fields, not from the thresholds.
+- `recheck_from` 0.60 → **0.65** cuts wrong types reaching a draft in both replicates (6 → 4, 5 → 2): tickets at 0.60–0.65 are escalated instead. `pass_above` 0.75 → 0.90 helps in one replicate only (wrong → ready 2 → 1, 1 → 1) and doubles the re-checks (≈ 42 → 82).
+- **Not decided yet:** the differences are a few tickets, and some "wrong" tickets may be wrong labels. Decide after the author's label check. (If `recheck_from` goes to 0.65, `missing_field_cap` must go with it, or a missing field escalates instead of flagging; the replay already does this.)
+
+**Label check for the author:** `data/review/dev_label_check.csv`, 18 rows: the 14 tickets where the recommended runs disagree with gold most consistently (type first, then outcome and priority; F3c's own "models disagreed" flag doesn't count), plus 4 random tickets where everything matched, shuffled.
+
 ## 29 Oct: first API runs, and the cli judge becomes the default
 
 The first runs on the **API** backend (the $35 test key), with the recommended set plus F17, F18 and F19 on, on a 30-ticket sample of dev (one ticket from each of the 23 subcategories plus 7 at random, seed 29; the file lives in `runs/sets/`, git-ignored).
