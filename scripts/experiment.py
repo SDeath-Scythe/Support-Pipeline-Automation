@@ -94,8 +94,11 @@ def load_run(set_name: str, label: str) -> dict:
     src = gold_file(set_name)
     if src.exists():
         gold = {d["id"]: d for d in map(json.loads, src.read_text(encoding="utf-8").splitlines()) if d}
+        # The set file decides which tickets count: one removed from it since the run (e.g. the
+        # Arabizi tickets, 29 Oct) is left out of the score.
+        run["tickets"] = [row for row in run["tickets"] if row["ticket"].get("id") in gold]
         for row in run["tickets"]:
-            row["ticket"] = gold.get(row["ticket"].get("id"), row["ticket"])
+            row["ticket"] = gold[row["ticket"]["id"]]
     return run
 
 

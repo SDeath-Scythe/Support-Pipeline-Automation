@@ -25,6 +25,10 @@ Every subcategory appears at least 3 times in each test set (23 × 3 = 69 ≤ 80
 - **heldout** was generated in its own run with its own seed, and only its statistics were printed. Keep it unread until the progress review.
 - Hand check: `data/review/handcheck_80.csv` (columns ok / fix / note left blank, for Google Sheets), from dev and mvp_test only: every audit dispute, every two-issue ticket and every ticket with "ورقة" or a USD amount, then at least 30 random tickets spread across subcategories and dialects.
 
+## No Arabizi (author's decision, 29 Oct)
+
+Arabizi (Arabic in Latin letters) is rare in real tickets and was pulling the work off course, so it is out of the dataset. The 11 Arabizi tickets were moved to `excluded/arabizi.jsonl` (dev 7, mvp_test 2, heldout 2; heldout moved by code, text not read): **dev 233, mvp_test 78, heldout 78**. The generator's Arabizi cap is now 0, so new splits have none. Saved runs re-score on the remaining tickets (the split file decides which tickets count). The tables below describe the build before this change.
+
 ## Corrections from the project author (a native Iraqi speaker), 23 Oct
 
 The first build (seeds 1001 / 2002 / 3003) was replaced because of three corrections:

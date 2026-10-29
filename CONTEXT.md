@@ -54,7 +54,7 @@ These are standing instructions from the author. Follow them unless he says othe
    - **No word raises priority** (not هسه, ضروري, عاجل or any other). Priority comes from the problem type, plus the amount rule: ≥ 1,000,000 IQD, or ≥ 750 USD.
    - **Most people raise one issue,** not two unrelated ones.
    - **Don't ask for a transaction number** when the problem doesn't need one to be fixed.
-   - **Arabizi is rare.** Don't build rules for it; a rule there could corrupt real numbers.
+   - **No Arabizi** (29 Oct): it is out of the dataset and the generator. Don't build rules for it; a rule there could corrupt real numbers.
 9. **Development uses the Pro plan; numbers come from the API.**
    - `LLM_BACKEND=cli` runs `claude -p` (headless Claude Code) on the Pro plan, for development and dataset generation.
    - `LLM_BACKEND=api` is the backend for every reported number and for threshold calibration.

@@ -87,7 +87,9 @@ SUB_WEIGHTS = {"not_received": 0.5, "wrong_recipient": 0.3, "reversal_request": 
 DIALECTS = {"baghdadi": 0.5, "southern": 0.3, "mosuli": 0.2}
 STYLES = {"short": 0.33, "long": 0.20, "typos": 0.15, "mixed_english": 0.14, "voice_note_style": 0.15,
           "arabizi": 0.03}
-ARABIZI_MAX_SHARE = 0.03
+# The author, 29 Oct: no Arabizi in the dataset (rare, and it pulled the work off course). The weight stays
+# in STYLES so the draws for other styles are unchanged; the cap of 0 re-draws every Arabizi pick.
+ARABIZI_MAX_SHARE = 0.0
 DIFFICULTY = {"easy": 0.45, "medium": 0.40, "hard": 0.15}
 EDGE_SHARE = 0.18
 
