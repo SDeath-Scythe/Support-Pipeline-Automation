@@ -114,7 +114,11 @@ def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:
         maybe = [f for f in missing if f not in _CHECKED]
         lines.append("Ask the customer for: " + (", ".join(FIELD_AR.get(f, f) for f in sure) if sure else "nothing"))
         if maybe:
-            lines.append("Also ask for these, but only if the ticket does not already give them: "
+            # F11b (ask_if_unnamed), from the author's round-2 review (dev-0199): "بالمطعم" (at the restaurant)
+            # was taken as the shop's name, so the drafter didn't ask for it.
+            unnamed = (" (the kind of place alone, like the restaurant or the agent, does not count: ask for its name)"
+                       if enabled("ask_if_unnamed") else "")
+            lines.append("Also ask for these, but only if the ticket does not already give them" + unnamed + ": "
                          + ", ".join(FIELD_AR.get(f, f) for f in maybe))
     else:
         lines.append("Ask the customer for: " + (", ".join(FIELD_AR.get(f, f) for f in missing) if missing else "nothing"))

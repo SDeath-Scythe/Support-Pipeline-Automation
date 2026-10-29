@@ -187,9 +187,12 @@ OFF_TOPIC_TOPICS = ["whether the company is hiring", "a football match",
                     "whether it will rain tomorrow", "a recipe or cooking question", "the price of gold today",
                     "a good internet provider for their area", "help wording a message to a relative"]
 # Words from other Arabic dialects or from standard Arabic (Mizan's "fusha in disguise"). Matched on
-# normalised text, with an optional و/ف/ب/ل in front. Not listed on purpose: كيف (Mosuli), ابي (Basra).
+# normalised text, with an optional و/ف/ب/ل in front. Not listed on purpose: كيف (Mosuli).
+# `not_iraqi`, from the author's round-2 review (29 Oct): Iraqis say اريد, not ابي (allowed before as
+# Basra); and من الاستعجال, not من العجلة.
 DRIFT = {"levantine": r"(بدي|بدك|بدو|هيك|كتير|منيح|هلق|بقدر|مابقدر|شو)", "gulf": r"(وايد|ابغي|ابغا|كذا)",
-         "egyptian": r"(عايز|عاوز|ازاي|دلوقتي|كده|مش|بتاع)", "msa": r"(لقد|سوف|الذي|التي|لماذا|ليس|لدي|اود|حيث)"}
+         "egyptian": r"(عايز|عاوز|ازاي|دلوقتي|كده|مش|بتاع)", "msa": r"(لقد|سوف|الذي|التي|لماذا|ليس|لدي|اود|حيث)",
+         "not_iraqi": r"(ابي|ابيه|ابيها|من العجله)"}
 _DRIFT_RE = {k: re.compile(rf"(^|\s)[وفبل]?{p}(\s|$)") for k, p in DRIFT.items()}
 
 

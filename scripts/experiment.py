@@ -54,6 +54,8 @@ CODES = {
     "F18": "reference_when_needed",
     "F19": "usd_large_amount",
     "F20": "duplicate_payment_hint",
+    "F11b": "ask_if_unnamed",
+    "F21": "team_summary",
 }
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"

@@ -73,7 +73,8 @@ def _reasons(flags: list[str], confidence: float | None, first: Extraction | Non
 
 
 def note(ex: Extraction | None, flags: list[str], *, confidence: float | None = None,
-         second: Extraction | None = None, cleared_secondary: str | None = None) -> str:
+         second: Extraction | None = None, cleared_secondary: str | None = None,
+         summary: str | None = None) -> str:
     """The handoff note, one short line per part. `ex` is the answer the ticket was routed on
     (None if classification failed); `second` is the re-check's answer when the models disagreed."""
     if ex is None:
@@ -83,6 +84,8 @@ def note(ex: Extraction | None, flags: list[str], *, confidence: float | None = 
     unsure = "invalid_category" in flags or ("recheck_disagreed" in flags and second is not None)
     lines = ["الموضوع: نوع المشكلة غير محسوم (شوف سبب التصعيد)" if unsure
              else f"الموضوع: {_label(main.subcategory) or main.subcategory}"]
+    if summary:   # F21: what happened, in one line (a model wrote it from the ticket alone)
+        lines.append(f"الخلاصة: {summary}")
 
     secondary = main.secondary_subcategory or cleared_secondary
     if secondary and secondary != main.subcategory and _label(secondary) and not unsure:

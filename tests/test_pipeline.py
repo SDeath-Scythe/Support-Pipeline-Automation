@@ -1163,3 +1163,39 @@ def test_duplicate_payment_hint_changes_only_the_reversal_line(monkeypatch):
     changed = [(a, b) for a, b in zip(before.splitlines(), after.splitlines()) if a != b]
     assert len(before.splitlines()) == len(after.splitlines()) and len(changed) == 1
     assert "`reversal_request`" in changed[0][1] and "twice by mistake" in changed[0][1]
+
+
+def test_team_summary_goes_into_the_handoff_note(monkeypatch):
+    """F21: an escalated ticket's team note gets one summary line; a line with an invented number is dropped."""
+    from pipeline import run
+
+    replies = {"summary": "انطى الرمز لواحد اتصل بيه، وهسه ما يكدر يدخل للحساب"}
+
+    def fake_call(role, system, user, attempt=0):
+        if "ONE short line" in system:
+            return replies["summary"]
+        return '{"category": "fraud_security", "subcategory": "suspected_scam", "confidence": 0.95}'
+
+    monkeypatch.setattr(run, "call", fake_call)
+    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note,team_summary")
+    result = run.process("واحد اتصل وكال من خدمة العملاء وطلب الرمز وانطيته، هسه ما اكدر افوت")
+    assert result["outcome"] == "escalated"
+    assert "الخلاصة: انطى الرمز لواحد اتصل بيه" in result["handoff_ar"]
+
+    replies["summary"] = "خسر 250000 دينار"          # not in the ticket: dropped
+    assert "الخلاصة" not in run.process("واحد اتصل وطلب الرمز وانطيته")["handoff_ar"]
+
+    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")  # flag off: no summary call
+    assert "الخلاصة" not in run.process("واحد اتصل وطلب الرمز وانطيته")["handoff_ar"]
+
+
+def test_ask_if_unnamed_wording(monkeypatch):
+    from pipeline.clean import clean
+    from pipeline.draft import user_prompt
+    from pipeline.schemas import Extraction
+
+    ex = Extraction(category="cards", subcategory="card_payment_failed", amount_iqd=60000, confidence=0.9)
+    monkeypatch.setenv("PIPELINE_FIXES", "ask_if_missing")
+    assert "the restaurant" not in user_prompt(clean("دفعت بالمطعم"), ex, "cards")
+    monkeypatch.setenv("PIPELINE_FIXES", "ask_if_missing,ask_if_unnamed")
+    assert "does not count: ask for its name" in user_prompt(clean("دفعت بالمطعم"), ex, "cards")

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import time
+from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 
@@ -79,6 +80,22 @@ def _add_usage(a: dict, b: dict) -> dict:
     return {**out, "cost_usd": round(cost, 6), "cached": bool(a.get("cached") and b.get("cached")), "retried": True}
 
 
+_SUMMARY_PROMPT = Path(__file__).parent / "prompts" / "summary_system.md"
+
+
+def _team_summary(text: str) -> tuple[str | None, dict]:
+    """F21: one Arabic line for the team handling an escalated ticket. A line with a number that is
+    not in the ticket is dropped (the note then has no summary), and so is a failed call."""
+    try:
+        line = call("classifier", _SUMMARY_PROMPT.read_text(encoding="utf-8"), cls.user_prompt(text)).strip()
+    except Exception:  # noqa: BLE001 - the note works without a summary
+        return None, last_usage()
+    line = " ".join(line.split())
+    if not line or len(line) > 300 or "unknown_number" in draft_check.problems(line, text):
+        return None, last_usage()
+    return line, last_usage()
+
+
 def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str, Any]]:
     t0 = time.time()
     reply = call(role, system, user)
@@ -122,8 +139,12 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
         result = {"outcome": outcome.value, "flags": flags,
                   "notes_ar": [FLAG_AR.get(f, f) for f in flags], **extra}
         if outcome == Outcome.ESCALATED and enabled("handoff_note"):
+            summary = None
+            if enabled("team_summary") and ctx["ex"] is not None:
+                summary, result["usage"] = _team_summary(text)
             result["handoff_ar"] = handoff.note(ctx["ex"], flags, confidence=ctx["confidence"],
-                                                second=ctx["second"], cleared_secondary=ctx["cleared"])
+                                                second=ctx["second"], cleared_secondary=ctx["cleared"],
+                                                summary=summary)
         send("result", "done", result)
         return result
 

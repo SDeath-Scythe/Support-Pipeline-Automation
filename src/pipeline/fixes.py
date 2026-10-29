@@ -33,6 +33,8 @@ FIXES = {
     "no_urgency_words": "F15: no word raises priority; only the subcategory default and the large-amount rule",
     "warqa_usd": "F16: classifier prompt: 'ورقة' is a 100 USD note ('خمسين ورقة' = 5,000 USD), not 1,000 IQD",
     "unclear_template": "F8: unclear tickets get a fixed reply instead of a drafter call",
+    "ask_if_unnamed": "F11b: with F11, the kind of place alone (the restaurant, the agent) does not count as its name, so the draft still asks for it",
+    "team_summary": "F21: escalated tickets get a one-line Arabic summary of what happened in the team note (a small extra call; dropped if it has a number not in the ticket)",
     "duplicate_payment_hint": "F20: classifier hint: the same payment sent twice by mistake is a reversal request, not a wrong recipient or a shop payment",
 }
 

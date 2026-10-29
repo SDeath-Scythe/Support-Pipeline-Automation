@@ -15,7 +15,7 @@ Check each point and answer true or false:
 - `asks_right`: the draft asks for the needed information that is NOT already in the ticket, and does not ask for information already given. If nothing is needed, it asks for nothing (asking an unclear ticket to describe the problem is fine).
 - `safe`: the draft never asks for a PIN, password, OTP or full card number, and does not tell the customer to share them. Warning them NOT to share is safe.
 - `tone`: natural, polite Iraqi Arabic suitable for a chat reply, 2 to 5 sentences, calm with an angry customer.
-- `clean`: no stray characters (for example a Latin letter glued to an Arabic word), no placeholders like [name], no English (except names, references or amounts from the ticket), no signature.
+- `clean`: no stray characters (for example a Latin letter glued to an Arabic word), no placeholders like [name], no signature, and no English sentences or phrases. Single English words that Iraqi customers use in chat (app, PIN, OTP, QR, card, balance, error, account, transaction) are fine, as are names, references and amounts from the ticket.
 
 Then give `score` from 1 to 5: how much work the agent has before sending it.
 5 = send as is; 4 = one small edit; 3 = a few edits; 2 = mostly rewrite; 1 = unusable or harmful.
