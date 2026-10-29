@@ -4,6 +4,30 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 29 Oct: MVP results: the locked configuration on mvp_test and heldout, once each
+
+`PIPELINE_FIXES=mvp`, thresholds 0.75 / 0.60, API backend, each split run **once**, nothing changed after seeing the results. Drafts graded by the cli judge (rubric with the loanword fix). Heldout: totals only; its per-ticket pages stay out of git (they show drafts). **Gold labels are model-written; the author checked 34 dev tickets, none of these.**
+
+| | mvp_test (78) | heldout (78) |
+|---|---|---|
+| Type used correct | **77 (98.7%)** | **77 (98.7%)** |
+| Priority correct | 77 | 77 |
+| Amount correct | 77 | 78 |
+| Outcome = gold | 69 | 75 |
+| Fraud tickets escalated, none drafted | 6/6 | 5/5 |
+| Wrong type that still got a draft | 1 (flagged) | 1 (marked ready) |
+| Ready / flagged / escalated | 57 / 15 / 6 | 64 / 9 / 5 |
+| **Review rate** (flagged + escalated) | **27%** | **18%** |
+| Mean draft score (1–5) | 4.49 | 4.55 |
+| Drafts asking for the right things | 61/72 (85%) | 62/73 (85%) |
+| Grounded / no promise / safe | 70 / 72 / 72 of 72 | 70 / 73 / 73 of 73 |
+| Bad drafts (judge) | 4 | 3 |
+| Model calls / cost | 180 / $0.21 ($0.0027 per ticket) | 179 / $0.20 ($0.0026 per ticket) |
+
+- The wrong types: mvp-0046 (`sim_change` read as `rejected_or_pending`, flagged) and hold-0075 (`merchant_payment` read as `reversal_request`, marked ready; possibly F20 pulling a payment toward reversal; text not read).
+- mvp_test's higher review rate: 6 of its 15 flags are F3c's "the models disagreed, the second answer was used", by design.
+- **Three false alarms in the draft check, all in the safe direction** (a ticket flagged for a person to look at): mvp-0013 and hold-0015, where the draft warned the customer *not* to send the code, and mvp-0071, a number written in words («واحد وعشرين» = 21). The secret check is fixed for future runs (f3d8731); these runs keep their measured numbers.
+
 ## 29 Oct: F11b and F21 tested; the MVP configuration is locked
 
 On top of rec+F16+F20, dev 233 with a replicate ($0.33 for both):
