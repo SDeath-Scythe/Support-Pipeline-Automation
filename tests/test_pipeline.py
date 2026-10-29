@@ -1151,3 +1151,15 @@ def test_judge_needed_info_follows_reference_rule():
     assert ref not in exp.needed_info({"subcategory": "not_received", "recipient_phone": "07812345678"})
     assert ref in exp.needed_info({"subcategory": "not_received", "recipient_phone": None})
     assert "اسم المتجر" in exp.needed_info({"subcategory": "card_payment_failed"})
+
+
+def test_duplicate_payment_hint_changes_only_the_reversal_line(monkeypatch):
+    from pipeline import classify as cls
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    before = cls.system_prompt()
+    monkeypatch.setenv("PIPELINE_FIXES", "duplicate_payment_hint")
+    after = cls.system_prompt()
+    changed = [(a, b) for a, b in zip(before.splitlines(), after.splitlines()) if a != b]
+    assert len(before.splitlines()) == len(after.splitlines()) and len(changed) == 1
+    assert "`reversal_request`" in changed[0][1] and "twice by mistake" in changed[0][1]

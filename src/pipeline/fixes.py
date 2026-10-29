@@ -33,6 +33,7 @@ FIXES = {
     "no_urgency_words": "F15: no word raises priority; only the subcategory default and the large-amount rule",
     "warqa_usd": "F16: classifier prompt: 'ورقة' is a 100 USD note ('خمسين ورقة' = 5,000 USD), not 1,000 IQD",
     "unclear_template": "F8: unclear tickets get a fixed reply instead of a drafter call",
+    "duplicate_payment_hint": "F20: classifier hint: the same payment sent twice by mistake is a reversal request, not a wrong recipient or a shop payment",
 }
 
 

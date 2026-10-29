@@ -53,18 +53,28 @@ _WARQA_NEW = ('"خمسين" or "خمسين الف" about money means 50,000 IQD 
               '"خمسين ورقة" = 5,000 USD and goes in amount_usd);')
 
 
+# F20 (duplicate_payment_hint), from the author's label check (29 Oct): "paid the same amount twice by
+# mistake" was read as a shop payment or a wrong recipient (dev-0109, 0138, 0190). A hint on
+# reversal_request only; the rest of the prompt is unchanged.
+_DUPLICATE_HINT = ("wants a payment or transfer undone although it reached the intended person or shop: "
+                   "the same amount sent twice by mistake, or a cancelled deal; if the money went to the wrong "
+                   "person, that is wrong_recipient")
+
+
 def system_prompt() -> str:
     return _system_prompt(enabled("fee_amount"), enabled("runner_up"), enabled("lookalike_hints"),
-                          enabled("fraud_secondary_rule"), enabled("warqa_usd"))
+                          enabled("fraud_secondary_rule"), enabled("warqa_usd"), enabled("duplicate_payment_hint"))
 
 
 @lru_cache(maxsize=32)
 def _system_prompt(fee_field: bool, runner_up: bool = False, lookalike: bool = False,
-                   fraud_rule: bool = False, warqa: bool = False) -> str:
+                   fraud_rule: bool = False, warqa: bool = False, duplicate: bool = False) -> str:
     """The classifier prompt, with the taxonomy filled in from config/taxonomy.yaml."""
     raw = load_yaml("taxonomy.yaml")
     # F13 (lookalike_hints): sharper one-line definitions for the look-alike subcategories.
     extra = load_yaml("experiments/lookalike_hints.yaml") if lookalike else {}
+    if duplicate:
+        extra = {**extra, "reversal_request": _DUPLICATE_HINT}
     lines = []
     for cat_key, cat in raw["categories"].items():
         lines.append(f"- `{cat_key}` ({cat['label']})")

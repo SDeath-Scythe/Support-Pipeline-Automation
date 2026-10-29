@@ -53,6 +53,7 @@ CODES = {
     "F17": "handoff_note",
     "F18": "reference_when_needed",
     "F19": "usd_large_amount",
+    "F20": "duplicate_payment_hint",
 }
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"

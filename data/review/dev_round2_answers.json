@@ -1,0 +1,306 @@
+{
+ "reviewer": "the author (native Iraqi Arabic speaker)",
+ "date": "2026-10-29",
+ "run": "dev/recF16",
+ "how": "review page round 2: type right/wrong; draft send / edit / rewrite and asks right / too_much / missing; escalated: team note useful / missing / wrong. 'judge' is the cli grader's verdict on the same draft, hidden from the reviewer.",
+ "decisions": {
+  "d1": {
+   "choice": "yes",
+   "note": "We should test "
+  },
+  "d2": {
+   "choice": "yes",
+   "note": ""
+  },
+  "d3": {
+   "choice": "transfers",
+   "note": ""
+  }
+ },
+ "answers": {
+  "dev-0019": {
+   "asks": "right",
+   "correct_type": "",
+   "note": "Again the note on the customer we say من الاستعجال no من العجلة ",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "flagged",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 5,
+    "problems": ""
+   }
+  },
+  "dev-0034": {
+   "asks": "right",
+   "correct_type": "",
+   "note": "",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "random_ready",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 5,
+    "problems": ""
+   }
+  },
+  "dev-0035": {
+   "asks": "right",
+   "correct_type": "",
+   "note": "The note i have is about the customer not the draft , iraqi dialect dont use ابي they use  اريد when thay want to say i want/ed",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "random_ready",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 4,
+    "problems": "Minor wording slip: 'إذا يحق للوكيل يرفض وين تگدر' is missing 'و' between the two questions."
+   }
+  },
+  "dev-0063": {
+   "asks": "",
+   "correct_type": "unauthorized_charge",
+   "note": "Honestly i dont know whether we should put this as fruad unwn charge unauthorized ",
+   "quality": "useful",
+   "type": "wrong",
+   "picked_as": "escalated",
+   "judge": null
+  },
+  "dev-0075": {
+   "asks": "missing",
+   "correct_type": "",
+   "note": "",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "judge_bad",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": false,
+    "score": 4,
+    "problems": "The draft uses the English word 'PIN' (written الـPIN) twice, which should be replaced with an Arabic term like الرمز السري."
+   }
+  },
+  "dev-0077": {
+   "asks": "",
+   "correct_type": "",
+   "note": "I dont know about the ref number did it extract correctly or is this just show error from the artifact, needs checking ",
+   "quality": "",
+   "type": "",
+   "picked_as": "judge_bad",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": false,
+    "score": 4,
+    "problems": "The draft uses the English word 'declined', which should be replaced with Arabic (e.g. 'انرفضت')."
+   }
+  },
+  "dev-0108": {
+   "asks": "right",
+   "correct_type": "",
+   "note": "",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "flagged",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 5,
+    "problems": ""
+   }
+  },
+  "dev-0154": {
+   "asks": "right",
+   "correct_type": "",
+   "note": "",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "flagged",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 4,
+    "problems": "The draft never acknowledges the customer's direct question about whether the agent is allowed to charge that much, and 'وأيضاً' reads slightly formal."
+   }
+  },
+  "dev-0191": {
+   "asks": "right",
+   "correct_type": "",
+   "note": "",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "random_ready",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 4,
+    "problems": "The draft calls the customer's number 121911287 a reference number and adds 'dinar', but the ticket labels neither, so one small wording fix is needed."
+   }
+  },
+  "dev-0197": {
+   "asks": "",
+   "correct_type": "",
+   "note": "It would be more useful to give info like, he gave the code to the scammer ,in this ticket ",
+   "quality": "missing",
+   "type": "right",
+   "picked_as": "escalated",
+   "judge": null
+  },
+  "dev-0199": {
+   "asks": "missing",
+   "correct_type": "",
+   "note": "The ticket doesn't say any info no number or transaction number or refrence \nMaybe it's because an error showed up so he can't know a reference number but at least the customer info should be there rigtt?",
+   "quality": "edit",
+   "type": "right",
+   "picked_as": "judge_bad",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": false,
+    "safe": true,
+    "tone": true,
+    "clean": false,
+    "score": 3,
+    "problems": "The draft never asks for the restaurant's name, which is needed and missing from the ticket, and it uses the English word 'error' instead of Arabic."
+   }
+  },
+  "dev-0204": {
+   "asks": "right",
+   "correct_type": "",
+   "note": "",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "random_ready",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 5,
+    "problems": ""
+   }
+  },
+  "dev-0218": {
+   "asks": "right",
+   "correct_type": "",
+   "note": "",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "flagged",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": false,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 4,
+    "problems": "The draft asks for the amount but not the approximate time of the transfer; the customer only said 'yesterday'."
+   }
+  },
+  "dev-0232": {
+   "asks": "missing",
+   "correct_type": "",
+   "note": "",
+   "quality": "send",
+   "type": "right",
+   "picked_as": "random_ready",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 5,
+    "problems": ""
+   }
+  },
+  "dev-0235": {
+   "asks": "missing",
+   "correct_type": "",
+   "note": "",
+   "quality": "edit",
+   "type": "right",
+   "picked_as": "random_ready",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": false,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 4,
+    "problems": "The draft asks for the agent's name and location but not the approximate time of the transaction (only 'yesterday' was given)."
+   }
+  },
+  "dev-0237": {
+   "asks": "right",
+   "correct_type": "",
+   "note": "",
+   "quality": "edit",
+   "type": "right",
+   "picked_as": "random_ready",
+   "judge": {
+    "understood": true,
+    "grounded": true,
+    "no_promise": true,
+    "asks_right": true,
+    "safe": true,
+    "tone": true,
+    "clean": true,
+    "score": 5,
+    "problems": ""
+   }
+  }
+ }
+}
