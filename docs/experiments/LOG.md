@@ -4,6 +4,24 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 29 Oct: first API runs, and the cli judge becomes the default
+
+The first runs on the **API** backend (the $35 test key), with the recommended set plus F17, F18 and F19 on, on a 30-ticket sample of dev (one ticket from each of the 23 subcategories plus 7 at random, seed 29; the file lives in `runs/sets/`, git-ignored).
+
+- **Cost:** 10-ticket pilot $0.030, the other 20 tickets $0.052: **about $0.002–0.003 per ticket**. The drafter (Sonnet) is ~70% of it. The prompt cache works: 62,562 prompt tokens were read from it in the 20-ticket run, and the first ticket now runs alone so the parallel workers don't each pay to write the same cache entry.
+- **Accuracy on the 30:** subcategory used correct 29/30, priority 29/30. The two differences from gold: dev-0121 (the models disagreed; F3c used the re-check's answer, which is correct, and flagged it, as designed) and dev-0109 (gold `reversal_request`, classified and drafted as `merchant_payment`: a wrong type that reached a draft).
+- **F2 false alarm, fixed:** dev-0077's draft echoed the customer's "declined" before an Arabic comma, and F2 counted the comma (and tatweel) as an Arabic letter. Only Arabic letters count now.
+
+**Judge on cli vs API** ([dev_sample30/judge_backends-rec.md](dev_sample30/judge_backends-rec.md)): the same 27 drafts graded 3 times on each backend.
+
+| | Score identical | Score within 1 | Same bad/ok verdict |
+|---|---|---|---|
+| cli vs cli | 83% | 100% | 95% |
+| API vs API | 85% | 100% | 98% |
+| **cli vs API** | **82%** | **100%** | **97%** |
+
+The cli judge agrees with the API judge as well as each agrees with itself; per-draft average scores differ by 0.14 (cli mean 4.33, API 4.42), never by more than 1. **Decision (author's rule: if similar, take the free one): drafts are graded on cli by default** (`report` and `judge-noise` take `--judge-backend api` to override). Pipeline numbers still come from the API. The API grading cost $0.65 for 81 gradings.
+
 ## Current recommendation (after round 3)
 
 **Adopt F2 + F3c + F6b + F15 + F11 + F12 (v2) + F14b.** F15 (no word raises priority) replaced F7 on 23 Oct after a correction from the project author; F14b was added after the fraud/secondary follow-up below. **F16** (the meaning of "ورقة") is pending an API test with replicates. This replaces F3 with F3c and F6 with F6b compared with the round-2 advice. F8 stays your call; F5 needs your real policy values. Do not adopt F9, F10 or F13 (reasons below).

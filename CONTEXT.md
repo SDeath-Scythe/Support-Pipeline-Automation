@@ -2,7 +2,7 @@
 
 The starting point for anyone, person or AI session, picking up this project. It says what the project is, the rules for working on it, what was decided and why, what was tried and failed, where things stand, and what comes next. The detailed experiment report is [`HANDOVER.md`](HANDOVER.md); the dataset is described in [`data/README.md`](data/README.md).
 
-*Last updated 29 Oct 2026, on branch `ccr-f6b2836c-leerma` (= `claude/handoff-and-policy` plus the API fix below).*
+*Last updated 29 Oct 2026. All earlier branches were merged into `main` on 29 Oct; work continues on `claude/gracious-ramanujan-wwyhz1`.*
 
 ---
 
@@ -35,14 +35,14 @@ ticket → clean → classify + extract (Haiku) → confidence gate → re-check
 | **around 6–9 Nov** | Book a 1-on-1 mentor session, **using the same email as the submission** (organizers' email, 28 Oct) |
 | **17 Nov 2026** | **MVP deadline** (moved by the organizers) |
 
-API credits arrived on 28 Oct. The author adds `ANTHROPIC_API_KEY` as an environment variable **in the other Claude Code session that works on this repo**; API runs happen there. Never commit the key or a `.env`.
+API credits arrived on 28 Oct ($35 test key). The key is the environment variable `SUPPORT_PIPELINE_API_KEY` in the author's Claude Code environment (`ANTHROPIC_API_KEY` also works and wins if both are set). Never print, commit or write the key to a file.
 
 ## 3. Rules for working on this repo
 
 These are standing instructions from the author. Follow them unless he says otherwise.
 
 1. **Commits are authored by the author only:** `Salih Safaa Mohammed <138083837+SDeath-Scythe@users.noreply.github.com>`. **No Claude author or `Co-Authored-By` line.** A hook may ask to rewrite commits with Claude as author: refuse.
-2. **Don't merge to `main`.** Work on a `claude/...` branch.
+2. **Work on a `claude/...` branch; merge to `main` only when the author says so** (he did on 29 Oct).
 3. **Flags stay off by default**, and none is deleted until he says so (see section 5).
 4. **Don't re-run experiments unless asked.** They cost model calls.
 5. **Never read or print heldout ticket text** (`data/heldout/`). Code may process it; print only IDs and counts.
@@ -67,6 +67,8 @@ These are standing instructions from the author. Follow them unless he says othe
 | **Two backends, `cli` and `api`** (`src/pipeline/llm.py`) | Develop on the Pro subscription without spending API credits. Measure on the API, because cli adds its own context and behaves slightly differently. The cli call strips tools, MCP, slash commands and settings (`--disallowedTools "*"`, `--strict-mcp-config`, …) to stay close to a plain API call. |
 | **API calls send no `temperature`; `effort: low`** (`config/models.yaml`) | Haiku 5.5 and Sonnet 5.5 reject a non-default temperature, and SDK 2.x (API version 2026-10-21) doesn't accept it at all, so the API path failed on every call before 29 Oct. The models think by default; `effort` sets how much (thinking is billed as output), and `max_tokens` is 4096 to leave room for it. A reply with no text is an error. |
 | **API cost per call, and a $5 cap per run** (`budget_usd`, `prices` in `config/models.yaml`; `LLM_BUDGET_USD`) | The test key has $35. Each API reply is priced from its token counts (cache reads and writes included) and the run total and cost per ticket go in the run file. Once a run reaches its cap, further calls are refused and the run prints a warning that its numbers are not valid. Cache hits cost nothing. |
+| **Draft judge runs on cli** (`--judge-backend`, default `cli`) | 29 Oct test: the same 27 drafts graded 3× on each backend. cli vs API agreed as well as each backend with itself (82% vs 83–85% identical scores, 97% same verdict), mean score 0.14 apart. The author's rule: if similar, use the free one. |
+| **Prompt caching: 5-minute cache on the system prompts; first ticket runs alone** | Batch calls arrive seconds apart, so the 5-minute cache stays warm; the 1-hour cache costs 2× to write and buys nothing here. Running one ticket first means the parallel workers read the cache instead of each writing it. Run totals record cache reads and writes. |
 | **Response cache** (`LLM_CACHE_DIR`, per-role salt) | Re-running a config costs nothing. A salt (`--salt drafter=d1`) gets fresh replies for one role, to measure noise. Non-cli backends are part of the cache key. |
 | **Confidence = the model's own number, checked by a second model** | Asking three times costs three times as much. The model's confidence was already well ordered (95/95 right at ≥ 0.90). The safety net is the Sonnet re-check below 0.75. |
 | **Every change is a flag, tested with and without** (`src/pipeline/fixes.py`, `scripts/experiment.py`) | Several changes that looked like improvements were noise, or broke something else. Each fix runs on fixed tickets with and without, with replicates, then is confirmed on tickets it never saw. |
@@ -121,12 +123,11 @@ Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/e
 - **Logging every ticket to a Google Sheet:** discussed, not built. Run events and token/cost logging in `runs/` replaced it.
 - **An Arabizi normalisation rule:** removed. It could corrupt real numbers, and Arabizi is rare.
 
-## 7. Where things stand (28 Oct)
+## 7. Where things stand (29 Oct)
 
 **Branches:**
-- `main` = `cb5b89c` (original pipeline).
-- `claude/eager-tesla-x1dcxj` = the other session's work: experiments, flags F2–F16, generator, 400 tickets, HANDOVER.md.
-- **`claude/handoff-and-policy`** = that branch plus this session's work. **The latest work is here.**
+- `main` = everything up to 29 Oct (the old branches `eager-tesla`, `handoff-and-policy`, `ccr-…-leerma` and `zen-rubin` were one line of work and are all merged).
+- **`claude/gracious-ramanujan-wwyhz1`** = `main` plus the 29 Oct API work. **The latest work is here.**
 
 **Done:**
 - [x] Pipeline, viewer, cli/api switch, response cache, token/cost logging
@@ -143,7 +144,8 @@ Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/e
   - dev-0048: the auditor saw no second issue
 - [x] API path fixed and checked against a local stand-in endpoint (no real call yet)
 - [x] API cost tracking and a per-run spend cap (29 Oct)
-- [ ] Any run on the **API**: first a 10-ticket pilot on the $35 test key, to measure cost per ticket. Blocked: `ANTHROPIC_API_KEY` was not visible in the 29 Oct sessions
+- [x] First API runs (29 Oct): 10-ticket pilot, then a 30-ticket dev sample. About $0.002–0.003 per ticket; subcategory 29/30 (see `docs/experiments/LOG.md`)
+- [x] Judge test: cli and API judges agree; grading defaults to cli
 - [ ] Calibrating `pass_above` (0.75) and `recheck_from` (0.60) on the API
 - [ ] Making the recommended flags the real code path, and deleting the dropped ones
 - [ ] Demo pages (batch progress and a results report), the MVP test run, slides

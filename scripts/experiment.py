@@ -292,6 +292,7 @@ def scored(set_name: str, label: str) -> tuple[dict, list[dict], dict]:
 
 
 def cmd_report(args) -> None:
+    os.environ["LLM_BACKEND"] = args.judge_backend
     set_name = set_key(args.set)
     label = args.label or args.config
     m, rows, meta = scored(set_name, label)
@@ -441,6 +442,7 @@ def cmd_pool(args) -> None:
 
 
 def cmd_judge_noise(args) -> None:
+    os.environ["LLM_BACKEND"] = args.judge_backend
     set_name = set_key(args.set)
     run = load_run(set_name, args.config)
     a, b = judge_all(run), judge_all(run, salt="\n\n(second review)")
@@ -585,6 +587,12 @@ def main() -> None:
         p.add_argument("--backend", default=os.getenv("LLM_BACKEND", "cli"))
         p.add_argument("--nocache", action="store_true", help="fresh model calls (noise check)")
         p.add_argument("--salt", help='fresh replies for some roles only, e.g. "drafter=d1"')
+        if name in ("report", "judge-noise"):
+            # The cli judge agreed with the API judge as well as each agreed with itself (82% vs
+            # 83-85% identical scores, 27 drafts x 3 gradings each; docs/experiments/dev_sample30/
+            # judge_backends-rec.md), so grading defaults to the free cli backend.
+            p.add_argument("--judge-backend", default="cli", choices=("cli", "api"),
+                           help="backend that grades the drafts (default cli)")
         if name == "judge-compare":
             p.add_argument("--backends", default="cli,api", help="judge backends to compare")
             p.add_argument("--reps", type=int, default=3, help="gradings per backend")
