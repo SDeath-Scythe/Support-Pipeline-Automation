@@ -53,18 +53,23 @@ A fixed workflow, not a free-roaming agent: predictable and testable. Models are
 - The tickets and most labels are model-written; a person checked 64 of them. There are no real customer messages in the evaluation.
 - The ticket writer, the pipeline and the draft grader are models from the same family.
 - The drafter sometimes doesn't ask for a shop or agent's name when the customer only says "the restaurant"; the fix tried made drafts worse.
-- Saved runs and the response cache store full ticket text. Fine for synthetic data; it must be masked before real tickets are processed.
+- Masking covers numbers only: saved runs hide every phone, card, account and transaction number of 7+ digits (shorter references stay visible), but not names. The response cache, a development tool, keeps replies in full and must stay off for real tickets.
 
 ## Run it
 
 ```bash
 pip install -r requirements.txt
-pytest                                          # 74 tests, no model calls
+pytest                                          # 76 tests, no model calls
+python app/server.py                            # viewer: http://localhost:8000, no key needed
 
 export SUPPORT_PIPELINE_API_KEY=...             # or ANTHROPIC_API_KEY
-LLM_BACKEND=api python app/server.py            # viewer: http://localhost:8000
+LLM_BACKEND=api python app/server.py            # the same viewer, able to run new tickets
 LLM_BACKEND=api python scripts/run_batch.py data/test2/tickets.jsonl
 ```
+
+**See the final test without a key:** start the viewer and pick "test2 · final" in the list. It replays the measured run ([`docs/runs/test2/final.json`](docs/runs/test2/final.json), committed as it was run on 30 Oct) and scores it against the current labels: type 78/80, priority 79/80.
+
+**Saved runs are masked:** `run_batch.py` hides phone, card, account and transaction numbers (7+ digits, keeping the first and last two) in the file it saves. `--no-mask` keeps them, for synthetic test sets scored against their gold labels; the experiment script uses it. Names are not masked.
 
 The viewer (standard library only) replays saved runs with an overview (accuracy, outcomes, confidence vs. accuracy, cost) and shows any ticket stage by stage, including exactly what each model was sent and returned. You can also paste a new ticket and watch it go through live. Screenshots: [`docs/demo/`](docs/demo/).
 
@@ -84,7 +89,7 @@ config/         taxonomy, thresholds, models (and prices), policy (empty on purp
 app/            the viewer
 scripts/        run_batch, experiment (with/without tests, judge), calibrate, review_sheet, generate_tickets
 data/           dev, mvp_test, heldout, test2, heldout2 (sealed); probes/ older test sets; review/ the author's checks
-docs/           experiments/ (LOG.md, AUDIT, per-set pages), demo/ screenshots, design brief
+docs/           experiments/ (LOG.md, AUDIT, per-set pages), runs/ (the final test, replayable), demo/ screenshots, design brief
 CONTEXT.md      goals, rules, decisions and status, for anyone picking the project up
 ```
 

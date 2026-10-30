@@ -129,11 +129,12 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
 - [x] Adversarial set 14/14; all 389 earlier tickets 385/389
 - [x] README, `docs/experiments/LOG.md`, `AUDIT-2026-10-29.md`, viewer screenshots in `docs/demo/`
 - [x] MVP update doc (Claude Docs) and the mentor deck (Slides artifact, 14 slides)
-- [x] Tests: 74 pass
+- [x] Saved batch runs mask long numbers by default (`mask_run` in `src/pipeline/clean.py`; `--no-mask` for scored synthetic sets)
+- [x] The final test run is committed (`docs/runs/test2/final.json`): the viewer replays it from a fresh clone with no key
+- [x] Tests: 76 pass
 
 **Open:**
 - [ ] Unknown charges: they stay with the fraud team; the author is unsure (ask the mentor)
-- [ ] Masking names, numbers and references in saved runs and the cache, before any real ticket
 - [ ] Drafts rated by people, and agent minutes per ticket: both need support agents using the tool
 
 ## 8. Next steps, in order
@@ -143,14 +144,14 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
 3. **heldout2** (80, sealed): run once at the progress review.
 4. Submit before **17 Nov**: repo, write-up, demo.
 
-Known limits to state in the write-up: tickets and most labels are model-written (64 checked by the author); one model family writes, runs and grades; the drafter sometimes misses asking for a shop or agent name (F11b, the fix tried, made drafts worse); unknown charges go to the fraud team; saved runs keep full ticket text.
+Known limits to state in the write-up: tickets and most labels are model-written (64 checked by the author); one model family writes, runs and grades; the drafter sometimes misses asking for a shop or agent name (F11b, the fix tried, made drafts worse); unknown charges go to the fraud team; masking covers numbers but not names, and the response cache (development only) keeps replies in full.
 
 ## 9. How to run
 
 ```bash
 pip install -r requirements.txt
-pytest                                                    # 74 tests, no model calls
-python app/server.py                                      # viewer: http://localhost:8000
+pytest                                                    # 76 tests, no model calls
+python app/server.py                                      # viewer: http://localhost:8000 ("test2 · final" replays with no key)
 LLM_BACKEND=cli python scripts/run_batch.py ...            # dev runs on the Pro plan
 python scripts/experiment.py run <config> --set <file> [--backend api]
 python scripts/generate_tickets.py stats                  # dataset tables, never ticket text

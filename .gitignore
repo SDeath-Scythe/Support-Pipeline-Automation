@@ -14,7 +14,7 @@ venv/
 *.egg-info/
 
 # Local run outputs (logs may contain ticket text)
-runs/
+/runs/
 logs/
 *.log
 

@@ -96,7 +96,7 @@ def cmd_run(args) -> None:
     else:
         env["LLM_CACHE_DIR"] = str(CACHE)
     subprocess.run([sys.executable, str(ROOT / "scripts/run_batch.py"), str(src), "--workers", str(args.workers),
-                    "--out", str(run_path(set_key(src), label))], env=env, check=True)
+                    "--out", str(run_path(set_key(src), label)), "--no-mask"], env=env, check=True)
 
 
 # ---------------------------------------------------------------- judge

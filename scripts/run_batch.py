@@ -5,6 +5,11 @@
 
 Saves runs/<timestamp>-<set>-<backend>.json. Open it in the viewer (python app/server.py)
 to see the overview and replay any ticket stage by stage.
+
+Long numbers (phones, cards, accounts, transaction references) are masked in the saved file by
+default. --no-mask keeps them: only for synthetic test sets scored against their gold labels
+(scripts/experiment.py uses it). The response cache (LLM_CACHE_DIR) is a development tool that
+stores model replies unmasked; leave it unset for real tickets.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from pipeline.clean import mask_run  # noqa: E402
 from pipeline.config import models  # noqa: E402
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.fixes import active as active_fixes  # noqa: E402
@@ -45,6 +51,8 @@ def main() -> None:
     ap.add_argument("file", nargs="?", default=str(ROOT / "data/probes/mixed_30.jsonl"))
     ap.add_argument("--workers", type=int, default=5)
     ap.add_argument("--out", help="output file (default runs/<timestamp>-<set>-<backend>.json)")
+    ap.add_argument("--no-mask", action="store_true",
+                    help="keep long numbers in the saved file (synthetic test sets only)")
     args = ap.parse_args()
 
     src = Path(args.file)
@@ -92,7 +100,10 @@ def main() -> None:
               "and this run's numbers are not valid. Raise LLM_BUDGET_USD and re-run (cached calls are free).")
     out = Path(args.out) if args.out else ROOT / "runs" / f"{started:%Y%m%d-%H%M%S}-{src.stem}-{backend()}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({
+    if not args.no_mask and os.getenv("LLM_CACHE_DIR"):
+        print("Note: LLM_CACHE_DIR is set; the response cache keeps model replies unmasked. "
+              "Leave it unset for real tickets.")
+    run = {
         "meta": {
             "set": src.stem, "backend": backend(), "started": started.isoformat(timespec="seconds"),
             "wall_seconds": round(time.time() - t0, 1), "workers": args.workers,
@@ -101,10 +112,12 @@ def main() -> None:
             "thresholds": load_thresholds()["confidence"],
             "fixes": fixes,
             "usage": totals,
+            "masked": not args.no_mask,
         },
         "tickets": rows,
-    }, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"Saved {out}")
+    }
+    out.write_text(json.dumps(run if args.no_mask else mask_run(run), ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"Saved {out}{'' if args.no_mask else ' (long numbers masked)'}")
 
 
 if __name__ == "__main__":

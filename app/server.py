@@ -30,6 +30,7 @@ from pipeline.run import process  # noqa: E402
 STATIC = Path(__file__).parent / "static"
 PROBES = ROOT / "data" / "probes"
 RUNS = ROOT / "runs"
+SAVED = ROOT / "docs" / "runs"   # committed runs (docs/runs/<set>/<label>.json): replay from a fresh clone, no key
 
 
 # Dataset splits the viewer may show. heldout and heldout2 stay sealed: their text is not shown here.
@@ -49,18 +50,22 @@ def load_tickets(name: str) -> list[dict]:
 
 
 def list_runs() -> list[dict]:
-    """Saved batch runs (runs/*.json) and experiment runs (runs/exp/<set>/<config>.json)."""
+    """Committed runs (docs/runs/<set>/<label>.json), saved batch runs (runs/*.json) and
+    experiment runs (runs/exp/<set>/<config>.json)."""
     out = []
-    files = sorted(RUNS.glob("*.json"), reverse=True) + sorted(RUNS.glob("exp/*/*.json"))
+    files = (sorted(SAVED.glob("*/*.json")) + sorted(RUNS.glob("*.json"), reverse=True)
+             + sorted(RUNS.glob("exp/*/*.json")))
     for f in files:
         try:
             meta = json.loads(f.read_text(encoding="utf-8"))["meta"]
         except (ValueError, KeyError):
             continue
-        name = f.relative_to(RUNS).with_suffix("").as_posix()
-        if name.startswith("exp/"):   # every split's file is tickets.jsonl: name the run after its folder
+        saved = SAVED in f.parents
+        name = ("saved/" + f.relative_to(SAVED).with_suffix("").as_posix() if saved
+                else f.relative_to(RUNS).with_suffix("").as_posix())
+        if saved or name.startswith("exp/"):   # every split's file is tickets.jsonl: name the run after its folder
             meta = {**meta, "set": f.parent.name}
-        out.append({"name": name, "experiment": name.startswith("exp/"), **meta})
+        out.append({"name": name, "experiment": saved or name.startswith("exp/"), **meta})
     return out
 
 
@@ -68,7 +73,7 @@ def with_current_gold(f: Path) -> dict:
     """A saved run with each ticket's gold label taken from its set file as it is now, so a label
     corrected after the run (e.g. the author's t2-0033) is scored the same way as in the reports."""
     run = json.loads(f.read_text(encoding="utf-8"))
-    if f.parent.parent == RUNS / "exp":
+    if f.parent.parent in (RUNS / "exp", SAVED):
         name = f.parent.name
         run["meta"] = {**run.get("meta", {}), "set": name}
         src = ROOT / "data" / name / "tickets.jsonl" if (ROOT / "data" / name).is_dir() else PROBES / f"{name}.jsonl"
@@ -80,10 +85,11 @@ def with_current_gold(f: Path) -> dict:
 
 
 def run_file(name: str) -> Path | None:
-    """The run file for a name from list_runs(), refusing anything outside runs/ or in the cache."""
-    f = (RUNS / f"{name}.json").resolve()
-    runs = RUNS.resolve()
-    if runs not in f.parents or (runs / "cache") in f.parents or not f.is_file():
+    """The run file for a name from list_runs(), refusing anything outside runs/ and docs/runs/,
+    or in the cache."""
+    base = SAVED if name.startswith("saved/") else RUNS
+    f = (base / f"{name.removeprefix('saved/')}.json").resolve()
+    if base.resolve() not in f.parents or (RUNS.resolve() / "cache") in f.parents or not f.is_file():
         return None
     return f
 

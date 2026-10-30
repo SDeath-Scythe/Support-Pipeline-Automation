@@ -1,4 +1,6 @@
-from pipeline.clean import clean, mask_for_logs
+import json
+
+from pipeline.clean import clean, mask_for_logs, mask_run
 from pipeline.config import models, taxonomy
 from pipeline.gate import check
 from pipeline.route import route
@@ -38,6 +40,26 @@ def test_clean_converts_arabic_digits_and_whitespace():
 
 def test_mask_hides_long_numbers():
     assert mask_for_logs("رقمي 07712345678") == "رقمي 07*******78"
+
+
+def test_mask_covers_spaced_and_arabic_digits_but_not_amounts_or_dates():
+    assert mask_for_logs("رقم العملية 9776 593217") == "رقم العملية 97** ****17"
+    assert mask_for_logs("رقمه ٠٧٧٠١٢٣٤٥٦٧") == "رقمه ٠٧*******٦٧"
+    assert mask_for_logs("+9647712345678") == "+96*********78"
+    assert mask_for_logs("ورقم العملية 9776 593217. وشكراً") == "ورقم العملية 97** ****17. وشكراً"
+    assert mask_for_logs("07712345678, شكراً") == "07*******78, شكراً"
+    kept = "حولت 1,000,000 دينار يوم 30/10/2026، رقم 88213، مبلغ 250000"
+    assert mask_for_logs(kept) == kept
+
+
+def test_mask_run_masks_every_string_and_keeps_numbers():
+    run = {"meta": {"cost_usd": 0.21}, "tickets": [{"ticket": {"id": "t2-0002", "text": "رقمي 07712345678"},
+                                                   "events": [{"data": {"reply": "{\"phone\": \"07712345678\"}"}}],
+                                                   "seconds": 4.9}]}
+    out = mask_run(run)
+    assert out["meta"]["cost_usd"] == 0.21 and out["tickets"][0]["seconds"] == 4.9
+    assert out["tickets"][0]["ticket"] == {"id": "t2-0002", "text": "رقمي 07*******78"}
+    assert "07712345678" not in json.dumps(out)
 
 
 # --- confidence gate ---
