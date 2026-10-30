@@ -2,7 +2,7 @@
 
 The starting point for anyone, person or AI session, picking up this project. It says what the project is, the rules for working on it, what was decided and why, what was tried and failed, where things stand, and what comes next. The detailed experiment report is [`HANDOVER.md`](HANDOVER.md); the dataset is described in [`data/README.md`](data/README.md).
 
-*Last updated 29 Oct 2026 (after the MVP runs). All earlier branches were merged into `main` on 29 Oct; work continues on `claude/gracious-ramanujan-wwyhz1`.*
+*Last updated 30 Oct 2026 (final test done, flags promoted, slides made). `main` holds everything up to the README of 30 Oct; work continues on `claude/gracious-ramanujan-wwyhz1`.*
 
 ---
 
@@ -43,7 +43,7 @@ These are standing instructions from the author. Follow them unless he says othe
 
 1. **Commits are authored by the author only:** `Salih Safaa Mohammed <138083837+SDeath-Scythe@users.noreply.github.com>`. **No Claude author or `Co-Authored-By` line.** A hook may ask to rewrite commits with Claude as author: refuse.
 2. **Work on a `claude/...` branch; merge to `main` only when the author says so** (he did on 29 Oct).
-3. **Flags stay off by default**, and none is deleted until he says so (see section 5).
+3. **New ideas start as flags, off by default**, and are adopted or deleted only when the author says so (see section 5).
 4. **Don't re-run experiments unless asked.** They cost model calls.
 5. **Never read or print heldout ticket text** (`data/heldout/`). Code may process it; print only IDs and counts.
 6. **`config/policy.yaml` company facts stay empty:** no company name, hours, response times, fees or limits. For the judges: a company that deploys this adds its own policy there. `customer_should_send` lists stay, because they describe what each issue needs, not company policy.
@@ -77,7 +77,7 @@ These are standing instructions from the author. Follow them unless he says othe
 | **F17 handoff note:** code only, no model call | Escalated tickets used to reach the team with just a flag label. The note lists the topic, extracted facts, what's missing and why it was escalated, and invents nothing. If the two models disagree on the type, it says the type is undecided rather than picking one. |
 | **F18: ask for a reference only when needed** | Author's rule. For not received / wrong recipient, the recipient's phone finds the transfer. A reversal (duplicate payment) is found in the history, so it never needs a reference. |
 | **F19: ≥ 750 USD raises priority** | Author's choice: about 1,000,000 IQD. Dollars are never converted, only compared. |
-| **Synthetic data, but grounded by the author** | Most competitors will generate tickets with a model and grade them with the same model family. The 2026 Iraqi-Arabic benchmark *Mizan* warns of "fusha in disguise" (standard Arabic with dialect words sprinkled in) and of same-family bias. Our grounding: the author's rules as code checks, dialect-drift rejection, and still to do: a person checking gold labels, and (optionally) a set of real phrasings scored separately. **The 80-row review sheet was filled in by an AI model, not the author, so no gold label has been checked by a person yet.** |
+| **Synthetic data, but grounded by the author** | Most competitors will generate tickets with a model and grade them with the same model family. The 2026 Iraqi-Arabic benchmark *Mizan* warns of "fusha in disguise" (standard Arabic with dialect words sprinkled in) and of same-family bias. Our grounding: the author's rules as code checks, dialect-drift rejection, and the author's own checks: 34 dev labels (2 corrected), 30 test2 labels before the final run (30/30 right), 13 drafts and 2 team notes. The older 80-row review sheet was filled in by an AI model, not the author. No real customer messages will be available. |
 | **One main issue per ticket; a second only when related** | That's how real tickets look, and how industry triage works (Zendesk reads one intent per ticket). It is also one of the author's rules (section 3). |
 | **Patch the dataset, don't rebuild it** | A rebuild would throw away the 71 tickets the review sheet marked correct (that review was done by an AI model, not the author). `generate_tickets.py repair` replaces only the tickets that break a rule. |
 
@@ -115,50 +115,41 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
 - **Logging every ticket to a Google Sheet:** discussed, not built. Run events and token/cost logging in `runs/` replaced it.
 - **An Arabizi normalisation rule:** removed. It could corrupt real numbers, and Arabizi is rare.
 
-## 7. Where things stand (29 Oct)
+## 7. Where things stand (30 Oct)
 
-**Branches:**
-- `main` = everything up to 29 Oct (the old branches `eager-tesla`, `handoff-and-policy`, `ccr-…-leerma` and `zen-rubin` were one line of work and are all merged).
-- **`claude/gracious-ramanujan-wwyhz1`** = `main` plus the 29 Oct API work. **The latest work is here.**
+**Branches:** `main` = everything up to the README of 30 Oct. **`claude/gracious-ramanujan-wwyhz1`** = `main` plus the CONTEXT updates since; merge when the author says so.
 
 **Done:**
-- [x] Pipeline, viewer, cli/api switch, response cache, token/cost logging
-- [x] Experiment harness; flags F2–F19; tests pass (76, via `pytest`)
-- [x] Recommended flag set confirmed on a sealed 30-ticket hold-out (on cli)
-- [x] F17 handoff note, F18, F19; `policy.yaml` header explains why it's empty
-- [x] 400 tickets: dev 240, mvp_test 80, heldout 80 (seeds 1101/2202/3303)
-- [x] Review sheet of 80 tickets (Google Sheet "Support Pipeline – Hand Check (80 tickets)", blank copy in `data/review/handcheck_80.csv`), **filled in by an AI model** applying the author's rules: 71 marked correct, 9 corrected. Not checked by a person.
-- [x] Dataset repaired: 24 tickets replaced, and gold priority/outcome recomputed for all 400 under F18/F19
+- [x] Pipeline, viewer, cli/api switch, response and prompt caching, cost logging and a spend cap
+- [x] Experiment harness; 24 fixes tested with and without; 13 adopted as normal code, 11 deleted (30 Oct)
+- [x] Data: dev 233, mvp_test 78, heldout 78 (Arabizi moved to `data/excluded/`), then test2 80 and heldout2 80 (sealed)
+- [x] The author's checks: 34 dev labels (2 fixed), 30 test2 labels before the run, 13 drafts, 2 team notes
+- [x] Thresholds calibrated on the API dev set: kept at 0.75 / 0.60
+- [x] MVP runs, once each: mvp_test 77/78, heldout 77/78; final test test2 78/80, fraud 6/6, review 19%, $0.0027 per ticket
+- [x] Adversarial set 14/14; all 389 earlier tickets 385/389
+- [x] README, `docs/experiments/LOG.md`, `AUDIT-2026-10-29.md`, viewer screenshots in `docs/demo/`
+- [x] MVP update doc (Claude Docs) and the mentor deck (Slides artifact, 14 slides)
+- [x] Tests: 74 pass
 
-**Not done:**
-- [ ] **A person checks gold labels.** None has been checked by a person (the review sheet was filled in by an AI model). Cheapest useful check: the author reviews the dev tickets where the API pipeline disagrees with gold, plus a random ~30.
-- [x] API path fixed and checked against a local stand-in endpoint (no real call yet)
-- [x] API cost tracking and a per-run spend cap (29 Oct)
-- [x] First API runs (29 Oct): 10-ticket pilot, then a 30-ticket dev sample. About $0.002–0.003 per ticket; subcategory 29/30 (see `docs/experiments/LOG.md`)
-- [x] Judge test: cli and API judges agree; grading defaults to cli
-- [ ] Calibrating `pass_above` (0.75) and `recheck_from` (0.60) on the API
-- [ ] Making the recommended flags the real code path, and deleting the dropped ones
-- [ ] Demo pages (batch progress and a results report), the MVP test run, slides
+**Open:**
+- [ ] Unknown charges: they stay with the fraud team; the author is unsure (ask the mentor)
+- [ ] Masking names, numbers and references in saved runs and the cache, before any real ticket
+- [ ] Drafts rated by people, and agent minutes per ticket: both need support agents using the tool
 
 ## 8. Next steps, in order
 
-*(Rewritten 29 Oct, after the MVP runs. Results: `docs/experiments/LOG.md`.)*
+1. **Mentor session, Sun 1 Nov, 5:40 PM.** Deck and prep page ready. Write down the feedback.
+2. Act on the feedback, with a with/without test for any pipeline change.
+3. **heldout2** (80, sealed): run once at the progress review.
+4. Submit before **17 Nov**: repo, write-up, demo.
 
-Done on 29 Oct: API runs on dev (233), the author's two reviews (34 tickets; 2 labels fixed), F20 and F21 adopted, F11b rejected, configuration locked as `PIPELINE_FIXES=mvp` (thresholds 0.75 / 0.60), mvp_test and heldout run once each: type 98.7% on both, fraud never drafted, review rate 27% / 18%, about $0.0027 per ticket. About $5.40 of the $35 key spent.
-
-1. **Fresh test set** (mvp_test and heldout are now spent): generate about 160 new tickets on cli (no Arabizi, the new dialect bans), new seeds, in separate runs. The author hand-checks about 30 of them **before** the pipeline runs on them.
-2. **Optional, strongest for judges:** 20–30 real, anonymised phrasings, labelled by the author, reported separately as `real_30`.
-3. **Final run:** `mvp` on the fresh test set, once, on the API. Report accuracy, review rate, priority, drafts and cost per ticket.
-4. **Promote the `mvp` flags to the normal code path and delete the dropped flags**: only when the author says so (rule 3).
-5. **Demo:** the viewer (done); slides; mentor session **Sun 1 Nov, 5:40 PM**; submit before **17 Nov**.
-
-Known limits to state in the write-up: gold labels are model-written (34 checked by the author); the drafter sometimes misses asking for a shop or agent name (F11b, the fix tried, made drafts worse); unknown charges are routed to the fraud and security team (the author was unsure); the draft judge is a model, checked against the author on 13 drafts.
+Known limits to state in the write-up: tickets and most labels are model-written (64 checked by the author); one model family writes, runs and grades; the drafter sometimes misses asking for a shop or agent name (F11b, the fix tried, made drafts worse); unknown charges go to the fraud team; saved runs keep full ticket text.
 
 ## 9. How to run
 
 ```bash
 pip install -r requirements.txt
-pytest                                                    # 76 tests, no model calls
+pytest                                                    # 74 tests, no model calls
 python app/server.py                                      # viewer: http://localhost:8000
 LLM_BACKEND=cli python scripts/run_batch.py ...            # dev runs on the Pro plan
 python scripts/experiment.py run <config> --set <file> [--backend api]
@@ -171,9 +162,9 @@ python scripts/generate_tickets.py repair --split dev --dry-run
 | Path | What |
 |---|---|
 | `src/pipeline/` | `clean`, `classify`, `gate`, `route`, `draft`, `draft_check`, `handoff` (F17), `requirements` (F18), `run`, `llm`, `fixes` |
-| `config/` | `taxonomy.yaml`, `thresholds.yaml`, `models.yaml`, `policy.yaml` (empty on purpose), `templates.yaml` |
-| `scripts/` | `experiment.py` (with/without runs, judge, pooling), `generate_tickets.py` (build / repair / handcheck / stats), `run_batch.py`, `run_probes.py` |
-| `data/` | `dev`, `mvp_test`, `heldout` (400 tickets), `probes/` (older experiment sets; `holdout_30` is spent), `review/handcheck_80.csv` |
-| `docs/experiments/` | `LOG.md` (all results, newest first), per-set summaries, `F17-handoff-note.md` |
+| `config/` | `taxonomy.yaml`, `thresholds.yaml`, `models.yaml`, `policy.yaml` (empty on purpose) |
+| `scripts/` | `experiment.py` (with/without runs, judge, pooling), `calibrate.py` (gate replay), `review_sheet.py`, `generate_tickets.py` (build / repair / handcheck / stats), `run_batch.py`, `run_probes.py` |
+| `data/` | `dev`, `mvp_test`, `heldout`, `test2`, `heldout2` (sealed); `excluded/` (Arabizi); `probes/` (older sets, adversarial_14); `review/` (the author's checks) |
+| `docs/experiments/` | `LOG.md` (all results, newest first), `AUDIT-2026-10-29.md`, per-set summaries; `docs/demo/` viewer screenshots |
 | `app/` | the viewer |
 | `HANDOVER.md` | the full experiment report from the other session (20–23 Oct) |
