@@ -8,7 +8,7 @@ sent it, so any threshold can be replayed. Calls the run already made come from 
 cache (runs/cache/), so only the other tickets cost anything. Answers go to
 runs/exp/<set>/<label>.recheck_all.json.
 
-table replays the gate (same rules as pipeline.run, with the run's fixes) for a grid of
+table replays the gate (same rules as pipeline.run) for a grid of
 thresholds and writes docs/experiments/<set>/calibration-<label>.md. No model calls.
 Gold labels are model-written; check the disagreements by hand before trusting a choice.
 """
@@ -33,8 +33,8 @@ RECHECK_FROM = [0.50, 0.55, 0.60, 0.65, 0.70]
 
 
 def _use_run_settings(run: dict, salt: str | None = None) -> None:
-    """Same fixes (they change the classifier prompt and the gate rules) and cache as the run."""
-    os.environ["PIPELINE_FIXES"] = ",".join(run["meta"].get("fixes") or [])
+    """Same cache as the run. The replay uses the current gate rules; flags named in runs made before
+    30 Oct are the normal code now (or were deleted), so they are not set."""
     os.environ["LLM_CACHE_DIR"] = str(ROOT / "runs/cache")
     if salt is not None:
         os.environ["LLM_CACHE_SALT"] = salt
@@ -84,7 +84,6 @@ def replay(run: dict, rechecks: dict, pass_above: float, recheck_from: float) ->
     from pipeline import gate
     from pipeline.clean import clean
     from pipeline.config import taxonomy, thresholds
-    from pipeline.fixes import enabled
     from pipeline.schemas import Extraction
 
     base = thresholds()
@@ -118,9 +117,9 @@ def replay(run: dict, rechecks: dict, pass_above: float, recheck_from: float) ->
                     sub2 = tax.subcategories.get(ex2.subcategory)
                     if ex2.subcategory == ex.subcategory:
                         outcome = "flagged" if gr.flags else "drafted"
-                    elif (enabled("recheck_cross_team") and sub2 is not None and not sub2.always_escalate
+                    elif (sub2 is not None and not sub2.always_escalate
                           and not gate.check(ex2, text).escalate):
-                        final, outcome = ex2, "flagged"                    # F3c: draft from the re-check
+                        final, outcome = ex2, "flagged"                    # drafted from the re-check
                     else:
                         outcome = "escalated"
             else:

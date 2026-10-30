@@ -37,7 +37,6 @@ import csv
 import hashlib
 import json
 import math
-import os
 import random
 import re
 import sys
@@ -50,11 +49,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-# Priority uses the routing rules with the recommended flags on (only F15 affects routing).
-# F16 (warqa_usd) only changes the classifier rules the blind audit is given ("ورقة" = 100 USD).
-os.environ["PIPELINE_FIXES"] = ("draft_check,recheck_cross_team,fee_followup,no_urgency_words,"
-                                "ask_if_missing,no_specific_followup,fraud_secondary_cleanup,warqa_usd,"
-                                "reference_when_needed,usd_large_amount")
+# Gold priority and outcome come from the pipeline's own routing rules, and the blind audit gets the
+# classifier's rules ("ورقة" = 100 USD included). These are the normal code path since 30 Oct.
 
 from pipeline import classify as cls  # noqa: E402
 from pipeline.clean import clean  # noqa: E402

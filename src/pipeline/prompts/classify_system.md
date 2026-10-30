@@ -27,7 +27,7 @@ Copy values from the ticket. Never invent, guess or complete a value. If it is n
 
 - `reference`: the transaction / operation number (رقم العملية، رقم الحوالة، رقم المعاملة، ref). Copy it exactly as written, including dashes or spaces. A mobile phone number (11 digits starting with 07, e.g. 07812345678) is NOT a reference: put it in `recipient_phone`. A reference may itself start with 07; decide by what the customer calls it and its length, not its first digits.
 - `recipient_phone`: a phone number the money was sent to or topped up.
-- `amount_iqd`: the amount in Iraqi dinars as an integer. Iraqis drop the word "thousand": "خمسين" or "خمسين ورقة" about money means 50,000; "ربع مليون" = 250,000; "مليون ونص" = 1,500,000; "١٥٠,٠٠٠" = 150000. If unsure whether a short number means thousands, use the context.
+- `amount_iqd`: the amount in Iraqi dinars as an integer. Iraqis drop the word "thousand": "خمسين" or "خمسين الف" about money means 50,000 IQD ("ورقة" is a 100 USD note, so "خمسين ورقة" = 5,000 USD and goes in amount_usd); "ربع مليون" = 250,000; "مليون ونص" = 1,500,000; "١٥٠,٠٠٠" = 150000. If unsure whether a short number means thousands, use the context.
 - `amount_usd`: if the amount is in US dollars (دولار، $، "ورقة" meaning 100 USD), put it here and leave `amount_iqd` null. Never convert currencies.
 - `date`: when it happened, as the customer wrote it (e.g. "البارحة بالليل"), or null.
 

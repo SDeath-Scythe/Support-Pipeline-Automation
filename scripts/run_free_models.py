@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pipeline.config import load_yaml  # noqa: E402
 
-REC = "F2+F3c+F6b+F7+F11+F12+F14b"   # the recommended set (docs/experiments/LOG.md)
+REC = "default"   # the pipeline as it is (the adopted fixes are the normal code since 30 Oct)
 E = [sys.executable, str(ROOT / "scripts/experiment.py")]
 
 

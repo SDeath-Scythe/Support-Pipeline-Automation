@@ -1,7 +1,7 @@
 """Test candidate fixes with and without them on the same tickets, and write up the results.
 
-    python scripts/experiment.py run baseline              # all fixes off
-    python scripts/experiment.py run F2+F3                 # fixes F2 and F3 on
+    python scripts/experiment.py run default               # the pipeline as it is (no flags)
+    python scripts/experiment.py run F22                   # a new fix's flag on (codes in CODES)
     python scripts/experiment.py run baseline --nocache --label baseline-rep1   # noise check
     python scripts/experiment.py report F2+F3              # judge drafts, score, compare with baseline
     python scripts/experiment.py judge-noise baseline      # grade the same drafts twice
@@ -28,36 +28,12 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pipeline.config import load_yaml, taxonomy  # noqa: E402
 from pipeline.draft import FIELD_AR  # noqa: E402
-from pipeline.fixes import PRESETS  # noqa: E402
 from pipeline.gate import _key  # noqa: E402
 from pipeline.requirements import REFERENCE_ALTERNATIVES, REFERENCE_NOT_NEEDED  # noqa: E402
 
-CODES = {
-    "F2": "draft_check",
-    "F3": "recheck_same_team",
-    "F5": "policy_facts",
-    "F6": "fee_amount",
-    "F7": "no_now_urgency",
-    "F8": "unclear_template",
-    "F3b": "recheck_use_second",
-    "F3c": "recheck_cross_team",
-    "F9": "confusable_recheck",
-    "F10": "runner_up",
-    "F11": "ask_if_missing",
-    "F12": "no_specific_followup",
-    "F13": "lookalike_hints",
-    "F6b": "fee_followup",
-    "F14": "fraud_secondary_rule",
-    "F14b": "fraud_secondary_cleanup",
-    "F15": "no_urgency_words",
-    "F16": "warqa_usd",
-    "F17": "handoff_note",
-    "F18": "reference_when_needed",
-    "F19": "usd_large_amount",
-    "F20": "duplicate_payment_hint",
-    "F11b": "ask_if_unnamed",
-    "F21": "team_summary",
-}
+# Short codes for the flags in pipeline/fixes.py, e.g. "F22": "some_fix". Empty since 30 Oct: the
+# adopted fixes (F2-F21, see docs/experiments/LOG.md) are the normal code and the rest were deleted.
+CODES: dict[str, str] = {}
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"
 JUDGE_PROMPT = (ROOT / "scripts/prompts/judge_draft.md").read_text(encoding="utf-8")
@@ -65,10 +41,9 @@ JUDGE_CHECKS = ["understood", "grounded", "no_promise", "asks_right", "safe", "t
 
 
 def flags_for(config: str) -> list[str]:
-    if config.startswith("baseline"):
+    """No flags for the pipeline as it is ("default"; "baseline" and "mvp" are older names for the same)."""
+    if config.startswith(("baseline", "default", "mvp")):
         return []
-    if config in PRESETS:        # e.g. "mvp": the locked configuration
-        return list(PRESETS[config])
     return [CODES[c] for c in config.split("+")]
 
 

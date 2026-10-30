@@ -86,8 +86,15 @@ def test_large_amount_raises_priority():
     assert route(ex(amount_iqd=2_000_000), TICKET) == ("transfers", "P1")
 
 
-def test_urgent_words_raise_priority():
-    assert route(ex(subcategory="topup_failed", category="bills_topup"), "ضروري الرصيد ما وصل") == ("bills", "P2")
+def test_no_word_raises_priority_but_amount_does():
+    """The author's rule: no word (هسه, ضروري, عاجل ...) changes priority; >= 1,000,000 IQD or >= $750 does."""
+    topup = ex(category="bills_topup", subcategory="topup_failed", reference=None, amount_iqd=5000)
+    assert route(topup, "ضروري عاجل بسرعة هسه صارلي يومين ثاني مرة الرصيد ما وصل") == ("bills", "P3")
+    assert route(ex(amount_iqd=1_000_000), "حولت مليون وما وصل")[1] == "P1"
+    assert route(ex(amount_iqd=999_999), "ضروري")[1] == "P2"
+    usd = ex(subcategory="not_received", reference="95120323", amount_iqd=None, amount_usd=2000)
+    assert route(usd, "حولت 20 ورقة")[1] == "P1"                          # dollars compared, not converted
+    assert route(ex(amount_iqd=None, amount_usd=500), "x")[1] == "P2"
 
 
 # --- LLM backend switch ---
@@ -229,13 +236,12 @@ def test_run_confident_ticket_is_drafted(monkeypatch):
 # --- experiment harness: fix flags and the response cache ---
 
 def test_fix_flags_off_by_default_and_reject_unknown(monkeypatch):
+    """No flag is open since the adopted fixes became the normal code (30 Oct); the mechanism stays."""
     from pipeline import fixes
 
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert fixes.active() == frozenset()
-    monkeypatch.setenv("PIPELINE_FIXES", "draft_check, no_now_urgency")
-    assert fixes.enabled("draft_check") and not fixes.enabled("fee_amount")
-    monkeypatch.setenv("PIPELINE_FIXES", "nope")
+    assert fixes.active() == frozenset() and fixes.FIXES == {}
+    monkeypatch.setenv("PIPELINE_FIXES", "draft_check")                    # adopted, so no longer a flag
     try:
         fixes.active()
         assert False, "unknown fix should raise"
@@ -264,14 +270,6 @@ def test_cache_reuses_identical_calls_only(monkeypatch, tmp_path):
 
 # --- F7: "هسه" does not raise priority ---
 
-def test_now_raises_priority_without_f7_but_not_with_it(monkeypatch):
-    forgot = ex(category="account_access", subcategory="forgot_pin", reference=None, amount_iqd=None)
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert route(forgot, "نسيت الرمز السري، هسه شلون ارجعه؟")[1] == "P2"
-    monkeypatch.setenv("PIPELINE_FIXES", "no_now_urgency")
-    assert route(forgot, "نسيت الرمز السري، هسه شلون ارجعه؟")[1] == "P3"
-    assert route(forgot, "ضروري نسيت الرمز السري")[1] == "P2"   # real urgency still counts
-
 
 # --- F3: re-check disagreement inside one team ---
 
@@ -291,29 +289,6 @@ SAME_TEAM = {
 T_WRONG = "دزيت ٣٠٠ الف لرقم غلط بالخطأ، رقم العملية 55128830، رجعولي ياها"
 
 
-def test_same_team_disagreement_escalates_without_f3(monkeypatch):
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    run = _fake_classifier_by_role(monkeypatch, SAME_TEAM)
-    result = run.process(T_WRONG)
-    assert result["outcome"] == "escalated" and "recheck_disagreed" in result["flags"]
-
-
-def test_same_team_disagreement_is_flagged_with_draft_under_f3(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "recheck_same_team")
-    run = _fake_classifier_by_role(monkeypatch, SAME_TEAM)
-    result = run.process(T_WRONG)
-    assert result["outcome"] == "flagged" and result["draft_ar"]
-    assert result["flags"] == ["recheck_same_team"] and result["recheck_alternative"] == "wrong_recipient"
-
-
-def test_f3_still_escalates_other_team_or_fraud(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "recheck_same_team")
-    for second in ['{"category": "general", "subcategory": "fees_limits_question", "confidence": 0.9}',
-                   '{"category": "fraud_security", "subcategory": "unauthorized_charge", "confidence": 0.9}']:
-        run = _fake_classifier_by_role(monkeypatch, {**SAME_TEAM, "rechecker": second})
-        assert run.process(T_WRONG)["outcome"] == "escalated"
-
-
 # --- F2: draft rule checks ---
 
 def test_draft_check_catches_each_problem():
@@ -329,57 +304,31 @@ def test_draft_check_catches_each_problem():
     assert problems("هلا بيك، الرد خلال ٢٤ ساعة.", given + "; Expected response time: خلال ٢٤ ساعة") == []
 
 
-def test_draft_problems_flag_the_ticket_only_under_f2(monkeypatch):
-    clf = '{"category": "general", "subcategory": "app_bug", "confidence": 0.92}'
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    run = _fake_models(monkeypatch, clf, "hلا بيك")
-    assert run.process("التطبيق يفتح شاشة بيضاء")["outcome"] == "drafted"
-    monkeypatch.setenv("PIPELINE_FIXES", "draft_check")
+def test_draft_problems_flag_the_ticket(monkeypatch):
+    run = _fake_models(monkeypatch, '{"category": "general", "subcategory": "app_bug", "confidence": 0.92}', "hلا بيك")
     result = run.process("التطبيق يفتح شاشة بيضاء")
     assert result["outcome"] == "flagged" and result["flags"] == ["draft:stray_latin"]
 
 
 # --- F8: fixed reply for unclear tickets ---
 
-def test_unclear_gets_template_without_drafter_under_f8(monkeypatch):
-    from pipeline import draft as drf
-
-    clf = '{"category": "general", "subcategory": "unclear", "confidence": 0.9}'
-    run = _fake_models(monkeypatch, clf, "من النموذج")
-    monkeypatch.setenv("PIPELINE_FIXES", "unclear_template")
-    monkeypatch.setattr(drf, "call", lambda *a: (_ for _ in ()).throw(AssertionError("drafter must not be called")))
-    events = []
-    result = run.process("السلام عليكم", events.append)
-    assert result["outcome"] == "drafted" and "رقم العملية" in result["draft_ar"]
-    draft_ev = [e for e in events if e["stage"] == "draft"][-1]
-    assert draft_ev["data"]["template"] is True
-
 
 # --- F6: the disputed fee is extracted separately ---
-
-def test_fee_field_only_in_prompt_under_f6(monkeypatch):
-    from pipeline.classify import system_prompt
-    from pipeline.draft import user_prompt
-
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert "fee_iqd" not in system_prompt()
-    monkeypatch.setenv("PIPELINE_FIXES", "fee_amount")
-    p = system_prompt()
-    assert "- `fee_iqd`" in p and '"amount_usd": null, "fee_iqd": null' in p
-    fee = ex(category="agents_cash", subcategory="overcharged_fee", reference=None, amount_iqd=50000, fee_iqd=7000)
-    assert "Disputed fee: 7,000 IQD" in user_prompt("…", fee, "agent_network")
 
 
 # --- F5: filled-in policy facts for the drafter ---
 
-def test_policy_facts_reach_the_drafter_only_under_f5(monkeypatch):
-    from pipeline.draft import user_prompt
+def test_policy_facts_reach_the_drafter_only_when_filled(monkeypatch):
+    """policy.yaml is empty on purpose; a company that fills it gives the drafter those facts."""
+    from pipeline import draft
 
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert "Known facts: none" in user_prompt("…", ex(), "transfers")
-    monkeypatch.setenv("PIPELINE_FIXES", "policy_facts")
-    p = user_prompt("…", ex(), "transfers")
-    assert "Support hours:" in p and "Expected response time for this issue: خلال ٢٤ ساعة" in p
+    assert "Known facts: none" in draft.user_prompt("…", ex(), "transfers")
+    real = draft.load_yaml
+    filled = {"company": {"support_hours_ar": "من السبت للخميس"},
+              "subcategories": {"not_received": {"response_time_ar": "خلال ٢٤ ساعة", "customer_should_send": []}}}
+    monkeypatch.setattr(draft, "load_yaml", lambda name: filled if name == "policy.yaml" else real(name))
+    p = draft.user_prompt("…", ex(), "transfers")
+    assert "Support hours: من السبت للخميس" in p and "Expected response time for this issue: خلال ٢٤ ساعة" in p
 
 
 def test_draft_check_v2_avoids_round1_false_alarms():
@@ -438,10 +387,9 @@ def test_cache_salt_refreshes_only_the_named_role(monkeypatch, tmp_path):
     assert llm._cached(cfg, "S", "a", send, "classifier") == "r1"   # classifier unchanged
 
 
-# --- F3b / F3c: draft from the re-check's answer ---
+# --- a re-check disagreement is drafted from the second answer (F3c) ---
 
-def test_f3b_uses_second_answer_for_same_team(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "recheck_use_second")
+def test_same_team_disagreement_uses_the_second_answer(monkeypatch):
     run = _fake_classifier_by_role(monkeypatch, SAME_TEAM)
     result = run.process(T_WRONG)
     assert result["outcome"] == "flagged" and result["draft_ar"]
@@ -449,82 +397,33 @@ def test_f3b_uses_second_answer_for_same_team(monkeypatch):
     assert result["recheck_alternative"] == "reversal_request" and "recheck_used_second" in result["flags"]
 
 
-def test_f3b_still_escalates_cross_team_but_f3c_does_not(monkeypatch):
+def test_recheck_disagreement_uses_the_second_answer_but_never_for_fraud(monkeypatch):
+    """F3c: the re-check model was right in most disagreements, so its answer is drafted, flagged."""
     cross = {**SAME_TEAM, "rechecker": '{"category": "general", "subcategory": "fees_limits_question", "confidence": 0.9}'}
-    monkeypatch.setenv("PIPELINE_FIXES", "recheck_use_second")
-    run = _fake_classifier_by_role(monkeypatch, cross)
-    assert run.process(T_WRONG)["outcome"] == "escalated"
-    monkeypatch.setenv("PIPELINE_FIXES", "recheck_cross_team")
-    result = run.process(T_WRONG)
+    result = _fake_classifier_by_role(monkeypatch, cross).process(T_WRONG)
     assert result["outcome"] == "flagged" and result["team"] == "general"
-    assert result["extraction"]["subcategory"] == "fees_limits_question"
-
-
-def test_f3c_never_overrides_into_or_out_of_fraud(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "recheck_cross_team")
+    assert result["extraction"]["subcategory"] == "fees_limits_question" and "recheck_used_second" in result["flags"]
     fraud = {**SAME_TEAM, "rechecker": '{"category": "fraud_security", "subcategory": "unauthorized_charge", "confidence": 0.9}'}
-    run = _fake_classifier_by_role(monkeypatch, fraud)
-    result = run.process(T_WRONG)
+    result = _fake_classifier_by_role(monkeypatch, fraud).process(T_WRONG)
     assert result["outcome"] == "escalated" and "fraud" in result["flags"]
 
 
-# --- F9 / F10: re-check close calls without a second model on every ticket ---
-
-def test_f9_rechecks_lookalike_answers_under_090(monkeypatch):
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert not check(ex(confidence=0.85), TICKET).needs_recheck          # not_received, 0.85 passes
-    monkeypatch.setenv("PIPELINE_FIXES", "confusable_recheck")
-    assert check(ex(confidence=0.85), TICKET).needs_recheck              # look-alike, so re-check
-    assert not check(ex(confidence=0.95), TICKET).needs_recheck          # very sure: no re-check
-    app = ex(category="general", subcategory="app_bug", reference=None, amount_iqd=None, confidence=0.85)
-    assert not check(app, TICKET).needs_recheck                          # not in a pair
-
-
-def test_f10_runner_up_prompt_and_gate(monkeypatch):
-    from pipeline.classify import system_prompt
-
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert "runner_up" not in system_prompt()
-    assert not check(ex(confidence=0.85, runner_up="fees_limits_question"), TICKET).needs_recheck
-    monkeypatch.setenv("PIPELINE_FIXES", "runner_up")
-    assert '"runner_up": null, "confidence": 0.0' in system_prompt() and "## Runner-up" in system_prompt()
-    assert check(ex(confidence=0.85, runner_up="fees_limits_question"), TICKET).needs_recheck
-    assert not check(ex(confidence=0.85, runner_up=None), TICKET).needs_recheck
 
 
 # --- F11 / F12: drafter prompt fixes ---
 
-def test_f11_splits_checkable_and_unverifiable_asks(monkeypatch):
+def test_drafter_asks_unverifiable_details_only_if_not_given():
     from pipeline.draft import user_prompt
 
-    card = ex(category="cards", subcategory="card_payment_failed", reference=None, amount_iqd=None)
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert "Ask the customer for: المبلغ, اسم المتجر" in user_prompt("…", card, "cards")
-    monkeypatch.setenv("PIPELINE_FIXES", "ask_if_missing")
-    p = user_prompt("…", card, "cards")
-    assert "Ask the customer for: المبلغ" in p
+    p = user_prompt("…", ex(category="cards", subcategory="card_payment_failed", reference=None, amount_iqd=None), "cards")
+    assert "Ask the customer for: المبلغ\n" in p
     assert "only if the ticket does not already give them: اسم المتجر" in p
 
 
-def test_f12_adds_rule_to_drafter_prompt(monkeypatch):
+def test_drafter_prompt_forbids_promising_specific_answers():
     from pipeline.draft import system_prompt
 
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert "a specific answer" not in system_prompt()
-    monkeypatch.setenv("PIPELINE_FIXES", "no_specific_followup")
     assert "Do not say the team will send, confirm or tell the customer a specific answer" in system_prompt()
-
-
-def test_f13_lookalike_hints_only_under_flag(monkeypatch):
-    from pipeline.classify import system_prompt
-
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    base = system_prompt()
-    assert "arrived but less than was sent" not in base
-    monkeypatch.setenv("PIPELINE_FIXES", "lookalike_hints")
-    p = system_prompt()
-    assert "`not_received`: Not received or deducted (money left the account" in p
-    assert p.count("\n") == base.count("\n")     # hints only, no new lines or rules
 
 
 # --- F6b: fee follow-up call only for fee tickets ---
@@ -543,7 +442,6 @@ def test_f6b_extracts_fee_with_a_separate_call(monkeypatch):
 
     monkeypatch.setattr(run, "call", fake_call)
     monkeypatch.setattr(drf, "call", lambda *a: "هلا بيك")
-    monkeypatch.setenv("PIPELINE_FIXES", "fee_followup")
     result = run.process("الوكيل اخذ ٧ الاف عمولة على سحب ٥٠ الف")
     assert result["extraction"]["fee_iqd"] == 7000 and result["fee_followup"] is True
     assert len(seen) == 2 and "fee_iqd" not in run.cls.system_prompt()     # classifier prompt untouched
@@ -556,37 +454,17 @@ def test_parse_fee_rejects_junk():
     assert parse_fee('{"fee_iqd": null}') is None and parse_fee("no json") is None and parse_fee('{"fee_iqd": "x"}') is None
 
 
-# --- F14: fraud rule defers to the two-issues rule ---
-
-def test_f14_rewords_only_the_two_sentences(monkeypatch):
-    from pipeline.classify import system_prompt
-
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    base = system_prompt()
-    assert "Put the other issue in `secondary_subcategory`." in base
-    monkeypatch.setenv("PIPELINE_FIXES", "fraud_secondary_rule")
-    p = system_prompt()
-    assert "Put the other issue in `secondary_subcategory`." not in p
-    assert "Being locked out, or losing money, because of the scam is part of the fraud" in p
-    assert "`secondary_subcategory` is optional; use it only as rules 1 and 5 describe." in p
-    # everything else is untouched
-    assert p.split("## Rules for choosing")[1].split("2. **Read the story")[1] == \
-        base.split("## Rules for choosing")[1].split("2. **Read the story")[1]
-
 
 # --- F14b: clear a fraud ticket's secondary when it is only a consequence ---
 
 def test_f14b_clears_consequence_keeps_separate_request(monkeypatch):
     from pipeline import run
 
-    monkeypatch.setenv("PIPELINE_FIXES", "fraud_secondary_cleanup")
     for second, kept in [("login_otp", None), ("unauthorized_charge", None), ("topup_failed", "topup_failed")]:
         reply = ('{"category": "fraud_security", "subcategory": "suspected_scam", '
                  f'"secondary_subcategory": "{second}", "confidence": 0.95}}')
         monkeypatch.setattr(run, "call", lambda role, system, user, r=reply: r)
         assert run.process("واحد كال واخذ الكود")["extraction"]["secondary_subcategory"] == kept
-    monkeypatch.delenv("PIPELINE_FIXES")
-    assert run.process("واحد كال واخذ الكود")["extraction"]["secondary_subcategory"] == "topup_failed"
 
 
 # --- free-model profiles (OpenAI-compatible backend; wiring only, no real API) ---
@@ -724,18 +602,12 @@ def test_cli_cache_key_unchanged(monkeypatch, tmp_path):
 
 def _gen():
     import importlib.util
-    import os
     from pathlib import Path
 
     p = Path(__file__).resolve().parents[1] / "scripts/generate_tickets.py"
     spec = importlib.util.spec_from_file_location("generate_tickets", p)
     mod = importlib.util.module_from_spec(spec)
-    before = os.environ.get("PIPELINE_FIXES")
-    spec.loader.exec_module(mod)            # the script sets PIPELINE_FIXES for itself; undo that here
-    if before is None:
-        os.environ.pop("PIPELINE_FIXES", None)
-    else:
-        os.environ["PIPELINE_FIXES"] = before
+    spec.loader.exec_module(mod)
     return mod
 
 
@@ -813,37 +685,25 @@ def test_generator_mosuli_markers_and_dedup():
 
 # --- F15: no word raises priority ---
 
-def test_f15_no_word_raises_priority_but_amount_still_does(monkeypatch):
-    topup = ex(category="bills_topup", subcategory="topup_failed", reference=None, amount_iqd=5000)
-    urgent = "ضروري عاجل بسرعة هسه صارلي يومين ثاني مرة الرصيد ما وصل"
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert route(topup, urgent)[1] == "P2"                              # off: urgent words raise P3 -> P2
-    monkeypatch.setenv("PIPELINE_FIXES", "no_urgency_words")
-    assert route(topup, urgent)[1] == "P3"                              # on: subcategory default
-    big = ex(subcategory="not_received", amount_iqd=1_000_000)
-    assert route(big, "حولت مليون وما وصل")[1] == "P1"                  # the amount rule is kept
-    assert route(ex(amount_iqd=999_999), "ضروري")[1] == "P2"
-    monkeypatch.setenv("PIPELINE_FIXES", "no_urgency_words,no_now_urgency")
-    assert route(topup, urgent)[1] == "P3"                              # F15 wins over F7
-
 
 # --- F16: "ورقة" is a 100 USD note ---
 
-def test_f16_rewords_only_the_warqa_example(monkeypatch):
+MVP_CLASSIFIER_SHA256 = "49732e62ba0c2d3d3220cdd150dca0ab545aacc338acc2b4becb76e960abbdef"
+
+
+def test_classifier_prompt_has_the_authors_rules():
+    """ورقة = 100 USD (F16) and a duplicate payment is a reversal (F20), as tested on the API."""
     import hashlib
 
     from pipeline.classify import system_prompt
 
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    base = system_prompt()
-    assert '"خمسين ورقة" about money means 50,000;' in base
-    assert hashlib.sha256(base.encode()).hexdigest().startswith("cb700138234e")   # baseline prompt unchanged
-    monkeypatch.setenv("PIPELINE_FIXES", "warqa_usd")
     p = system_prompt()
-    assert '"خمسين ورقة" about money means 50,000;' not in p
     assert '"ورقة" is a 100 USD note, so "خمسين ورقة" = 5,000 USD and goes in amount_usd' in p
-    assert '"خمسين الف" about money means 50,000 IQD' in p
-    assert p.count("\n") == base.count("\n")                                     # one line changed, nothing added
+    assert '"خمسين ورقة" about money means 50,000;' not in p
+    line = next(x for x in p.splitlines() if "`reversal_request`" in x)
+    assert "the same amount sent twice by mistake" in line
+    # Byte-identical to the prompt measured as PIPELINE_FIXES=mvp on dev, mvp_test, heldout and test2.
+    assert hashlib.sha256(p.encode()).hexdigest() == MVP_CLASSIFIER_SHA256
 
 
 # --- F17: handoff note for escalated tickets ---
@@ -851,14 +711,7 @@ def test_f16_rewords_only_the_warqa_example(monkeypatch):
 FRAUD_LOCKED = '{"category": "fraud_security", "subcategory": "suspected_scam", "secondary_subcategory": "login_otp", "amount_iqd": 250000, "confidence": 0.95}'
 
 
-def test_handoff_off_by_default(monkeypatch):
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    run = _fake_models(monkeypatch, FRAUD_LOCKED)
-    assert "handoff_ar" not in run.process("واحد اتصل وطلب الرمز وانطيته، وراحت ربع مليون")
-
-
 def test_handoff_fraud_note(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
     run = _fake_models(monkeypatch, FRAUD_LOCKED)
     note = run.process("واحد اتصل وطلب الرمز وانطيته، وراحت ربع مليون، وهسه ما اكدر افوت")["handoff_ar"]
     assert "الاحتيال والأمان › احتيال أو مشاركة الرمز" in note
@@ -869,7 +722,6 @@ def test_handoff_fraud_note(monkeypatch):
 
 
 def test_handoff_keeps_lockout_when_f14b_clears_it(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note,fraud_secondary_cleanup")
     run = _fake_models(monkeypatch, FRAUD_LOCKED)
     result = run.process("واحد اتصل وطلب الرمز وانطيته، وهسه ما اكدر افوت")
     assert result["extraction"]["secondary_subcategory"] is None     # F14b cleared the label
@@ -877,14 +729,14 @@ def test_handoff_keeps_lockout_when_f14b_clears_it(monkeypatch):
 
 
 def test_handoff_recheck_disagreement_names_both_answers_and_missing(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
+    """A disagreement escalates when the re-check's own answer fails the gate (here: low confidence)."""
     run = _fake_classifier_by_role(monkeypatch, {
         "classifier": '{"category": "transfers", "subcategory": "not_received", "amount_iqd": 100000, "confidence": 0.7}',
-        "rechecker": '{"category": "general", "subcategory": "fees_limits_question", "amount_iqd": 100000, "confidence": 0.7}',
+        "rechecker": '{"category": "general", "subcategory": "fees_limits_question", "amount_iqd": 100000, "confidence": 0.5}',
     })
     result = run.process("حولت ١٠٠ الف ووصلت ٩٨، وين راحت الالفين؟")
     note = result["handoff_ar"]
-    assert result["outcome"] == "escalated"
+    assert result["outcome"] == "escalated" and "recheck_disagreed" in result["flags"]
     assert "النموذجين اختلفوا" in note and "التحويل ما وصل أو انخصم" in note and "سؤال عن الرسوم والحدود" in note
     assert "غير محسوم" in note and "ناقص" not in note       # the type is in doubt, so no topic or missing list
     assert "المبلغ 100,000 دينار" in note
@@ -894,58 +746,43 @@ def test_handoff_low_confidence_and_model_error(monkeypatch):
     from pipeline import handoff
     from pipeline.schemas import Extraction
 
-    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
     low = Extraction(category="general", subcategory="unclear", confidence=0.4)
     assert "الثقة واطية (0.40)" in handoff.note(low, [], confidence=0.4)
     assert "خطأ بالنموذج" in handoff.note(None, ["model_error"])
 
 
 def test_handoff_only_on_escalated(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
     run = _fake_models(monkeypatch, '{"category": "general", "subcategory": "app_bug", "confidence": 0.92}')
     assert "handoff_ar" not in run.process("التطبيق يفتح شاشة بيضاء")
 
 
 def test_handoff_invalid_category_is_not_presented_as_a_topic(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")
     run = _fake_models(monkeypatch, '{"category": "transfers", "subcategory": "unclear", "confidence": 0.3}')
     note = run.process("شكد رسوم التحويل لحساب بمصرف؟")["handoff_ar"]
     assert "غير محسوم" in note and "غير واضح" not in note
     assert "التصنيف ما يطابق قائمة الأقسام" in note
 
 
-# --- F18: reference only when needed / F19: dollar amounts count as large ---
+# --- the author's rules: reference only when needed ---
 
-def test_f18_recipient_phone_replaces_reference(monkeypatch):
+def test_recipient_phone_replaces_reference():
+    """The author's rule (F18): no transaction number needed when the recipient's phone identifies it."""
     t = clean("دزيت ورقتين على 07865076865 وصاحبي يحلف ما وصله شي")
     e = ex(subcategory="not_received", reference=None, recipient_phone="07865076865", amount_iqd=None,
            amount_usd=200, confidence=0.9)
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert "missing:reference" in check(e, t).flags
-    monkeypatch.setenv("PIPELINE_FIXES", "reference_when_needed")
     g = check(e, t)
     assert "missing:reference" not in g.flags and g.confidence == 0.9
 
 
-def test_f18_reversal_never_needs_reference_but_not_received_still_does(monkeypatch):
+def test_reversal_never_needs_reference_but_not_received_still_does():
     from pipeline.draft import ask_for
 
-    monkeypatch.setenv("PIPELINE_FIXES", "reference_when_needed")
     dup = ex(subcategory="reversal_request", reference=None, amount_iqd=100000, confidence=0.9)
     assert "missing:reference" not in check(dup, clean("دزيت مية الف مرتين بالغلط")).flags
     assert "reference" not in ask_for(dup)
     plain = ex(subcategory="not_received", reference=None, amount_iqd=50000, confidence=0.9)
     assert "missing:reference" in check(plain, clean("حولت خمسين الف وما وصلت")).flags
     assert "reference" in ask_for(plain)
-
-
-def test_f19_usd_large_amount(monkeypatch):
-    e = ex(subcategory="not_received", reference="95120323", amount_iqd=None, amount_usd=2000)
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert route(e, "حولت 20 ورقة")[1] == "P2"
-    monkeypatch.setenv("PIPELINE_FIXES", "usd_large_amount")
-    assert route(e, "حولت 20 ورقة")[1] == "P1"
-    assert route(ex(subcategory="not_received", amount_iqd=None, amount_usd=500), "x")[1] == "P2"
 
 
 def test_generator_second_issues_are_related():
@@ -1153,18 +990,6 @@ def test_judge_needed_info_follows_reference_rule():
     assert "اسم المتجر" in exp.needed_info({"subcategory": "card_payment_failed"})
 
 
-def test_duplicate_payment_hint_changes_only_the_reversal_line(monkeypatch):
-    from pipeline import classify as cls
-
-    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    before = cls.system_prompt()
-    monkeypatch.setenv("PIPELINE_FIXES", "duplicate_payment_hint")
-    after = cls.system_prompt()
-    changed = [(a, b) for a, b in zip(before.splitlines(), after.splitlines()) if a != b]
-    assert len(before.splitlines()) == len(after.splitlines()) and len(changed) == 1
-    assert "`reversal_request`" in changed[0][1] and "twice by mistake" in changed[0][1]
-
-
 def test_team_summary_goes_into_the_handoff_note(monkeypatch):
     """F21: an escalated ticket's team note gets one summary line; a line with an invented number is dropped."""
     from pipeline import run
@@ -1177,39 +1002,12 @@ def test_team_summary_goes_into_the_handoff_note(monkeypatch):
         return '{"category": "fraud_security", "subcategory": "suspected_scam", "confidence": 0.95}'
 
     monkeypatch.setattr(run, "call", fake_call)
-    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note,team_summary")
     result = run.process("واحد اتصل وكال من خدمة العملاء وطلب الرمز وانطيته، هسه ما اكدر افوت")
     assert result["outcome"] == "escalated"
     assert "الخلاصة: انطى الرمز لواحد اتصل بيه" in result["handoff_ar"]
 
     replies["summary"] = "خسر 250000 دينار"          # not in the ticket: dropped
     assert "الخلاصة" not in run.process("واحد اتصل وطلب الرمز وانطيته")["handoff_ar"]
-
-    monkeypatch.setenv("PIPELINE_FIXES", "handoff_note")  # flag off: no summary call
-    assert "الخلاصة" not in run.process("واحد اتصل وطلب الرمز وانطيته")["handoff_ar"]
-
-
-def test_ask_if_unnamed_wording(monkeypatch):
-    from pipeline.clean import clean
-    from pipeline.draft import user_prompt
-    from pipeline.schemas import Extraction
-
-    ex = Extraction(category="cards", subcategory="card_payment_failed", amount_iqd=60000, confidence=0.9)
-    monkeypatch.setenv("PIPELINE_FIXES", "ask_if_missing")
-    assert "the restaurant" not in user_prompt(clean("دفعت بالمطعم"), ex, "cards")
-    monkeypatch.setenv("PIPELINE_FIXES", "ask_if_missing,ask_if_unnamed")
-    assert "does not count: ask for its name" in user_prompt(clean("دفعت بالمطعم"), ex, "cards")
-
-
-def test_mvp_preset_expands_to_known_flags(monkeypatch):
-    from pipeline import fixes
-
-    monkeypatch.setenv("PIPELINE_FIXES", "mvp")
-    on = fixes.active()
-    assert on == set(fixes.PRESETS["mvp"]) and on <= fixes.FIXES.keys()
-    assert fixes.enabled("duplicate_payment_hint") and not fixes.enabled("unclear_template")
-    monkeypatch.delenv("PIPELINE_FIXES")
-    assert not fixes.active()                       # still off by default
 
 
 def test_draft_check_secret_warning_with_wa_or_three_words_back():

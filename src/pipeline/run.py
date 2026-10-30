@@ -19,8 +19,7 @@ from . import draft as drf
 from . import draft_check
 from . import handoff
 from .clean import _DIGITS, _TATWEEL, clean
-from .config import load_yaml, taxonomy
-from .fixes import enabled
+from .config import taxonomy
 from .gate import check
 from .llm import backend, call, last_usage, model_for
 from .route import route
@@ -39,7 +38,6 @@ FLAG_AR = {
     "missing:reference": "رقم العملية ناقص",
     "missing:amount": "المبلغ ناقص",
     "recheck_disagreed": "النموذج الثاني صنّفها بشكل مختلف",
-    "recheck_same_team": "النموذجين اختلفوا بالنوع بس نفس القسم: تأكد من نوع المشكلة قبل الاعتماد",
     "recheck_used_second": "النموذجين اختلفوا: اعتمدنا جواب المراجعة الثانية، تأكد من نوع المشكلة",
     "model_error": "صار خطأ بالنموذج، تحتاج مراجعة يدوية",
     "draft:stray_latin": "المسودة بيها حروف إنكليزية بغير مكانها",
@@ -57,10 +55,10 @@ def _clean_changes(raw: str) -> dict[str, int]:
     }
 
 
-# F14b (fraud_secondary_cleanup): rule 1 of the classifier prompt (fraud: put the other issue in
-# secondary) contradicts rule 5 (a consequence is not a second issue), so "gave my code, now locked
-# out" sometimes got login_otp as secondary. Rewording the prompt (F14) shifted other classifications,
-# so this is enforced in code: a consequence of the fraud is cleared, a separate request is kept.
+# Rule 1 of the classifier prompt (fraud: put the other issue in secondary) contradicts rule 5 (a
+# consequence is not a second issue), so "gave my code, now locked out" sometimes got login_otp as
+# secondary. Rewording the prompt shifted other classifications, so this is enforced in code: a
+# consequence of the fraud is cleared, a separate request is kept.
 _FRAUD_CONSEQUENCES = ("account_access", "fraud_security")
 
 
@@ -84,7 +82,7 @@ _SUMMARY_PROMPT = Path(__file__).parent / "prompts" / "summary_system.md"
 
 
 def _team_summary(text: str) -> tuple[str | None, dict]:
-    """F21: one Arabic line for the team handling an escalated ticket. A line with a number that is
+    """One Arabic line for the team handling an escalated ticket. A line with a number that is
     not in the ticket is dropped (the note then has no summary), and so is a failed call."""
     try:
         line = call("classifier", _SUMMARY_PROMPT.read_text(encoding="utf-8"), cls.user_prompt(text)).strip()
@@ -108,11 +106,9 @@ def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str
         reply = call(role, system, user, attempt=1)
         usage = _add_usage(usage, last_usage())
         ex = cls.parse(reply)
-    cleared = None
-    if enabled("fraud_secondary_cleanup"):
-        before = ex.secondary_subcategory
-        ex = _clean_secondary(ex)
-        cleared = before if before and ex.secondary_subcategory is None else None
+    before = ex.secondary_subcategory
+    ex = _clean_secondary(ex)
+    cleared = before if before and ex.secondary_subcategory is None else None
     return ex, {
         "role": role,
         "model": model_for(role),
@@ -138,9 +134,9 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     def finish(outcome: Outcome, flags: list[str], **extra: Any) -> dict[str, Any]:
         result = {"outcome": outcome.value, "flags": flags,
                   "notes_ar": [FLAG_AR.get(f, f) for f in flags], **extra}
-        if outcome == Outcome.ESCALATED and enabled("handoff_note"):
+        if outcome == Outcome.ESCALATED:   # no draft: a short note for the team that receives it
             summary = None
-            if enabled("team_summary") and ctx["ex"] is not None:
+            if ctx["ex"] is not None:
                 summary, result["usage"] = _team_summary(text)
             result["handoff_ar"] = handoff.note(ctx["ex"], flags, confidence=ctx["confidence"],
                                                 second=ctx["second"], cleared_secondary=ctx["cleared"],
@@ -197,22 +193,15 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
             agree = ex2.subcategory == ex.subcategory
             info2.update(agree=agree, first=ex.subcategory, second=ex2.subcategory)
             send("recheck", "done", info2)
-            # F3 (recheck_same_team): a disagreement inside one team still gets a draft, flagged.
+            # The re-check model was right in most disagreements, so a disagreement is drafted from its
+            # answer, flagged, with the gate rules re-run for it. Never for fraud.
             sub2 = tax.subcategories.get(ex2.subcategory)
-            same_team = (not agree and sub is not None and sub2 is not None and sub2.team == sub.team
-                         and not sub2.always_escalate)
-            # F3b / F3c: the re-check model was right in most disagreements, so draft from its answer
-            # (same team only for F3b, any team for F3c). Never for fraud.
-            use_second = (not agree and sub2 is not None and not sub2.always_escalate
-                          and (enabled("recheck_cross_team") or (same_team and enabled("recheck_use_second"))))
+            use_second = not agree and sub2 is not None and not sub2.always_escalate
             gate2 = check(ex2, text) if use_second else None
             if use_second and not gate2.escalate:
                 alternative, ex, sub = ex.subcategory, ex2, sub2
                 flags = list(gate2.flags) + ["recheck_used_second"]
                 ctx.update(ex=ex, confidence=gate2.confidence, cleared=info2.get("cleared_secondary"))
-            elif same_team and enabled("recheck_same_team"):
-                flags.append("recheck_same_team")
-                alternative = ex2.subcategory
             elif not agree or ex2.category == "fraud_security":
                 flags.append("fraud" if ex2.category == "fraud_security" else "recheck_disagreed")
                 ctx["second"] = ex2
@@ -228,11 +217,10 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     else:
         send("recheck", "skipped", {"why": f"الثقة {gate.confidence:.2f} عالية والنوع مو حساس"})
 
-    # F6b (fee_followup): fee tickets get a small extra call for the disputed fee, so the
-    # classifier prompt (and its accuracy) stays as it is. Round 3 showed F6's prompt change
-    # shifted some classifications.
+    # Fee tickets get a small extra call for the disputed fee, so the classifier prompt (and its
+    # accuracy) stays as it is: adding a fee field to it shifted other classifications (round 3).
     fee_call: dict[str, Any] = {}
-    if enabled("fee_followup") and ex.subcategory in FEE_SUBCATEGORIES and ex.fee_iqd is None:
+    if ex.subcategory in FEE_SUBCATEGORIES and ex.fee_iqd is None:
         try:
             fee_reply = call("classifier", cls.fee_prompt(), cls.user_prompt(text))
             ex = ex.model_copy(update={"fee_iqd": cls.parse_fee(fee_reply)})
@@ -244,17 +232,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     team, priority = route(ex, text)
     send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority, **fee_call})
 
-    # 6. Draft. F8 (unclear_template): an unclear ticket gets the fixed reply, no model call.
-    if enabled("unclear_template") and ex.subcategory == "unclear":
-        reply = load_yaml("templates.yaml")["unclear_ar"].strip()
-        checks = draft_check.problems(reply, text) if enabled("draft_check") else []
-        flags += [f"draft:{p}" for p in checks]
-        send("draft", "done", {"model": "قالب ثابت", "template": True, "seconds": 0, "reply": reply,
-                               "user_prompt": "(قالب من config/templates.yaml، بدون نموذج)", "ask_for": [],
-                               "checks": checks})
-        outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
-        return finish(outcome, flags, team=team, priority=priority, draft_ar=reply, extraction=ex.model_dump())
-
+    # 6. Draft (drafter model), then rule checks on it
     send("draft", "running", {"model": model_for("drafter"), "backend": backend(),
                               "ask_for": drf.ask_for(ex)})
     t0 = time.time()
@@ -264,7 +242,7 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         send("draft", "error", {"error": f"{type(e).__name__}: {e}"})
         return finish(Outcome.ESCALATED, flags + ["model_error"], team=team, priority=priority)
-    checks = draft_check.problems(reply, user) if enabled("draft_check") else []
+    checks = draft_check.problems(reply, user)
     flags += [f"draft:{p}" for p in checks]
     send("draft", "done", {"model": model_for("drafter"), "backend": backend(),
                            "seconds": round(time.time() - t0, 1), "user_prompt": user, "reply": reply,

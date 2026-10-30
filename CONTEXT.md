@@ -83,21 +83,13 @@ These are standing instructions from the author. Follow them unless he says othe
 
 ## 5. Feature flags
 
-Set with `PIPELINE_FIXES=a,b,c` (all off by default). Short codes for `scripts/experiment.py` are in brackets.
+**None are open (30 Oct).** On the author's word, the 13 adopted fixes became the normal code and every dropped one was deleted; `PIPELINE_FIXES` is now empty and the pipeline runs as measured. Proof: every prompt is byte-identical to the measured `mvp` configuration (a test pins the classifier prompt's hash), and replaying test2 through the response cache gave identical results on all 80 tickets (only app bugs' team, and so their draft, changed, by the author's routing choice).
 
-**Recommended set** (tested on cli; needs confirming on the API):
-`draft_check` [F2], `recheck_cross_team` [F3c], `fee_followup` [F6b], `no_urgency_words` [F15], `ask_if_missing` [F11], `no_specific_followup` [F12 v2], `fraud_secondary_cleanup` [F14b].
+Adopted, now normal code: F2 draft checks, F3c draft from the re-check's answer, F6b separate fee call, F11 ask only for what's missing, F12 no promised specifics, F14b fraud consequence is not a second issue, F15 no word raises priority, F16 «ورقة» = 100 USD, F17 team note on escalations, F18 reference only when needed, F19 ≥ $750 raises priority, F20 duplicate payment = reversal, F21 one-line summary in the team note.
 
-**New from the author's rules, to add once the API confirms them:**
-- `handoff_note` [F17]
-- `reference_when_needed` [F18]
-- `usd_large_amount` [F19]
+Deleted (history in `docs/experiments/LOG.md` and git): F3, F3b, F5, F6, F7, F8, F9, F10, F11b, F13, F14.
 
-**Waiting on an API test with replicates:** `warqa_usd` [F16]. It edits the classifier prompt, which is the kind of change that backfired before.
-
-**The author's call:** `unclear_template` [F8], a fixed reply for unclear tickets.
-
-**Dropped** (delete when he says so): F3, F3b, F6, F7 (replaced by F15), F9, F10, F13, F14. F5 (`policy_facts`) is unused while the policy stays empty.
+The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a new idea is added as a flag, measured with and without, then adopted or deleted.
 
 ## 6. What was tried and didn't work
 

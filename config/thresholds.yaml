@@ -3,11 +3,10 @@
 
 confidence:
   pass_above: 0.75        # above this: continue to routing and drafting
-  recheck_from: 0.60      # 0.60 to 0.75: Sonnet re-checks; disagree -> escalate
+  recheck_from: 0.60      # 0.60 to 0.75: Sonnet re-checks (see run.py for a disagreement)
                           # below 0.60: escalate with a note
   missing_field_cap: 0.60 # score is capped here if a required field is missing
-  confusable_below: 0.90  # F9: a look-alike answer under this is re-checked
 
 priority:
   large_amount_iqd: 1000000   # amounts at or above this raise priority one level
-  large_amount_usd: 750       # F19: the same rule for dollar amounts (about 1,000,000 IQD)
+  large_amount_usd: 750       # the same rule for dollar amounts (about 1,000,000 IQD)
