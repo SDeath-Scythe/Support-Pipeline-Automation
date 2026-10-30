@@ -32,7 +32,7 @@ ticket → clean → classify + extract (Haiku) → confidence gate → re-check
 | Date | What |
 |---|---|
 | 22 Oct 2026 | Design brief submitted (`docs/design-brief.pptx`) |
-| **around 6–9 Nov** | Book a 1-on-1 mentor session, **using the same email as the submission** (organizers' email, 28 Oct) |
+| **Sun 1 Nov, 5:40** | 1-on-1 mentor session (booked with the same email as the submission) |
 | **17 Nov 2026** | **MVP deadline** (moved by the organizers) |
 
 API credits arrived on 28 Oct ($35 test key). The key is the environment variable `SUPPORT_PIPELINE_API_KEY` in the author's Claude Code environment (`ANTHROPIC_API_KEY` also works and wins if both are set). Never print, commit or write the key to a file.
@@ -150,7 +150,7 @@ Done on 29 Oct: API runs on dev (233), the author's two reviews (34 tickets; 2 l
 2. **Optional, strongest for judges:** 20–30 real, anonymised phrasings, labelled by the author, reported separately as `real_30`.
 3. **Final run:** `mvp` on the fresh test set, once, on the API. Report accuracy, review rate, priority, drafts and cost per ticket.
 4. **Promote the `mvp` flags to the normal code path and delete the dropped flags**: only when the author says so (rule 3).
-5. **Demo:** viewer pages for batch progress and the report; slides; mentor session (6–9 Nov); submit before **17 Nov**.
+5. **Demo:** the viewer (done); slides; mentor session **Sun 1 Nov, 5:40**; submit before **17 Nov**.
 
 Known limits to state in the write-up: gold labels are model-written (34 checked by the author); the drafter sometimes misses asking for a shop or agent name (F11b, the fix tried, made drafts worse); unknown charges are routed to the fraud and security team (the author was unsure); the draft judge is a model, checked against the author on 13 drafts.
 
