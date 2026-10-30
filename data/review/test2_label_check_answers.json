@@ -1,0 +1,218 @@
+{
+ "reviewer": "the author (native Iraqi Arabic speaker)",
+ "date": "2026-10-30",
+ "split": "test2",
+ "how": "checked before the pipeline ran on test2; only the ticket and its gold label were shown. label right/wrong; details (amount, reference, number, priority, second issue) right/off; dialect natural / bit_off / not_iraqi",
+ "answers": {
+  "t2-0004": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0009": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0011": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0013": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0019": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0021": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": "I think its right app bug but is it correct to route it to the general queue?"
+  },
+  "t2-0022": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0026": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0027": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0028": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0029": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "bit_off",
+   "label": "right",
+   "note": "متضايج no one uses this word"
+  },
+  "t2-0032": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "bit_off",
+   "label": "right",
+   "note": "بعثلي is a little off we use دزليor ارسلي"
+  },
+  "t2-0034": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0036": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0039": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0041": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "bit_off",
+   "label": "right",
+   "note": "Trying to outsmart the system"
+  },
+  "t2-0048": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0049": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0052": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0053": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0056": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0058": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0061": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0064": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0069": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0070": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0073": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0075": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0076": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": ""
+  },
+  "t2-0080": {
+   "correct_type": "",
+   "details": "right",
+   "dialect": "natural",
+   "label": "right",
+   "note": "It's a complex ticket but i think it got it right "
+  }
+ }
+}

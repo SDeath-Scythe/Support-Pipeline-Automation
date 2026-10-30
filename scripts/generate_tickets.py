@@ -195,7 +195,7 @@ OFF_TOPIC_TOPICS = ["whether the company is hiring", "a football match",
 # Basra); and من الاستعجال, not من العجلة.
 DRIFT = {"levantine": r"(بدي|بدك|بدو|هيك|كتير|منيح|هلق|بقدر|مابقدر|شو)", "gulf": r"(وايد|ابغي|ابغا|كذا)",
          "egyptian": r"(عايز|عاوز|ازاي|دلوقتي|كده|مش|بتاع)", "msa": r"(لقد|سوف|الذي|التي|لماذا|ليس|لدي|اود|حيث)",
-         "not_iraqi": r"(ابي|ابيه|ابيها|من العجله)"}
+         "not_iraqi": r"(ابي|ابيه|ابيها|من العجله|متضايج|متضايق|بعثلي|بعثتلي)"}   # + the author's test2 check, 30 Oct
 _DRIFT_RE = {k: re.compile(rf"(^|\s)[وفبل]?{p}(\s|$)") for k, p in DRIFT.items()}
 
 
