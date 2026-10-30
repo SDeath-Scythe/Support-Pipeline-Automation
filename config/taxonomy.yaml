@@ -1,5 +1,6 @@
 # Ticket taxonomy: 8 categories, 23 subcategories.
 # Each subcategory routes to exactly one team. Routing is a rule, not a model decision.
+# A subcategory routes to its category's team unless it names its own `team`.
 #
 # default_priority: P1 (urgent) .. P3 (normal). The router can raise it
 #   (large amount, repeat contact, urgent wording) but never lower it.
@@ -17,6 +18,7 @@ teams:
   bills: { label: "Bills team", label_ar: "قسم الفواتير" }
   fraud: { label: "Fraud team", label_ar: "قسم الاحتيال" }
   general: { label: "General queue", label_ar: "الطابور العام" }
+  tech: { label: "Tech support", label_ar: "قسم الدعم التقني" }   # app bugs (author, 30 Oct)
 
 categories:
   transfers:
@@ -101,7 +103,7 @@ categories:
     label_ar: "عام"
     team: general
     subcategories:
-      app_bug: { label: "App bug", label_ar: "خلل بالتطبيق", default_priority: P3, required_fields: [], high_risk: false }
+      app_bug: { label: "App bug", label_ar: "خلل بالتطبيق", team: tech, default_priority: P3, required_fields: [], high_risk: false }
       fees_limits_question: { label: "Fees & limits question", label_ar: "سؤال عن الرسوم والحدود", hint: "asks about, or disputes, an app fee or a limit (not an agent fee)", default_priority: P3, required_fields: [], high_risk: false }
       complaint: { label: "Complaint", label_ar: "شكوى", default_priority: P3, required_fields: [], high_risk: false }
       unclear: { label: "Unclear", label_ar: "غير واضح", default_priority: P3, required_fields: [], high_risk: false }

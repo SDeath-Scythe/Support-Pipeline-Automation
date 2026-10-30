@@ -58,7 +58,7 @@ def taxonomy() -> Taxonomy:
                 label=sub["label"],
                 label_ar=sub.get("label_ar", sub["label"]),
                 category=cat_key,
-                team=cat["team"],
+                team=sub.get("team", cat["team"]),   # a subcategory may name its own team (app_bug -> tech)
                 default_priority=sub["default_priority"],
                 required_fields=tuple(sub.get("required_fields", [])),
                 high_risk=bool(sub.get("high_risk", False)),

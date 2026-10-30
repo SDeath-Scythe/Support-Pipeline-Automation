@@ -1230,3 +1230,13 @@ def test_handoff_labels_an_unknown_charge_after_a_scam_as_an_effect():
                     secondary_subcategory="unauthorized_charge", confidence=0.95)
     text = note(ex, ["fraud"])
     assert "أثر على الحساب: خصم غير معروف" in text and "طلب ثاني" not in text
+
+
+def test_app_bugs_go_to_tech_support():
+    from pipeline.config import taxonomy
+    from pipeline.route import route
+    from pipeline.schemas import Extraction
+
+    tax = taxonomy()
+    assert tax.get("app_bug").team == "tech" and tax.get("complaint").team == "general"
+    assert route(Extraction(category="general", subcategory="app_bug", confidence=0.9), "التطبيق ما يفتح")[0] == "tech"
