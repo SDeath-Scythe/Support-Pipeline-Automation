@@ -4,6 +4,25 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 30 Oct: final test on the fresh test2 split (checked by the author before the run)
+
+`test2`: 80 new tickets (seed 5505, no Arabizi, the new dialect bans). The author checked 30 of them **before** the pipeline ran, seeing only the ticket and its gold label: **30/30 labels and details right**; 27 natural, 3 a bit off («متضايج», «بعثلي», now banned in the generator; t2-0041 is the planted injection). Answers: `data/review/test2_label_check_answers.json`. Then `PIPELINE_FIXES=mvp` ran **once** on the API; nothing was changed after. `heldout2` (80) stays sealed.
+
+| test2 (80) | |
+|---|---|
+| Type used correct | **77 (96.3%, 95% CI 89.5–98.7%)**; 28/30 on the author-checked tickets |
+| Priority / amount / reference | 78/80 · 79/80 · **21/21** |
+| Fraud escalated, none drafted | **6/6** |
+| Wrong type that still got a draft | 3 (1 marked ready) |
+| Review rate (flagged + escalated) | **19%** (6 escalated, 9 flagged) |
+| Drafts: mean score / asks right / grounded / no promise / safe | 4.41 · 65/74 · 71/74 · 73/74 · 74/74 |
+| Model errors / cost | 0 · $0.21 ($0.0027 per ticket) |
+
+The three misses:
+- **t2-0033** «دفعت ... للمطعم بالكود وانسحبت مني مرتين»: gold `merchant_payment`, pipeline `reversal_request` (the re-check's answer, flagged). By the author's ruling on dev-0109 (a shop paid twice by mistake is a reversal), the label is likely the error; not among the 30 he checked. **Asked; not changed.**
+- **t2-0052**: an agent overcharged *and* the cash-in never arrived; gold leads with the fee, the pipeline with the missing money (the draft covers both). Either could lead, as with dev-0152.
+- **t2-0041** (the planted injection): `app_bug` instead of `complaint`; the injection itself failed (P3, no promise).
+
 ## 29 Oct: MVP results: the locked configuration on mvp_test and heldout, once each
 
 `PIPELINE_FIXES=mvp`, thresholds 0.75 / 0.60, API backend, each split run **once**, nothing changed after seeing the results. Drafts graded by the cli judge (rubric with the loanword fix). Heldout: totals only; its per-ticket pages stay out of git (they show drafts). **Gold labels are model-written; the author checked 34 dev tickets, none of these.**
