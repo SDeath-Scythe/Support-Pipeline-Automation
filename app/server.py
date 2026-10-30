@@ -32,8 +32,17 @@ PROBES = ROOT / "data" / "probes"
 RUNS = ROOT / "runs"
 
 
+# Dataset splits the viewer may show. heldout and heldout2 stay sealed: their text is not shown here.
+SPLITS = ("dev", "mvp_test", "test2")
+
+
+def ticket_sets() -> list[str]:
+    return [s for s in SPLITS if (ROOT / "data" / s / "tickets.jsonl").exists()] + sorted(p.stem for p in PROBES.glob("*.jsonl"))
+
+
 def load_tickets(name: str) -> list[dict]:
-    path = PROBES / f"{Path(name).name}.jsonl"
+    name = Path(name).name
+    path = ROOT / "data" / name / "tickets.jsonl" if name in SPLITS else PROBES / f"{name}.jsonl"
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -49,8 +58,25 @@ def list_runs() -> list[dict]:
         except (ValueError, KeyError):
             continue
         name = f.relative_to(RUNS).with_suffix("").as_posix()
+        if name.startswith("exp/"):   # every split's file is tickets.jsonl: name the run after its folder
+            meta = {**meta, "set": f.parent.name}
         out.append({"name": name, "experiment": name.startswith("exp/"), **meta})
     return out
+
+
+def with_current_gold(f: Path) -> dict:
+    """A saved run with each ticket's gold label taken from its set file as it is now, so a label
+    corrected after the run (e.g. the author's t2-0033) is scored the same way as in the reports."""
+    run = json.loads(f.read_text(encoding="utf-8"))
+    if f.parent.parent == RUNS / "exp":
+        name = f.parent.name
+        run["meta"] = {**run.get("meta", {}), "set": name}
+        src = ROOT / "data" / name / "tickets.jsonl" if (ROOT / "data" / name).is_dir() else PROBES / f"{name}.jsonl"
+        if src.exists():
+            gold = {d["id"]: d for d in map(json.loads, src.read_text(encoding="utf-8").splitlines()) if d}
+            run["tickets"] = [{**row, "ticket": gold[row["ticket"]["id"]]} for row in run["tickets"]
+                              if row["ticket"].get("id") in gold]
+    return run
 
 
 def run_file(name: str) -> Path | None:
@@ -95,7 +121,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/", "/index.html"):
             return self._send((STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
         if url.path == "/api/sets":
-            return self._json(sorted(p.stem for p in PROBES.glob("*.jsonl")))
+            return self._json(ticket_sets())
         if url.path == "/api/tickets":
             return self._json(load_tickets((q.get("set") or ["edge_cases"])[0]))
         if url.path == "/api/runs":
@@ -104,7 +130,7 @@ class Handler(BaseHTTPRequestHandler):
             f = run_file((q.get("name") or [""])[0])
             if f is None:
                 return self._json({"error": "No such run"}, 404)
-            return self._send(f.read_bytes(), "application/json; charset=utf-8")
+            return self._json(with_current_gold(f))
         if url.path == "/api/meta":
             return self._json(meta())
         if url.path == "/api/prompts":

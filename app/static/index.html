@@ -257,7 +257,7 @@ async function init() {
   const g2 = el("optgroup", { label: "تشغيلات محفوظة" });
   const g3 = el("optgroup", { label: "تجارب الإصلاحات" });
   runs.forEach(r => (r.experiment ? g3 : g2).append(el("option", { value: `run:${r.name}`, text: r.experiment
-    ? `${r.set} · ${r.name.split("/").pop()}${r.fixes?.length ? " (" + r.fixes.join("، ") + ")" : ""}`
+    ? `${r.set} · ${r.name.split("/").pop()}${!r.fixes?.length ? "" : r.fixes.length > 3 ? ` (${r.fixes.length} إصلاحات)` : " (" + r.fixes.join("، ") + ")"}`
     : `${r.set} · ${r.started.replace("T", " ").slice(0, 16)} · ${r.backend}` })));
   src.append(g1); if (g2.children.length) src.append(g2); if (g3.children.length) src.append(g3);
   const firstRun = runs.find(r => !r.experiment) || runs[0];
@@ -502,9 +502,12 @@ function scoreRow(row) {
   const g = row.ticket, r = row.result;
   const cl = ev(row, "classify"), gate = ev(row, "gate"), rc = ev(row, "recheck"), dr = ev(row, "draft");
   const ex = cl?.status === "done" ? cl.data.extraction : null;
+  // The type the pipeline acted on: the re-check's answer when it was used, else the first model's.
+  const used = r.extraction?.subcategory ?? ex?.subcategory;
   return {
-    sub: !!ex && ex.subcategory === g.subcategory,
-    got: ex?.subcategory, conf: ex?.confidence, gateConf: gate?.data.confidence,
+    sub: !!used && used === g.subcategory,
+    firstSub: !!ex && ex.subcategory === g.subcategory,     // the first model alone (confidence table)
+    got: used, conf: ex?.confidence, gateConf: gate?.data.confidence,
     outcome: r.outcome === g.outcome, priority: r.priority === g.priority,
     recheck: rc?.status === "done", agree: rc?.data?.agree,
     calls: (cl ? 1 : 0) + (rc?.status === "done" ? 1 : 0) + (dr?.status === "done" ? 1 : 0),
@@ -547,7 +550,7 @@ function renderOverview() {
   const bins = [[0.9, 1.01, "0.90 فما فوق"], [0.75, 0.9, "0.75 – 0.90"], [0.6, 0.75, "0.60 – 0.75"], [0, 0.6, "أقل من 0.60"]];
   const calib = el("table", { class: "grid" }, el("thead", {}, el("tr", {}, ["ثقة النموذج بنفسه", "التذاكر", "كم وحدة صحيحة"].map(h => el("th", { text: h })))),
     el("tbody", {}, bins.map(([lo, hi, label]) => { const idx = sc.filter(s => s.conf != null && s.conf >= lo && s.conf < hi);
-      return el("tr", {}, el("td", { class: "ltr", text: label }), el("td", { text: idx.length }), el("td", {}, idx.length ? accCell(idx.filter(s => s.sub).length, idx.length) : "—")); })));
+      return el("tr", {}, el("td", { class: "ltr", text: label }), el("td", { text: idx.length }), el("td", {}, idx.length ? accCell(idx.filter(s => s.firstSub).length, idx.length) : "—")); })));
 
   // all tickets
   const body = el("tbody");
