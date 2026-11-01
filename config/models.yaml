@@ -9,9 +9,23 @@
 #        thresholds, the MVP run and the demo.
 backend: cli
 
+# Kill switch. Override per run with PIPELINE_MODE=off|classify_only|full (the env var wins).
+#   off            no model is called; every ticket goes straight to a person
+#   classify_only  tickets are sorted, re-checked and routed, but no reply is drafted
+#   full           the normal pipeline
+# Read before every model call, so an edit here stops a running viewer or batch without a restart.
+# Keep the quotes (YAML reads a bare off as false; the code treats that as off too).
+mode: "full"
+
+# api only: seconds before one API request is abandoned. The SDK's own retries are off; the
+# pipeline retries a timeout, a dropped connection, a rate limit or a server error once (llm.call).
+# A role with its own timeout_s (generator, evaluator) uses that instead.
+timeout_s: 60
+
 # api only: stop a run once its API spend reaches this many dollars (override with
 # LLM_BUDGET_USD; 0 turns the cap off). The count is per process; calls already in flight
-# still finish, so a run can go over by a few calls.
+# still finish, so a run can go over by a few calls. While a cap is set, a model with no
+# entry under `prices` is refused (its spend could not be counted).
 budget_usd: 5.0
 
 # api only: USD per million tokens, used to price each call (Claude API list prices,

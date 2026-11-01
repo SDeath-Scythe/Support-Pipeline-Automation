@@ -38,7 +38,7 @@ A fixed workflow, not a free-roaming agent: predictable and testable. Models are
 - **Confidence gate.** The classifier's confidence is lowered when a rule disagrees (a required field is missing, or a "reference" it found isn't in the text). Below 0.60: escalated. 0.60–0.75, or a high-risk type: a second model classifies the ticket blind. If the two disagree, the ticket is drafted from the second model's answer and flagged; if the second answer is fraud or fails the gate itself, it is escalated. Fraud and security tickets are always escalated.
 - **Priority** comes from the problem type, raised one level for a large amount (≥ 1,000,000 IQD or ≥ $750). No word in the ticket changes it.
 - **Three outcomes:** ready to approve; flagged (a person should check one thing, named in the note); escalated (no customer draft; the team gets a note with the topic, the facts found, what's missing, why it was escalated, and a one-line summary of what happened).
-- **Grounded drafts.** The drafter is told only the ticket, the extracted facts and [`config/policy.yaml`](config/policy.yaml), which is empty on purpose: a deploying team adds its own hours and response times there. Rule checks flag any draft that promises an outcome or a time, asks for a code or PIN, contains a number not in the ticket, or has stray Latin letters.
+- **Grounded drafts.** The drafter is told only the ticket, the extracted facts and [`config/policy.yaml`](config/policy.yaml), which is empty on purpose: a deploying team adds its own hours and response times there. Rule checks flag any draft that promises an outcome, gives a time the policy file doesn't, asks for a code or PIN, contains a number not in the ticket, or has stray Latin letters.
 - **Taxonomy:** 8 categories, 23 types, 9 teams ([`config/taxonomy.yaml`](config/taxonomy.yaml)).
 
 ## How it was built and measured
@@ -53,13 +53,13 @@ A fixed workflow, not a free-roaming agent: predictable and testable. Models are
 - The tickets and most labels are model-written; a person checked 64 of them. There are no real customer messages in the evaluation.
 - The ticket writer, the pipeline and the draft grader are models from the same family.
 - The drafter sometimes doesn't ask for a shop or agent's name when the customer only says "the restaurant"; the fix tried made drafts worse.
-- Masking covers numbers only: saved runs hide every phone, card, account and transaction number of 7+ digits (shorter references stay visible), but not names. The response cache, a development tool, keeps replies in full and must stay off for real tickets.
+- Masking covers numbers only: saved runs hide every phone, card, account and transaction number of 7+ digits (shorter references stay visible) and any code written after a code word, but not names. The response cache, a development tool, keeps replies in full and must stay off for real tickets.
 
 ## Run it
 
 ```bash
-pip install -r requirements.txt
-pytest                                          # 76 tests, no model calls
+pip install -r requirements-dev.txt             # adds pytest to requirements.txt
+pytest                                          # 549 tests, no model calls
 python app/server.py                            # viewer: http://localhost:8000, no key needed
 
 export SUPPORT_PIPELINE_API_KEY=...             # or ANTHROPIC_API_KEY
@@ -69,7 +69,9 @@ LLM_BACKEND=api python scripts/run_batch.py data/test2/tickets.jsonl
 
 **See the final test without a key:** start the viewer and pick "test2 · final" in the list. It replays the measured run ([`docs/runs/test2/final.json`](docs/runs/test2/final.json), committed as it was run on 30 Oct) and scores it against the current labels: type 78/80, priority 79/80.
 
-**Saved runs are masked:** `run_batch.py` hides phone, card, account and transaction numbers (7+ digits, keeping the first and last two) in the file it saves. `--no-mask` keeps them, for synthetic test sets scored against their gold labels; the experiment script uses it. Names are not masked.
+**Saved runs are masked:** `run_batch.py` hides phone, card, account and transaction numbers (7+ digits, also when split by `-`, `.` or spaces, keeping the first and last two) and codes written after a code word (`OTP 482913` → `OTP ******`) in the file it saves. `--no-mask` keeps them, for synthetic test sets scored against their gold labels; the experiment script uses it. Names are not masked.
+
+**Safety switches:** the viewer answers only on localhost, with a per-page token, and refuses tickets over 4,000 characters. `PIPELINE_MODE=off` sends every ticket to a person with no model call (`classify_only` writes no drafts). `REAL_DATA=1` refuses the development-only paths (the free backend, the response cache, `--no-mask`). Details: the 1 Nov entry in [`docs/experiments/LOG.md`](docs/experiments/LOG.md).
 
 The viewer (standard library only) replays saved runs with an overview (accuracy, outcomes, confidence vs. accuracy, cost) and shows any ticket stage by stage, including exactly what each model was sent and returned. You can also paste a new ticket and watch it go through live. Screenshots: [`docs/demo/`](docs/demo/).
 

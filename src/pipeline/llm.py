@@ -25,13 +25,21 @@ model, system and user prompt). Runs with and without a fix then differ only whe
 fix changes a model's input, not because the model answered differently a second time.
 The key also names the backend for every non-cli backend (api, or openai:<provider>), so an
 API run never gets a stored cli reply back; cli keys are unchanged, so old cli entries stay valid.
+LLM_CACHE_ONLY=1 replays the cache and never calls a model: a call with no stored reply raises
+CacheMiss, so a replay cannot spend.
+
+Real tickets: set REAL_DATA=1. assert_real_data_safe() then refuses every development path that
+would send a ticket somewhere it shouldn't go or keep it unmasked on disk (the cli backend, free-model
+profiles, the response cache, an API endpoint other than Anthropic's).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import random
 import shutil
 import subprocess
 import tempfile
@@ -39,11 +47,13 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from .config import llm_backend, load_yaml, models
+from .config import llm_backend, load_yaml, models, pipeline_mode
 
 load_dotenv()
 
@@ -52,6 +62,9 @@ BACKENDS = ("api", "cli")
 # Where the API key can come from, in order. SUPPORT_PIPELINE_API_KEY is the name the author's
 # Claude Code environment uses; ANTHROPIC_API_KEY (or .env) works as before.
 API_KEY_VARS = ("ANTHROPIC_API_KEY", "SUPPORT_PIPELINE_API_KEY")
+
+# The only API endpoint real tickets may go to (see assert_real_data_safe).
+ANTHROPIC_API_URL = "https://api.anthropic.com"
 
 # Keys that would make Claude Code bill the API instead of the Claude plan.
 _API_ENV_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "SUPPORT_PIPELINE_API_KEY")
@@ -78,6 +91,50 @@ class BudgetExceeded(RuntimeError):
     """Raised instead of an API call once this run has spent its budget (see models.yaml)."""
 
 
+class CacheMiss(RuntimeError):
+    """Raised under LLM_CACHE_ONLY=1 when the response cache has no reply for a call."""
+
+
+def _env_on(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def real_data() -> bool:
+    """True when this process handles real customer tickets (REAL_DATA=1). Fails closed: any value
+    but empty, 0, false, no or off counts as on, so a typo («REAL_DATA=y») never drops the guard."""
+    return os.getenv("REAL_DATA", "").strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def cache_only() -> bool:
+    return _env_on("LLM_CACHE_ONLY")
+
+
+def assert_real_data_safe() -> None:
+    """Under REAL_DATA=1, refuse the development paths that are fine for synthetic tickets only.
+
+    cli runs a personal Claude Code login; LLM_PROFILE sends tickets to third-party free tiers;
+    the response cache stores replies unmasked on disk (cache-only replays it); ANTHROPIC_BASE_URL
+    (read by the SDK, also from .env) would send tickets and the key to another host. Called at startup
+    by the viewer and run_batch, and again by every call(), so no path skips it.
+    """
+    if not real_data():
+        return
+    found = []
+    if backend() == "cli":
+        found.append("LLM_BACKEND is cli (a personal Claude Code login); use LLM_BACKEND=api")
+    base_url = os.getenv("ANTHROPIC_BASE_URL", "").strip().rstrip("/")
+    if base_url and base_url != ANTHROPIC_API_URL:
+        found.append(f"ANTHROPIC_BASE_URL points away from {ANTHROPIC_API_URL} (tickets and the key would "
+                     "go to that host); unset it")
+    for var, why in (("LLM_PROFILE", "sends tickets to free-tier models of other providers"),
+                     ("LLM_CACHE_DIR", "stores model replies unmasked on disk"),
+                     ("LLM_CACHE_ONLY", "replays stored development replies")):
+        if os.getenv(var):
+            found.append(f"{var} is set ({why}); unset it")
+    if found:
+        raise BackendError("REAL_DATA=1 refuses to run: " + "; ".join(found) + ".")
+
+
 # Dollars spent on the API by this process (cache hits cost nothing and are not counted).
 _spend_lock = threading.Lock()
 _spent = {"usd": 0.0}
@@ -88,14 +145,36 @@ def spent_usd() -> float:
 
 
 def budget_usd() -> float:
-    """The run's API budget in dollars; 0 means no cap."""
+    """The run's API budget in dollars; 0 means no cap. A cap that is not a finite number of 0 or more
+    («nan», «-1», «five») raises BackendError: NaN would compare as never reached and switch the cap off."""
     env = os.getenv("LLM_BUDGET_USD")
-    return float(env) if env not in (None, "") else float(load_yaml("models.yaml").get("budget_usd", 0) or 0)
+    raw = env if env not in (None, "") else (load_yaml("models.yaml").get("budget_usd", 0) or 0)
+    try:
+        cap = float(raw)
+    except (TypeError, ValueError):
+        cap = math.nan
+    if isinstance(raw, bool) or not math.isfinite(cap) or cap < 0:
+        raise BackendError("LLM_BUDGET_USD (or budget_usd in config/models.yaml) must be a number of dollars, "
+                           "0 or more (0 = no cap).")
+    return cap
+
+
+_PRICE_KEYS = ("input", "output", "cache_write", "cache_read")
+
+
+def _price(model: str) -> dict | None:
+    """The model's price entry, only if it has all four rates as finite numbers of 0 or more: a partial
+    entry would fail after a paid reply, leaving that spend uncounted."""
+    p = (load_yaml("models.yaml").get("prices") or {}).get(model)
+    ok = isinstance(p, dict) and all(
+        isinstance(p.get(k), (int, float)) and not isinstance(p.get(k), bool) and math.isfinite(p[k]) and p[k] >= 0
+        for k in _PRICE_KEYS)
+    return p if ok else None
 
 
 def price_usd(model: str, usage) -> float | None:
-    """Cost of one API response from its usage block, or None if the model has no price."""
-    p = (load_yaml("models.yaml").get("prices") or {}).get(model)
+    """Cost of one API response from its usage block, or None if the model has no (complete) price."""
+    p = _price(model)
     if not p:
         return None
     tokens = {"input": usage.input_tokens, "output": usage.output_tokens,
@@ -136,9 +215,12 @@ def _get_client():
 
         key = api_key()
         if not key:
-            raise RuntimeError(f"No API key: set one of {', '.join(API_KEY_VARS)} "
+            raise BackendError(f"No API key: set one of {', '.join(API_KEY_VARS)} "
                                "(or copy .env.example to .env and add it).")
-        _client = anthropic.Anthropic(api_key=key)
+        # No SDK retries: call() retries a transient failure once, so one ticket makes at most two
+        # requests per step instead of six, each bounded by timeout_s.
+        _client = anthropic.Anthropic(api_key=key, max_retries=0,
+                                      timeout=float(load_yaml("models.yaml").get("timeout_s", 60)))
     return _client
 
 
@@ -147,7 +229,14 @@ def _call_api(cfg: dict, system: str, user: str) -> str:
     # 2026-10-21 rejects it on every model (models.yaml keeps it for the free-model profiles).
     # These models think by default; `effort` sets how much, and thinking counts toward max_tokens.
     extra = {"output_config": {"effort": cfg["effort"]}} if cfg.get("effort") else {}
+    if cfg.get("timeout_s"):     # a long dev-only role (generator, evaluator) keeps its own limit
+        extra["timeout"] = float(cfg["timeout_s"])
     cap = budget_usd()
+    if cap and not _price(cfg["model"]):
+        # Fail closed: an unpriced model's spend would not count toward the cap.
+        raise BackendError(f"No price for {cfg['model']} in config/models.yaml while a budget is set; "
+                           "add input, output, cache_write and cache_read under `prices` "
+                           "(or set LLM_BUDGET_USD=0 to run without a cap).")
     if cap and spent_usd() >= cap:
         raise BudgetExceeded(f"API budget of ${cap:.2f} reached (spent ${spent_usd():.4f}). "
                              "Raise LLM_BUDGET_USD to continue.")
@@ -164,12 +253,14 @@ def _call_api(cfg: dict, system: str, user: str) -> str:
     # input_tokens counts every prompt token; the cache split shows whether prompt caching works.
     _usage.value = {"input_tokens": u.input_tokens + cache_read + cache_write, "output_tokens": u.output_tokens,
                     "cache_read_tokens": cache_read, "cache_write_tokens": cache_write}
+    if hasattr(u, "inference_geo"):     # where the request was served, for the data-residency record
+        _usage.value["inference_geo"] = u.inference_geo
     cost = price_usd(cfg["model"], u)
     if cost is not None:
         _usage.value["cost_usd"] = round(cost, 6)
         with _spend_lock:
             _spent["usd"] += cost
-    text ="".join(block.text for block in resp.content if block.type == "text")
+    text = "".join(block.text for block in resp.content if block.type == "text")
     if not text:
         raise RuntimeError(f"No reply text from {cfg['model']} (stop_reason={resp.stop_reason})")
     return text
@@ -233,6 +324,8 @@ def _cached(cfg: dict, system: str, user: str, send, role: str | None = None,
     """
     cache_dir = os.getenv("LLM_CACHE_DIR")
     if not cache_dir:
+        if cache_only():
+            raise BackendError("LLM_CACHE_ONLY=1 needs LLM_CACHE_DIR (the cache to replay).")
         return send(cfg, system, user)
     parts = ([cfg["model"], system, user] + ([_salt(role)] if _salt(role) else [])
              + ([f"attempt={attempt}"] if attempt else [])
@@ -254,6 +347,8 @@ def _cached(cfg: dict, system: str, user: str, send, role: str | None = None,
             stored = json.loads(path.read_text(encoding="utf-8"))
             _usage.value = {**stored.get("usage", {}), "cached": True}
             return stored["reply"]
+        if cache_only():
+            raise CacheMiss(f"No stored reply for this {cfg['model']} call (LLM_CACHE_ONLY=1); nothing was sent.")
         reply = send(cfg, system, user)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"model": cfg["model"], "reply": reply, "usage": last_usage()},
@@ -336,13 +431,74 @@ def _call_openai(cfg: dict, system: str, user: str) -> str:
     return text
 
 
+@lru_cache(maxsize=1)
+def _sdk_errors() -> tuple[tuple[type[Exception], ...], tuple[type[Exception], ...]]:
+    """(transient, every) Anthropic SDK error classes; APITimeoutError is an APIConnectionError."""
+    try:
+        import anthropic
+    except ImportError:      # cli-only install: no SDK errors to tell apart
+        return (), ()
+    names = ("APIConnectionError", "RateLimitError", "InternalServerError",
+             "OverloadedError", "ServiceUnavailableError", "DeadlineExceededError")
+    return tuple(getattr(anthropic, n) for n in names if hasattr(anthropic, n)), (anthropic.AnthropicError,)
+
+
+_retry_check = threading.local()
+
+
+@contextmanager
+def before_retry(check):
+    """Run `check` before any retry call() makes on this thread; it raises to stop. process() passes
+    its should_stop check, so a page closed during a failed call is not sent a second, paid attempt."""
+    prev = getattr(_retry_check, "fn", None)
+    _retry_check.fn = check
+    try:
+        yield
+    finally:
+        _retry_check.fn = prev
+
+
+def _pause(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _backoff(e: Exception) -> float:
+    """Seconds to wait before retrying `e`. The SDK's own retries are off, so a rate limit or an
+    overloaded or failing server waits as the API asks (retry-after, at most 10 s), or 1-2 s; a timeout
+    or a dropped connection, or a cli failure, is retried at once."""
+    response = getattr(e, "response", None)
+    status = getattr(response, "status_code", 0)
+    if not (status == 429 or status >= 500):
+        return 0.0
+    try:
+        return min(10.0, max(0.0, float(response.headers.get("retry-after"))))
+    except (TypeError, ValueError):
+        return 1.0 + random.random()
+
+
+def _retryable(e: Exception) -> bool:
+    """Worth one more try? Our own refusals never are (a retry would spend or fail the same way), nor
+    an API error that says the request itself is wrong (bad request, key, permission, unknown model).
+    A timeout, dropped connection, rate limit or server error is; so is a cli or free-model failure,
+    which carries no type to tell."""
+    if isinstance(e, (BudgetExceeded, CacheMiss, BackendError)):
+        return False
+    transient, sdk = _sdk_errors()
+    return isinstance(e, transient) or not isinstance(e, sdk)
+
+
 def call(role: str, system: str, user: str, *, retries: int = 1, attempt: int = 0) -> str:
     """Send one message for `role` and return the text reply.
 
-    Retries once on failure; the caller escalates the ticket if it still fails.
-    `attempt` > 0 asks for a fresh reply to the same prompt (its own cache slot), e.g. when the
+    Retries once on a transient failure (see _retryable), after the wait _backoff asks for and the
+    caller's before_retry check; the caller escalates the ticket if it still fails. A refusal (budget,
+    cache-only miss, real-data guard, a rejected request) is raised as it is, so the caller can tell
+    which. `attempt` > 0 asks for a fresh reply to the same prompt (its own cache slot), e.g. when the
     first reply could not be parsed.
     """
+    assert_real_data_safe()
+    if pipeline_mode() == "off":     # the kill switch holds even for a caller that forgot to check it
+        raise BackendError("PIPELINE_MODE is off: model calls are switched off.")
     route = profile_route(role)
     cfg = route or models()[role]
     _usage.value = {}
@@ -351,12 +507,17 @@ def call(role: str, system: str, user: str, *, retries: int = 1, attempt: int = 
     if tag == "api" and cfg.get("effort"):
         tag = f"api,effort={cfg['effort']}"      # a new effort level gets fresh replies
     last_error: Exception | None = None
-    for _ in range(retries + 1):
+    for n in range(retries + 1):
+        if n:
+            _pause(_backoff(last_error))
+            check = getattr(_retry_check, "fn", None)
+            if check is not None:
+                check()
         try:
             return _cached(cfg, system, user, send, role, tag, attempt)
-        except BudgetExceeded:
-            raise
         except Exception as e:  # noqa: BLE001 - surfaced to caller after retry
+            if not _retryable(e):
+                raise
             last_error = e
     where = f"{route['provider']}/{route['model']}" if route else f"the {backend()} backend"
     raise RuntimeError(f"Model call failed for role '{role}' on {where}") from last_error

@@ -1,15 +1,22 @@
 """Run one ticket through every stage, emitting an event as each stage starts and finishes.
 
-    process(text, emit=print)
+    process(text, emit=print, should_stop=None)
 
 Each event is a dict: {"stage", "status", "data", "ms"}. status is "running", "done",
 "skipped" or "error". The viewer streams these to the browser; logging will store them.
+
+process() never raises: whatever goes wrong, the ticket ends escalated to a person and a "result"
+event is always emitted. An error event says what failed in fixed Arabic text plus the exception's
+type, never its message (which can quote a model reply, the ticket or a file path); the traceback
+goes to stderr only.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import time
+import traceback
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
@@ -19,13 +26,16 @@ from . import draft as drf
 from . import draft_check
 from . import handoff
 from .clean import _DIGITS, _TATWEEL, clean
-from .config import taxonomy
+from .config import limits, pipeline_mode, taxonomy
 from .gate import check
-from .llm import backend, call, last_usage, model_for
+from .llm import (BackendError, BudgetExceeded, CacheMiss, backend, before_retry, call, last_usage, model_for,
+                  real_data)
 from .route import route
 from .schemas import Extraction, Outcome
 
 Emit = Callable[[dict[str, Any]], None]
+
+log = logging.getLogger(__name__)
 
 FEE_SUBCATEGORIES = ("overcharged_fee", "fees_limits_question")
 
@@ -44,7 +54,49 @@ FLAG_AR = {
     "draft:promise": "المسودة توعد بنتيجة أو وقت: تأكد قبل الاعتماد",
     "draft:asks_secret": "المسودة تطلب رمز أو كلمة سر: لا تعتمدها",
     "draft:unknown_number": "المسودة بيها رقم مو موجود بالتذكرة أو المعلومات",
+    "draft:hold_reason": "المسودة تذكر تحقيق أو اشتباه أو بلاغ: لا تعتمدها، ممنوع نخبر الزبون",
+    "draft:sensitive_number": "المسودة تكرر رقم بطاقة أو رمز: احذفه قبل الاعتماد",
+    "account_risk": "حساب محظور أو تغيير شريحة: يستلمها موظف بدون مسودة",
+    # Escalations the system decides on its own; their team note is built with no model call.
+    "too_long": "التذكرة أطول من الحد المسموح: يستلمها موظف بدون نموذج",
+    "pipeline_off": "النظام موقف: يستلمها موظف يدوياً",
+    "drafts_off": "المسودات موقفة: يرد الموظف بنفسه",
+    "cancelled": "انلغت المعالجة قبل ما تكمل",
+    "internal_error": "صار خطأ داخلي، تحتاج مراجعة يدوية",
 }
+
+# What an error event says: fixed text by exception type. The message itself never leaves stderr.
+_ERROR_AR = {
+    "BudgetExceeded": "وصل التشغيل لحد الصرف المسموح، فما انرسل الطلب للنموذج",
+    "CacheMiss": "ما اكو رد محفوظ لهالطلب، والتشغيل على الردود المحفوظة بس",
+    "BackendError": "إعدادات الاتصال بالنموذج ما تسمح بهالطلب",
+}
+_REFUSALS = (BudgetExceeded, CacheMiss, BackendError)   # expected refusals: one log line, no traceback
+
+# If even the normal closing path fails, the team still gets a note.
+_LAST_RESORT_NOTE = "سبب التصعيد: صار خطأ داخلي بالنظام. اقرأ التذكرة كاملة."
+
+
+def _error(e: BaseException, *, internal: bool = False) -> dict[str, str]:
+    kind = type(e).__name__
+    return {"error": FLAG_AR["internal_error"] if internal else _ERROR_AR.get(kind, FLAG_AR["model_error"]),
+            "kind": kind}
+
+
+def _log_error(where: str, e: BaseException) -> None:
+    """Report a failure on stderr. Under REAL_DATA=1 only the type and the stack are logged: an
+    exception's message can quote a model reply, and with it the customer's numbers."""
+    if isinstance(e, _REFUSALS):
+        log.warning("%s: %s", where, type(e).__name__ if real_data() else f"{type(e).__name__}: {e}")
+    elif real_data():
+        log.error("%s failed: %s\n%s", where, type(e).__name__, "".join(traceback.format_tb(e.__traceback__)))
+    else:
+        log.error("%s failed", where, exc_info=e)
+
+
+class _Cancelled(BaseException):
+    """should_stop() asked to stop. A BaseException, like asyncio.CancelledError, so the stages'
+    `except Exception` (a failed model call is escalated as a model error) cannot swallow it."""
 
 
 def _clean_changes(raw: str) -> dict[str, int]:
@@ -72,8 +124,13 @@ def _clean_secondary(ex: Extraction) -> Extraction:
 
 def _add_usage(a: dict, b: dict) -> dict:
     """Usage of two calls for one step. Tokens add up; cost counts only calls actually made
-    (a cache hit replays a stored cost but spends nothing), so the step is "cached" only if both were."""
-    out = {k: (a.get(k) or 0) + (b.get(k) or 0) for k in (a.keys() | b.keys()) - {"cached", "cost_usd"}}
+    (a cache hit replays a stored cost but spends nothing), so the step is "cached" only if both were.
+    A label such as inference_geo is not added up: the later call's is kept."""
+    out = {}
+    for k in (a.keys() | b.keys()) - {"cached", "cost_usd"}:
+        vals = [v for v in (a.get(k), b.get(k)) if v is not None]
+        counts = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in vals)
+        out[k] = sum(vals) if vals and counts else (vals[-1] if vals else None)
     cost = sum(u.get("cost_usd") or 0 for u in (a, b) if not u.get("cached"))
     return {**out, "cost_usd": round(cost, 6), "cached": bool(a.get("cached") and b.get("cached")), "retried": True}
 
@@ -94,8 +151,11 @@ def _team_summary(text: str) -> tuple[str | None, dict]:
     return line, last_usage()
 
 
-def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str, Any]]:
+def _model_step(role: str, system: str, user: str,
+                before_call: Callable[[], None] = lambda: None) -> tuple[Extraction, dict[str, Any]]:
+    """One classification by `role`. `before_call` runs before each model call (it raises to stop)."""
     t0 = time.time()
+    before_call()
     reply = call(role, system, user)
     usage = last_usage()
     try:
@@ -103,6 +163,7 @@ def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str
     except ValueError:
         # A reply that isn't valid JSON (on the API, Haiku sometimes adds a stray ")" before the
         # closing "}") gets one fresh try before the ticket is escalated as a model error.
+        before_call()
         reply = call(role, system, user, attempt=1)
         usage = _add_usage(usage, last_usage())
         ex = cls.parse(reply)
@@ -122,74 +183,140 @@ def _model_step(role: str, system: str, user: str) -> tuple[Extraction, dict[str
     }
 
 
-def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
+def process(raw_text: str, emit: Emit = lambda e: None,
+            should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
+    """Run one ticket through every stage and return its result. Never raises.
+
+    `should_stop` is checked before every model call, retries included; once it returns True the
+    ticket ends escalated with flag 'cancelled' and no further call is made (the viewer passes "the
+    browser went away", so an abandoned ticket stops spending).
+    """
     started = time.time()
+    if isinstance(raw_text, str):
+        # A lone surrogate (JSON allows "\ud83d", e.g. an emoji cut in half) can't be encoded, so the
+        # events and the saved run could not be written. It becomes "?"; valid text is unchanged.
+        raw_text = raw_text.encode("utf-8", "replace").decode("utf-8")
+    closed: set[str] = set()            # stages that reached done, skipped or error
+    sent: list[dict[str, Any]] = []     # the result, once emitted
 
     def send(stage: str, status: str, data: dict[str, Any] | None = None) -> None:
-        emit({"stage": stage, "status": status, "data": data or {}, "ms": int((time.time() - started) * 1000)})
+        if status != "running":
+            closed.add(stage)
+        try:
+            emit({"stage": stage, "status": status, "data": data or {}, "ms": int((time.time() - started) * 1000)})
+        except Exception as e:  # noqa: BLE001 - a broken listener must not stop the ticket
+            _log_error("emit", e)
+
+    def stop_requested() -> bool:
+        return should_stop is not None and bool(should_stop())
+
+    def check_stop() -> None:
+        if stop_requested():
+            raise _Cancelled
 
     # What the handoff note (F17) needs, filled in as the stages run.
-    ctx: dict[str, Any] = {"ex": None, "confidence": None, "second": None, "cleared": None}
+    ctx: dict[str, Any] = {"text": "", "ex": None, "confidence": None, "second": None, "cleared": None}
 
-    def finish(outcome: Outcome, flags: list[str], **extra: Any) -> dict[str, Any]:
-        result = {"outcome": outcome.value, "flags": flags,
-                  "notes_ar": [FLAG_AR.get(f, f) for f in flags], **extra}
+    def finish(outcome: Outcome, flags: list[str], *, team_summary: bool = True, **extra: Any) -> dict[str, Any]:
+        """Emit the result. An escalation gets a note for the team; `team_summary=False` builds it
+        without the one-line summary call (escalations the system decided, not the ticket)."""
+        flags = list(flags)
+        result = {"outcome": outcome.value, "flags": flags, "notes_ar": [], **extra}
         if outcome == Outcome.ESCALATED:   # no draft: a short note for the team that receives it
             summary = None
-            if ctx["ex"] is not None:
-                summary, result["usage"] = _team_summary(text)
+            if team_summary and ctx["ex"] is not None:
+                if stop_requested():
+                    flags.append("cancelled")
+                else:
+                    summary, result["usage"] = _team_summary(ctx["text"])
             result["handoff_ar"] = handoff.note(ctx["ex"], flags, confidence=ctx["confidence"],
                                                 second=ctx["second"], cleared_secondary=ctx["cleared"],
                                                 summary=summary)
+        result["notes_ar"] = [FLAG_AR.get(f, f) for f in flags]
         send("result", "done", result)
+        sent.append(result)
         return result
 
-    tax = taxonomy()
-    send("received", "done", {"text": raw_text, "chars": len(raw_text)})
+    def end_early(flag: str, error: BaseException | None = None, **extra: Any) -> dict[str, Any]:
+        """Close every stage still open (the first with the error, if any) and escalate with `flag`.
+        Nothing more is sent to a model."""
+        for stage in STAGES[:-1]:
+            if stage in closed:
+                continue
+            if error is not None:
+                send(stage, "error", _error(error, internal=True))
+                error = None
+            else:
+                send(stage, "skipped", {"why": FLAG_AR[flag]})
+        if ctx["ex"] is not None:
+            extra.setdefault("extraction", ctx["ex"].model_dump())
+        extra.update({k: ctx[k] for k in ("team", "priority") if ctx.get(k)})
+        return finish(Outcome.ESCALATED, [flag], team_summary=False, **extra)
 
-    # 1. Clean (rules)
-    text = clean(raw_text)
-    send("clean", "done", {"text": text, "changes": _clean_changes(raw_text)})
+    def run() -> dict[str, Any]:
+        tax = taxonomy()
+        send("received", "done", {"text": raw_text, "chars": len(raw_text)})
 
-    # 2. Classify + extract (classifier model)
-    send("classify", "running", {"model": model_for("classifier"), "backend": backend()})
-    try:
-        ex, info = _model_step("classifier", cls.system_prompt(), cls.user_prompt(text))
-    except Exception as e:  # noqa: BLE001
-        send("classify", "error", {"error": f"{type(e).__name__}: {e}"})
-        for s in ("gate", "recheck", "route", "draft"):
-            send(s, "skipped")
-        return finish(Outcome.ESCALATED, ["model_error"])
-    ctx.update(ex=ex, cleared=info.get("cleared_secondary"))
-    sub = tax.subcategories.get(ex.subcategory)
-    info["labels"] = {
-        "category": tax.categories.get(ex.category, ex.category),
-        "subcategory": sub.label if sub else ex.subcategory,
-    }
-    send("classify", "done", info)
+        # 1. Clean (rules)
+        text = clean(raw_text)
+        ctx["text"] = text
+        send("clean", "done", {"text": text, "changes": _clean_changes(raw_text)})
 
-    # 3. Confidence gate (rules)
-    gate = check(ex, text)
-    decision = "escalate" if gate.escalate else ("recheck" if gate.needs_recheck else "pass")
-    send("gate", "done", {**gate.model_dump(), "model_confidence": ex.confidence, "decision": decision,
-                          "high_risk": bool(sub and sub.high_risk)})
-    flags = list(gate.flags)
-    ctx["confidence"] = gate.confidence
+        # A very long ticket is not sent to a model: it costs more and is the usual shape of an
+        # attempt to bury instructions. A person reads it.
+        if len(text) > limits()["max_ticket_chars"]:
+            return end_early("too_long")
+        mode = pipeline_mode()
+        if mode == "off":
+            return end_early("pipeline_off")
 
-    if gate.escalate:
-        for s in ("recheck",):
-            send(s, "skipped", {"why": "البوابة صعّدتها"})
-        team, priority = route(ex, text) if sub else ("general", "P2")
-        send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority})
-        send("draft", "skipped", {"why": "متصعّدة: يستلمها موظف"})
-        return finish(Outcome.ESCALATED, flags, team=team, priority=priority, extraction=ex.model_dump())
-
-    # 4. Re-check (second model, classifies blind)
-    alternative = None
-    if gate.needs_recheck:
-        send("recheck", "running", {"model": model_for("rechecker"), "backend": backend()})
+        # 2. Classify + extract (classifier model)
+        send("classify", "running", {"model": model_for("classifier"), "backend": backend()})
         try:
-            ex2, info2 = _model_step("rechecker", cls.system_prompt(), cls.user_prompt(text))
+            ex, info = _model_step("classifier", cls.system_prompt(), cls.user_prompt(text), check_stop)
+        except Exception as e:  # noqa: BLE001
+            _log_error("classify", e)
+            send("classify", "error", _error(e))
+            for s in ("gate", "recheck", "route", "draft"):
+                send(s, "skipped")
+            return finish(Outcome.ESCALATED, ["model_error"])
+        ctx.update(ex=ex, cleared=info.get("cleared_secondary"))
+        sub = tax.subcategories.get(ex.subcategory)
+        info["labels"] = {
+            "category": tax.categories.get(ex.category, ex.category),
+            "subcategory": sub.label if sub else ex.subcategory,
+        }
+        send("classify", "done", info)
+
+        # 3. Confidence gate (rules)
+        gate = check(ex, text)
+        decision = "escalate" if gate.escalate else ("recheck" if gate.needs_recheck else "pass")
+        send("gate", "done", {**gate.model_dump(), "model_confidence": ex.confidence, "decision": decision,
+                              "high_risk": bool(sub and sub.high_risk)})
+        flags = list(gate.flags)
+        ctx["confidence"] = gate.confidence
+
+        if gate.escalate:
+            for s in ("recheck",):
+                send(s, "skipped", {"why": "البوابة صعّدتها"})
+            team, priority = route(ex, text) if sub else ("general", "P2")
+            ctx.update(team=team, priority=priority)
+            send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority})
+            send("draft", "skipped", {"why": "متصعّدة: يستلمها موظف"})
+            return finish(Outcome.ESCALATED, flags, team=team, priority=priority, extraction=ex.model_dump())
+
+        # 4. Re-check (second model, classifies blind)
+        alternative = None
+        if gate.needs_recheck:
+            send("recheck", "running", {"model": model_for("rechecker"), "backend": backend()})
+            try:
+                ex2, info2 = _model_step("rechecker", cls.system_prompt(), cls.user_prompt(text), check_stop)
+            except Exception as e:  # noqa: BLE001
+                _log_error("recheck", e)
+                send("recheck", "error", _error(e))
+                send("route", "skipped")
+                send("draft", "skipped")
+                return finish(Outcome.ESCALATED, flags + ["model_error"], extraction=ex.model_dump())
             agree = ex2.subcategory == ex.subcategory
             info2.update(agree=agree, first=ex.subcategory, second=ex2.subcategory)
             send("recheck", "done", info2)
@@ -204,52 +331,84 @@ def process(raw_text: str, emit: Emit = lambda e: None) -> dict[str, Any]:
                 ctx.update(ex=ex, confidence=gate2.confidence, cleared=info2.get("cleared_secondary"))
             elif not agree or ex2.category == "fraud_security":
                 flags.append("fraud" if ex2.category == "fraud_security" else "recheck_disagreed")
+                if gate2 is not None and "account_risk" in gate2.flags:
+                    flags.append("account_risk")
                 ctx["second"] = ex2
                 team, priority = route(ex2 if ex2.category == "fraud_security" else ex, text)
+                ctx.update(team=team, priority=priority)
                 send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority})
                 send("draft", "skipped", {"why": "المراجعة ما اتفقت: الموظف يقرر"})
                 return finish(Outcome.ESCALATED, flags, team=team, priority=priority, extraction=ex.model_dump())
-        except Exception as e:  # noqa: BLE001
-            send("recheck", "error", {"error": f"{type(e).__name__}: {e}"})
-            send("route", "skipped")
-            send("draft", "skipped")
-            return finish(Outcome.ESCALATED, flags + ["model_error"], extraction=ex.model_dump())
-    else:
-        send("recheck", "skipped", {"why": f"الثقة {gate.confidence:.2f} عالية والنوع مو حساس"})
+        else:
+            send("recheck", "skipped", {"why": f"الثقة {gate.confidence:.2f} عالية والنوع مو حساس"})
 
-    # Fee tickets get a small extra call for the disputed fee, so the classifier prompt (and its
-    # accuracy) stays as it is: adding a fee field to it shifted other classifications (round 3).
-    fee_call: dict[str, Any] = {}
-    if ex.subcategory in FEE_SUBCATEGORIES and ex.fee_iqd is None:
+        # Fee tickets get a small extra call for the disputed fee, so the classifier prompt (and its
+        # accuracy) stays as it is: adding a fee field to it shifted other classifications (round 3).
+        fee_call: dict[str, Any] = {}
+        if ex.subcategory in FEE_SUBCATEGORIES and ex.fee_iqd is None:
+            check_stop()
+            try:
+                fee_reply = call("classifier", cls.fee_prompt(), cls.user_prompt(text))
+                ex = ex.model_copy(update={"fee_iqd": cls.parse_fee(fee_reply)})
+                ctx["ex"] = ex
+                fee_call = {"fee_call": {"reply": fee_reply, "fee_iqd": ex.fee_iqd}, "usage": last_usage()}
+            except Exception as e:  # noqa: BLE001 - the fee is a nice-to-have; carry on without it
+                _log_error("fee call", e)
+
+        # 5. Route + priority (rules)
+        team, priority = route(ex, text)
+        ctx.update(team=team, priority=priority)
+        send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority, **fee_call})
+
+        if mode == "classify_only":   # sorted and routed; the agent writes the reply
+            send("draft", "skipped", {"why": FLAG_AR["drafts_off"]})
+            return finish(Outcome.ESCALATED, flags + ["drafts_off"], team_summary=False,
+                          team=team, priority=priority, extraction=ex.model_dump())
+
+        # 6. Draft (drafter model), then rule checks on it
+        send("draft", "running", {"model": model_for("drafter"), "backend": backend(),
+                                  "ask_for": drf.ask_for(ex)})
+        t0 = time.time()
+        user = drf.user_prompt(text, ex, team)
+        check_stop()
         try:
-            fee_reply = call("classifier", cls.fee_prompt(), cls.user_prompt(text))
-            ex = ex.model_copy(update={"fee_iqd": cls.parse_fee(fee_reply)})
-            fee_call = {"fee_call": {"reply": fee_reply, "fee_iqd": ex.fee_iqd}, "usage": last_usage()}
-        except Exception:  # noqa: BLE001 - the fee is a nice-to-have; carry on without it
-            pass
+            reply = drf.draft(text, ex, team)
+        except Exception as e:  # noqa: BLE001
+            _log_error("draft", e)
+            send("draft", "error", _error(e))
+            return finish(Outcome.ESCALATED, flags + ["model_error"], team=team, priority=priority)
+        # A time («خلال يومين») is allowed only from the policy facts, never because the customer wrote it.
+        facts_text = "\n".join(drf.known_facts(ex))
+        checks = draft_check.problems(reply, user, facts_text=facts_text)
+        spans = draft_check.findings(reply, user, facts_text=facts_text)
+        flags += [f"draft:{p}" for p in checks]
+        send("draft", "done", {"model": model_for("drafter"), "backend": backend(),
+                               "seconds": round(time.time() - t0, 1), "user_prompt": user, "reply": reply,
+                               "ask_for": drf.ask_for(ex), "checks": checks, "check_spans": spans,
+                               "usage": last_usage()})
 
-    # 5. Route + priority (rules)
-    team, priority = route(ex, text)
-    send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority, **fee_call})
+        outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
+        extra = {"recheck_alternative": alternative} if alternative else {}
+        if fee_call:
+            extra["fee_followup"] = True
+        return finish(outcome, flags, team=team, priority=priority, draft_ar=reply, draft_checks=spans,
+                      extraction=ex.model_dump(), **extra)
 
-    # 6. Draft (drafter model), then rule checks on it
-    send("draft", "running", {"model": model_for("drafter"), "backend": backend(),
-                              "ask_for": drf.ask_for(ex)})
-    t0 = time.time()
-    user = drf.user_prompt(text, ex, team)
     try:
-        reply = drf.draft(text, ex, team)
-    except Exception as e:  # noqa: BLE001
-        send("draft", "error", {"error": f"{type(e).__name__}: {e}"})
-        return finish(Outcome.ESCALATED, flags + ["model_error"], team=team, priority=priority)
-    checks = draft_check.problems(reply, user)
-    flags += [f"draft:{p}" for p in checks]
-    send("draft", "done", {"model": model_for("drafter"), "backend": backend(),
-                           "seconds": round(time.time() - t0, 1), "user_prompt": user, "reply": reply,
-                           "ask_for": drf.ask_for(ex), "checks": checks, "usage": last_usage()})
-
-    outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
-    extra = {"recheck_alternative": alternative} if alternative else {}
-    if fee_call:
-        extra["fee_followup"] = True
-    return finish(outcome, flags, team=team, priority=priority, draft_ar=reply, extraction=ex.model_dump(), **extra)
+        with before_retry(check_stop):
+            return run()
+    except _Cancelled:
+        flag, error = "cancelled", None
+    except Exception as e:  # noqa: BLE001 - process() never raises
+        _log_error("ticket", e)
+        flag, error = "internal_error", e
+    if sent:                 # the ticket had already ended; keep that result
+        return sent[-1]
+    try:
+        return end_early(flag, error)
+    except Exception as e:  # noqa: BLE001 - last resort: fixed text, no lookups
+        _log_error("closing the ticket", e)
+        result = {"outcome": Outcome.ESCALATED.value, "flags": [flag], "notes_ar": [FLAG_AR[flag]],
+                  "handoff_ar": _LAST_RESORT_NOTE}
+        send("result", "done", result)
+        return result

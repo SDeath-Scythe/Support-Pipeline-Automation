@@ -6,6 +6,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+from .clean import neutralise_tags
 from .config import load_yaml
 from .llm import call
 from .schemas import Extraction
@@ -59,7 +60,8 @@ def parse_fee(reply: str) -> int | None:
 
 
 def user_prompt(cleaned_text: str) -> str:
-    return f"<ticket>\n{cleaned_text}\n</ticket>"
+    """The ticket between our tags; a tag the customer typed is neutralised so it can't close ours."""
+    return f"<ticket>\n{neutralise_tags(cleaned_text)}\n</ticket>"
 
 
 def classify(cleaned_text: str, role: str = "classifier") -> Extraction:

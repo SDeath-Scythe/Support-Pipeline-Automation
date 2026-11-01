@@ -18,6 +18,16 @@ from .schemas import Extraction
 # Fields the pipeline can check in a ticket (others, like a shop name, it can't see).
 _CHECKABLE = {"reference", "amount", "date", "recipient_number", "phone_number"}
 
+# Escalations the system decides rather than the ticket (run.py): why the team got it.
+_SYSTEM_REASONS = {
+    "account_risk": "حساب محظور أو تغيير شريحة: يستلمها موظف من البداية",
+    "too_long": "التذكرة أطول من الحد المسموح، فما انرسلت للنموذج",
+    "pipeline_off": "النظام موقف، فما انرسلت للنموذج",
+    "drafts_off": "المسودات موقفة: الرد على الزبون عليك",
+    "cancelled": "انلغت المعالجة قبل ما تكمل",
+    "internal_error": "صار خطأ داخلي بالنظام",
+}
+
 
 def _label(key: str | None) -> str | None:
     tax = taxonomy()
@@ -67,6 +77,7 @@ def _reasons(flags: list[str], confidence: float | None, first: Extraction | Non
         out.append("التصنيف ما يطابق قائمة الأقسام")
     if "model_error" in flags:
         out.append("صار خطأ بالنموذج: اقرأ التذكرة كاملة")
+    out += [why for flag, why in _SYSTEM_REASONS.items() if flag in flags]
     if not out and confidence is not None and confidence < thresholds()["confidence"]["recheck_from"]:
         out.append(f"الثقة واطية ({confidence:.2f}): نوع المشكلة مو واضح")
     return out
@@ -78,6 +89,9 @@ def note(ex: Extraction | None, flags: list[str], *, confidence: float | None = 
     """The handoff note, one short line per part. `ex` is the answer the ticket was routed on
     (None if classification failed); `second` is the re-check's answer when the models disagreed."""
     if ex is None:
+        system = [why for flag, why in _SYSTEM_REASONS.items() if flag in flags]
+        if system and "model_error" not in flags:
+            return "سبب التصعيد: " + "؛ ".join(system) + ". اقرأ التذكرة كاملة."
         return "سبب التصعيد: صار خطأ بالنموذج وما انقرت التذكرة. اقرأها كاملة."
     main = second if second is not None and "fraud" in flags and second.category == "fraud_security" else ex
     # When the type itself is in doubt, say so instead of presenting one answer as the topic.

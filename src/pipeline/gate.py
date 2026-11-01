@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import re
 
+from . import fixes
 from .clean import clean
 from .config import taxonomy, thresholds
 from .requirements import missing_required
 from .schemas import Extraction, GateResult
 
+
+# escalate_account_risk: a blocked account or a new SIM is a common step in taking over someone
+# else's account, so (when the flag is on) a person handles them from the start, with no draft.
+ACCOUNT_RISK = ("blocked_account", "sim_change")
 
 _ALNUM = re.compile(r"[^0-9A-Za-z]")
 # A reference as customers type it: chunks of letters/digits joined by - space / _ .
@@ -54,6 +59,12 @@ def check(extraction: Extraction, cleaned_text: str) -> GateResult:
         return GateResult(
             confidence=score, needs_recheck=False, escalate=True,
             flags=["fraud"], reasons=["Fraud and security tickets are always handled by a person"],
+        )
+
+    if sub.key in ACCOUNT_RISK and fixes.enabled("escalate_account_risk"):
+        return GateResult(
+            confidence=score, needs_recheck=False, escalate=True,
+            flags=["account_risk"], reasons=["Blocked account or SIM change: handled by a person, no draft"],
         )
 
     # A reference the model "found" must actually appear in the ticket text.

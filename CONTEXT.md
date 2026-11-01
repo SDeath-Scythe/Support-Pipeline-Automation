@@ -2,7 +2,7 @@
 
 The starting point for anyone, person or AI session, picking up this project. It says what the project is, the rules for working on it, what was decided and why, what was tried and failed, where things stand, and what comes next. The detailed experiment report is [`HANDOVER.md`](HANDOVER.md); the dataset is described in [`data/README.md`](data/README.md).
 
-*Last updated 30 Oct 2026 (final test done, flags promoted, slides made). `main` holds everything up to the README of 30 Oct; work continues on `claude/gracious-ramanujan-wwyhz1`.*
+*Last updated 1 Nov 2026 (security and reliability hardening; mentor feedback). `main` holds everything up to masking and the committed final run (8dfd12c); work continues on `claude/gracious-ramanujan-wwyhz1`.*
 
 ---
 
@@ -83,7 +83,13 @@ These are standing instructions from the author. Follow them unless he says othe
 
 ## 5. Feature flags
 
-**None are open (30 Oct).** On the author's word, the 13 adopted fixes became the normal code and every dropped one was deleted; `PIPELINE_FIXES` is now empty and the pipeline runs as measured. Proof: every prompt is byte-identical to the measured `mvp` configuration (a test pins the classifier prompt's hash), and replaying test2 through the response cache gave identical results on all 80 tickets (only app bugs' team, and so their draft, changed, by the author's routing choice).
+**Three are open (1 Nov), all off, for the author to adopt or delete:**
+- `hold_reason`: flags a draft that mentions an investigation, suspicion, a report or money laundering (no tipping off). Fired on 0 saved drafts.
+- `sensitive_number`: flags a draft that repeats a card number or a code. Fired on 0 saved drafts.
+- `escalate_account_risk`: a blocked account or SIM change goes to a person with no draft. test2: 7 escalated (6 right, t2-0009 wrong because it acts before the re-check), review rate 19% → 26%; mvp_test 27% → 33%, over the 30% target.
+- Open wording question for the author: should «رفعنا بلاغ» / «سجلنا بلاغ بمشكلتك» (may mean "we raised a ticket") stay flagged by `hold_reason`?
+
+**Before that, none were open (30 Oct).** On the author's word, the 13 adopted fixes became the normal code and every dropped one was deleted; `PIPELINE_FIXES` is now empty and the pipeline runs as measured. Proof: every prompt is byte-identical to the measured `mvp` configuration (a test pins the classifier prompt's hash), and replaying test2 through the response cache gave identical results on all 80 tickets (only app bugs' team, and so their draft, changed, by the author's routing choice).
 
 Adopted, now normal code: F2 draft checks, F3c draft from the re-check's answer, F6b separate fee call, F11 ask only for what's missing, F12 no promised specifics, F14b fraud consequence is not a second issue, F15 no word raises priority, F16 «ورقة» = 100 USD, F17 team note on escalations, F18 reference only when needed, F19 ≥ $750 raises priority, F20 duplicate payment = reversal, F21 one-line summary in the team note.
 
@@ -131,7 +137,8 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
 - [x] MVP update doc (Claude Docs) and the mentor deck (Slides artifact, 14 slides)
 - [x] Saved batch runs mask long numbers by default (`mask_run` in `src/pipeline/clean.py`; `--no-mask` for scored synthetic sets)
 - [x] The final test run is committed (`docs/runs/test2/final.json`): the viewer replays it from a fresh clone with no key
-- [x] Tests: 76 pass
+- [x] Security and reliability hardening (1 Nov, no model calls): local-only viewer with a token, input limits, kill switch (`PIPELINE_MODE`), real-data guard (`REAL_DATA=1`), bounded spending and retries, no error text in the page, wider masking, rewritten secret/time/promise checks, decision log (no reply text). test2 replays from the cache unchanged. Details: LOG.md, 1 Nov
+- [x] Tests: 549 pass
 
 **Open:**
 - [ ] Unknown charges: they stay with the fraud team; the author is unsure (ask the mentor)
@@ -145,20 +152,20 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
 - Images and videos in tickets: yes, but **not in the MVP**. List them under future plans.
 - Ask for help whenever needed.
 
-1. Plan the work on functionality, security and UI/UX (proposed to the author on 1 Nov; waiting for the author's go-ahead).
+1. Functionality, security and UI/UX: security and reliability done (1 Nov). Next: the agent inbox as the main screen, then SECURITY.md, failure modes, disclosure and the one-page update.
 2. Any pipeline change gets a with/without test on dev.
 3. **heldout2** (80, sealed): run once on the final version.
 4. Submit before **17 Nov**: repo, write-up (organised around the process), demo.
 
 **Future plans (not in the MVP):** images and videos in tickets (screenshots of an error or a receipt, voice notes).
 
-Known limits to state in the write-up: tickets and most labels are model-written (64 checked by the author); one model family writes, runs and grades; the drafter sometimes misses asking for a shop or agent name (F11b, the fix tried, made drafts worse); unknown charges go to the fraud team; masking covers numbers but not names, and the response cache (development only) keeps replies in full.
+Known limits to state in the write-up: tickets and most labels are model-written (64 checked by the author); one model family writes, runs and grades; the drafter sometimes misses asking for a shop or agent name (F11b, the fix tried, made drafts worse); unknown charges go to the fraud team; masking covers numbers and codes but not names, and the response cache (development only) keeps replies in full.
 
 ## 9. How to run
 
 ```bash
-pip install -r requirements.txt
-pytest                                                    # 76 tests, no model calls
+pip install -r requirements-dev.txt                       # adds pytest to requirements.txt
+pytest                                                    # 549 tests, no model calls
 python app/server.py                                      # viewer: http://localhost:8000 ("test2 · final" replays with no key)
 LLM_BACKEND=cli python scripts/run_batch.py ...            # dev runs on the Pro plan
 python scripts/experiment.py run <config> --set <file> [--backend api]

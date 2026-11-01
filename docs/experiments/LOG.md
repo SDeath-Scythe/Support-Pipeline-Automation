@@ -4,9 +4,116 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 1 Nov: Security and reliability hardening (no model calls)
+
+The mentor asked for more security. A review on 1 Nov found 12 problems, each checked by hand before it was fixed. This entry lists the fixes, how they were checked, and what is still open. No model was called and nothing was spent: tests stub every model, and the replays below read only the response cache (`LLM_CACHE_ONLY=1`, which raises instead of calling a model, with a $0.001 cap as a second lock).
+
+**What changed, by finding:**
+
+1. **The viewer is local only** (a web page could start paid runs through `GET /api/stream?text=`, and a DNS name re-pointed at 127.0.0.1 could too). The viewer now answers only when Host is localhost, 127.0.0.1 or [::1] on its own port (else 421), refuses a foreign Origin (403), and needs a per-process token on every `/api/` call. The page gets the token in a `<meta>` tag. A live run is a `POST` with a JSON body, one at a time (429 in Arabic for a second one). `GET /api/stream` returns 405.
+2. **Input limits** (no limit before). `config/thresholds.yaml` has a `limits` block: 4,000 characters per ticket (a longer one goes to a person before any model call, flag `too_long`), 1,000 tickets per batch file, 64 KB per request. No ticket in dev, mvp_test, test2 or the probes is over 4,000 characters (longest 1,875), so no measured result moves.
+3. **The secret-request rule is rewritten.** It missed all 10 of the review's phrasings, for example «لازم ترسل الرمز» (it read «لازم» as «لا»), «شنو الرمز اللي وصلك؟», «ماكو مشكلة دزلنا الرمز». It now catches 10/10, plus 13/13 more requests (old: 4/13). It flags none of 27 warnings and mentions (old: 3 false alarms, such as «دزيت الرمز لأحد؟»).
+4. **A time in a draft is allowed only from the policy facts.** Before, «خلال يومين» passed if the customer had written it, and a ticket could plant a fake `</ticket>` and «Known facts» line. `draft.known_facts()` is now the only source. A `<ticket>` tag typed in a ticket is changed to `‹ticket›` in both prompts. Tickets without such a tag get byte-identical prompts.
+5. **Sealed sets can't reach the page.** The run list shows only real run files (top-level `meta` and `tickets`) outside any `heldout*` folder and without sealed ticket ids. A run is served only by a name the list shows, so traversal and odd names get 404. Gold labels are never read from `data/heldout*`.
+6. **Spending is bounded.** While a cap is set, a model with no price is refused (its cost would not count). SDK retries are off. `llm.call` retries once on a timeout, dropped connection, rate limit or server error only, with a 60 s timeout. Before, one step could make 6 attempts of up to 600 s each. When the browser closes, the live run stops before its next model call (flag `cancelled`).
+7. **No exception text reaches the page or a run file.** An error event says what failed in fixed Arabic, plus the error type. The traceback goes to stderr only; under `REAL_DATA=1`, without the message.
+8. **A run always ends.** `process()` never raises. Any unexpected error escalates the ticket with flag `internal_error`, and a result event is always sent. The live stream always ends with `event: end`.
+9. **Masking covers more.** Numbers split by `-`, `.` or spaces (`0770-123-4567`), card numbers (Luhn check) and a code after a code word (`OTP 482913` → `OTP ******`) are now masked. Dates, comma amounts and decimals stay as they are. On 2,639 saved strings, 46 change, all hyphenated references the old rule left visible.
+10. **Security headers on every response:** CSP, X-Frame-Options DENY, nosniff, no-referrer, COOP and no-store. The Server header no longer shows the Python version. The viewer still logs no requests.
+11. **Dependencies** have upper bounds. The unused streamlit and faker are removed. pytest moved to `requirements-dev.txt`. pip-audit found no known vulnerabilities.
+12. **Tipping-off and echoed numbers** (Iraq AML/CFT Law 39/2015 forbids telling a customer about a report or an investigation; repeating a card number or code back is poor card-industry practice). There are two new draft rules, behind flags (below).
+
+**New controls:**
+- **Kill switch:** `PIPELINE_MODE=off` calls no model, and every ticket goes to a person (`pipeline_off`). `classify_only` sorts and routes but writes no draft (`drafts_off`).
+- **Real-data guard:** under `REAL_DATA=1`, the viewer, `run_batch` and every model call refuse the dev-only paths: the cli backend, free-model profiles and the response cache. `--no-mask` is refused too.
+- **Decision log** for the next UI: `POST /api/decision` appends one line per approve, edit, take-over or forward. A line holds the reason codes, seconds, corrections, model ids, prompt hashes and a count of edited characters. It never holds the draft or reply text.
+
+**How it was checked:**
+- **Tests:** 296 pass. 76 existed before, and 220 are new (`test_text_rules.py` 118, `test_pipeline_safety.py` 52, `test_server_security.py` 50). Three old tests in `test_pipeline.py` were updated for the intended changes. Two now pass the policy facts separately: a time the customer wrote is still a promise. One reflects the three new flags, all off. No safety assertion was weakened.
+- **Replay of test2 from the cache:** 180 model calls, all from the cache, **0 misses**.
+  - Type 78/80, priority 79/80, outcomes 65 drafted, 9 flagged, 6 escalated: the same as the saved final run.
+  - 165 of 169 model prompts are byte-identical. The 4 others are the drafter prompts of the app-bug tickets (t2-0021, t2-0041, t2-0060, t2-0078), whose team line changed on 30 Oct (general → tech), so their drafts differ too.
+  - The new secret and promise rules change no outcome.
+- **Old vs new draft rules on 2,255 saved dev and mvp_test drafts** (`runs/exp/dev`, `runs/exp/mvp_test`): identical on every draft (stray Latin 21, unknown number 7, nothing else).
+- **Live viewer** (`PIPELINE_MODE=off`, checked with curl):
+  - the page carries the token, and `/api/meta` gives 200 with it and 403 without
+  - a foreign Host gets 421, a foreign Origin 403, `GET /api/stream` 405
+  - a short ticket streams to an escalated `pipeline_off` result, then `event: end`
+  - a 5,000-character ticket and a 70 KB body both get 413
+  - every response carries the headers
+  - a decision appends one line with no text
+  - 18 runs are listed, none sealed; sealed and non-run names get 404
+- **In a browser** (Playwright): the current viewer replays "test2 · final", opens a ticket and runs a pasted one with no script errors.
+
+**Behind a flag, not adopted** (off by default; `PIPELINE_FIXES=...`; for the author to adopt or delete):
+
+| Flag | What it does | test2 (80) | dev, mvp_test |
+|---|---|---|---|
+| `hold_reason` | flags a draft that mentions an investigation, suspicion, a report or money laundering | 0 drafts | 0 of 2,255 drafts |
+| `sensitive_number` | flags a draft that repeats a card number or a code | 0 drafts | 0 of 2,255 (one false alarm, dev-0099, fixed while building it) |
+| `escalate_account_risk` | a blocked account or a SIM change goes to a person, with no draft | 7 tickets escalated; review rate 19% → 26% | dev 12 (17% → 22%; replicate 20% → 25%); mvp_test 5 (27% → **33%**, over the 30% target) |
+
+- The two draft rules fire on no saved draft, so they cost nothing measurable and their benefit is untested. «تحقيق» can also mean "achieving" («لتحقيق رضاك»); no draft uses it yet.
+- `escalate_account_risk`: in dev and mvp_test, every ticket it escalated was really a blocked account or a SIM change. In test2, 6 of 7 were. Their drafts were safe (they acknowledge and pass the ticket to the accounts team), so the trade is a lost safe draft against a person handling a possible account takeover from the start.
+  - Its one wrong case: t2-0009 is a code-not-arriving ticket. The first model said SIM change at 0.60, and the flag escalates before the re-check that had corrected it.
+  - In a live run, each of these escalations also makes one small team-summary call (missing from the cache replay, so those notes had no summary line).
+
+**Left for the institution that deploys it:**
+- Fill `config/policy.yaml` (hours, response times).
+- Run with `REAL_DATA=1` on the API backend.
+- Keep the API key in a secrets store.
+- Choose where requests are served (the run records `inference_geo` when the API reports it).
+- Set how long run files and the decision log are kept.
+- Put real sign-in and TLS in front of the viewer before more than one person uses it. The local token only stops other web pages, and the reviewer name comes from the computer's login.
+- Mask names: masking covers numbers only.
+- Its own AML/CFT procedure for reporting: the pipeline only keeps the draft from mentioning it.
+
+**Still open:**
+- The dev-only scripts (`calibrate.py`, `run_probes.py`) still record exception messages in their own outputs. They run on synthetic sets only.
+- The CSP allows inline scripts, because the page is one file. The new UI can move its script to a file and drop `'unsafe-inline'`.
+- README and CONTEXT still describe the old secret and time checks, the old masking and the old test count.
+
+**Review.** Six reviewers (security, regression and Arabic rules, two each) checked the changes above and filed 53 reports, about 30 distinct problems. Each was reproduced with no model call before it was fixed, and each fix has a test that fails on the code before it (checked by running the new tests against a copy of that code).
+- **Fixed, safety switches and spending:**
+  - The kill switch failed open. YAML reads a bare `mode: off` as false, and the full pipeline ran. `mode:` is now read before every call (no restart needed), and false means off.
+  - `REAL_DATA=y` or `2` turned the guard off, and `LLM_BUDGET_USD=nan` turned the cap off. Both now fail closed.
+  - `ANTHROPIC_BASE_URL` could send real tickets and the key to another host. It is refused under `REAL_DATA=1` unless it is the Anthropic API.
+  - A price without its cache rates failed after the paid reply, so the spend went uncounted and the call was retried. Such a price is now refused before sending.
+  - A rate limit or overload was retried at once. It now waits as the API asks, at most 10 s.
+  - A page closed during a failed call still got a paid retry. should_stop is now checked before a retry.
+- **Fixed, the viewer and run files:**
+  - A lone surrogate in a ticket (an emoji cut in half) killed the stream and lost a whole batch run. The viewer refuses it, process() and run_batch replace it, and a run file is written whole or not at all.
+  - The stream treated a socket above fd 1024, or a half-closed client, as gone. A worker that could not start held the live slot for good, and a stream error left the run going.
+  - A foreign caller's body was read before the refusal, so a slow sender could hold a thread.
+  - edit_chars took 13 s on two long rewrites.
+  - The reply hashes in the decision log were plain SHA-256, so a short edit could be guessed. They are now keyed (`DECISIONS_HASH_KEY`, else a key per viewer run).
+  - The decision log, and the run file under `REAL_DATA=1`, are now readable by their owner only.
+  - The saved sensitive_number span kept the code's digits. They are now `*`.
+- **Fixed, masking:**
+  - A number joined by a space swallowed a comma amount or a date after it.
+  - Amounts, waits and bill or tracking codes after a code word were masked as codes.
+  - These slipped through: «باسورد», `OTP482913`, `CVV2 123`, a code four or five words after its word, «لرقمي», shadda, Persian kaf and yeh, and invisible characters.
+  - A +964 phone or a 13-digit reference counted as a card.
+  - All 3,602 non-sealed ticket texts, drafts and notes mask exactly as before.
+- **Fixed, draft rules.** The rules now read text with harakat and invisible characters removed.
+  - asks_secret missed formal and verbal-noun requests, the «ما عليك أمر» openers, need and know verbs, Mosuli and southern forms, the secret named first, and requests with no verb. It flagged quoted warnings («أي شخص يطلب منك…»), «اوعى» and «اياك», typing the code in the app, "we sent you a new code" and error codes on screen.
+  - hold_reason now catches شبهة, مريب, امتثال, تحت المراقبة and reports to the authorities. It no longer flags phishing advice or the customer's own «البلاغ مالتك».
+  - promise: a policy «خلال يومين» no longer allows a draft's «خلال يوم». It catches refund verbs and «بظرف», «غضون», «الأيام الجاية», and no longer flags «أكيد راح نساعدك» or «ما نكدر نضمن».
+  - unknown_number accepts «50 ألف» for 50,000.
+  - Of the reviewers' phrasings, 193 that the old rules got wrong are now right, and none is wrong.
+  - On the 1,220 saved drafts (dev, mvp_test, test2, probes), the old and new rules give the same flags on every draft, with both new flags on.
+- **Not changed, and why:**
+  - «رفعنا بلاغ» and «سجلنا بلاغ بمشكلتك» stay flagged by hold_reason. The reviewers disagreed on whether this means "we raised a ticket". A false alarm costs an edit; a miss is tipping-off. For the author to decide.
+  - «لازم تكتب الرمز خلال دقيقتين» stays asks_secret. With no app named, it reads like finding 3's «لازم تكتب الكود».
+  - A code written before its word («482913 هذا الرمز») is not masked. The rule masks a code only after its word, and the same pattern would mask an amount before «الكود ما وصل».
+  - There is no cap on connections. The viewer is local only, a local process can tie up threads while sending headers anyway, and the deployment notes already ask for a proxy with sign-in.
+  - An empty reply is still retried once, as before this phase.
+  - Still missed: a request more than three words before the secret («دزلنا آخر اربع ارقام من الرقم السري») and «خلال اربعة وعشرين ساعة». An amount after a code word with no unit («وعندي 150000») is still masked.
+- **Checked:** 549 tests pass (253 new). The test2 cache-only replay made 180 calls, all from the cache, with 0 misses. Its results, events and prompts are identical to the replay above.
+
 ## 30 Oct: app bugs go to a new Tech support team
 
-The author's choice (from his test2 note on t2-0021): `app_bug` now routes to `tech` («قسم الدعم التقني») instead of the general queue (`team:` on the subcategory in `config/taxonomy.yaml`). Routing only: no scored metric changes; runs made before this show the general queue.
+The author's choice (from the author's test2 note on t2-0021): `app_bug` now routes to `tech` («قسم الدعم التقني») instead of the general queue (`team:` on the subcategory in `config/taxonomy.yaml`). Routing only: no scored metric changes; runs made before this show the general queue.
 
 ## 30 Oct: final test on the fresh test2 split (checked by the author before the run)
 

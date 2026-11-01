@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -81,3 +82,44 @@ def llm_backend() -> str:
 @lru_cache(maxsize=1)
 def thresholds() -> dict[str, Any]:
     return load_yaml("thresholds.yaml")
+
+
+# Hard limits that keep one bad input from costing money or time (config/thresholds.yaml `limits`).
+_LIMIT_DEFAULTS = {"max_ticket_chars": 4000, "max_batch_tickets": 1000, "max_request_bytes": 65536}
+
+
+def limits() -> dict[str, int]:
+    """The `limits` block of thresholds.yaml, with the defaults filled in for a missing block or key."""
+    raw = thresholds().get("limits") or {}
+    out = {**_LIMIT_DEFAULTS, **{k: int(v) for k, v in raw.items()}}
+    bad = [k for k, v in out.items() if v <= 0]
+    if bad:
+        raise ValueError(f"limits in thresholds.yaml must be positive: {', '.join(bad)}")
+    return out
+
+
+# Kill switch. off: no model is called and every ticket goes to a person. classify_only: tickets are
+# still sorted and routed, but no reply is drafted. full: the normal pipeline.
+PIPELINE_MODES = ("off", "classify_only", "full")
+
+
+def _default_mode() -> str:
+    """`mode:` in models.yaml, read on every call so an edit stops a running viewer or batch at its next
+    model call. YAML reads a bare `off` (or no, false) as False: that means off, never full."""
+    raw = load_yaml("models.yaml").get("mode")
+    if raw is None:
+        return "full"
+    if raw is False:
+        return "off"
+    if not isinstance(raw, str):
+        raise ValueError(f"Unknown mode in models.yaml: {raw!r}. Use one of: {', '.join(PIPELINE_MODES)}.")
+    return raw
+
+
+def pipeline_mode() -> str:
+    """The run mode: PIPELINE_MODE env var first, then `mode:` in models.yaml, else full.
+    An unknown value raises rather than silently running the full pipeline."""
+    name = (os.getenv("PIPELINE_MODE") or _default_mode()).strip().lower()
+    if name not in PIPELINE_MODES:
+        raise ValueError(f"Unknown PIPELINE_MODE '{name}'. Use one of: {', '.join(PIPELINE_MODES)}.")
+    return name

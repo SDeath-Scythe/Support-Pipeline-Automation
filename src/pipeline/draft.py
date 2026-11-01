@@ -9,6 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from .clean import neutralise_tags
 from .config import load_yaml, taxonomy
 from .llm import call
 from .requirements import reference_needed
@@ -56,18 +57,26 @@ def ask_for(ex: Extraction) -> list[str]:
     return [f for f in wanted if not _have(ex, f)]
 
 
-def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:
+def known_facts(ex: Extraction) -> list[str]:
+    """The policy facts the drafter is told (support hours, the expected response time). They are the
+    only place a draft may take a time from: draft_check allows a «خلال ...» found here, never one
+    from the ticket."""
     facts_src = load_yaml("policy.yaml")
-    tax = taxonomy()
-    sub = tax.get(ex.subcategory)
     facts = []
     if facts_src["company"].get("support_hours_ar"):
         facts.append(f"Support hours: {facts_src['company']['support_hours_ar']}")
     rt = (facts_src["subcategories"].get(ex.subcategory) or {}).get("response_time_ar")
     if rt:
         facts.append(f"Expected response time for this issue: {rt}")
+    return facts
+
+
+def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:
+    tax = taxonomy()
+    sub = tax.get(ex.subcategory)
+    facts = known_facts(ex)
     lines = [
-        f"<ticket>\n{cleaned_text}\n</ticket>",
+        f"<ticket>\n{neutralise_tags(cleaned_text)}\n</ticket>",
         "",
         f"Issue: {tax.categories[sub.category]} / {sub.label}",
         f"Handled by: {tax.teams[team_key]['label_ar']}",

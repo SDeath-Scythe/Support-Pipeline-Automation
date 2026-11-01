@@ -10,6 +10,10 @@ Long numbers (phones, cards, accounts, transaction references) are masked in the
 default. --no-mask keeps them: only for synthetic test sets scored against their gold labels
 (scripts/experiment.py uses it). The response cache (LLM_CACHE_DIR) is a development tool that
 stores model replies unmasked; leave it unset for real tickets.
+
+Real tickets: set REAL_DATA=1. The run then refuses --no-mask and every development path
+(pipeline.llm.assert_real_data_safe). A file with more than limits.max_batch_tickets tickets
+(config/thresholds.yaml) is refused. PIPELINE_MODE=off|classify_only|full is recorded in the run.
 """
 
 from __future__ import annotations
@@ -27,10 +31,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from pipeline.clean import mask_run  # noqa: E402
-from pipeline.config import models  # noqa: E402
+from pipeline.config import limits, models, pipeline_mode  # noqa: E402
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.fixes import active as active_fixes  # noqa: E402
-from pipeline.llm import backend, budget_usd, model_for  # noqa: E402
+from pipeline.llm import BackendError, assert_real_data_safe, backend, budget_usd, model_for, real_data  # noqa: E402
 from pipeline.run import process  # noqa: E402
 
 
@@ -39,8 +43,8 @@ def run_one(ticket: dict) -> dict:
     t0 = time.time()
     try:
         result = process(ticket["text"], events.append)
-    except Exception as e:  # noqa: BLE001 - recorded, never crashes the batch
-        result = {"outcome": "escalated", "flags": ["model_error"], "error": f"{type(e).__name__}: {e}"}
+    except Exception as e:  # noqa: BLE001 - process() doesn't raise; if it ever does, record only the type
+        result = {"outcome": "escalated", "flags": ["internal_error"], "error_kind": type(e).__name__}
     secs = round(time.time() - t0, 1)
     print(f"  {ticket.get('id', '?'):>4}  {result['outcome']:<9}  {secs:>5}s", flush=True)
     return {"ticket": ticket, "events": events, "result": result, "seconds": secs}
@@ -55,11 +59,29 @@ def main() -> None:
                     help="keep long numbers in the saved file (synthetic test sets only)")
     args = ap.parse_args()
 
+    # Refuse before reading a ticket: a setting that is unsafe for real tickets, or an unknown mode.
+    try:
+        assert_real_data_safe()
+        mode = pipeline_mode()
+        budget_usd()
+    except (BackendError, ValueError) as e:
+        sys.exit(f"Refused: {e}")
+    if args.no_mask and real_data():
+        sys.exit("Refused: --no-mask keeps phone, card and account numbers in the saved file; "
+                 "it is for synthetic test sets only, not with REAL_DATA=1.")
+
     src = Path(args.file)
     tickets = [json.loads(line) for line in src.read_text(encoding="utf-8").splitlines() if line.strip()]
+    for t in tickets:   # a lone surrogate ("\ud83d" in the JSON) would make the final save fail
+        if isinstance(t.get("text"), str):
+            t["text"] = t["text"].encode("utf-8", "replace").decode("utf-8")
+    cap = limits()["max_batch_tickets"]
+    if len(tickets) > cap:
+        sys.exit(f"Refused: {src.name} has {len(tickets)} tickets, more than max_batch_tickets ({cap}) "
+                 "in config/thresholds.yaml. Split the file.")
     fixes = sorted(active_fixes())
     print(f"Running {len(tickets)} tickets from {src.name} on the {backend()} backend, {args.workers} at a time"
-          f"{', fixes: ' + ', '.join(fixes) if fixes else ''}")
+          f"{', fixes: ' + ', '.join(fixes) if fixes else ''}{'' if mode == 'full' else f', mode {mode}'}")
     started = datetime.now()
     t0 = time.time()
     rows = []
@@ -111,13 +133,30 @@ def main() -> None:
             "profile": os.getenv("LLM_PROFILE") or None,
             "thresholds": load_thresholds()["confidence"],
             "fixes": fixes,
+            "mode": mode,
+            "real_data": real_data(),
             "usage": totals,
             "masked": not args.no_mask,
         },
         "tickets": rows,
     }
-    out.write_text(json.dumps(run if args.no_mask else mask_run(run), ensure_ascii=False, indent=1), encoding="utf-8")
+    save(out, json.dumps(run if args.no_mask else mask_run(run), ensure_ascii=False, indent=1))
     print(f"Saved {out}{'' if args.no_mask else ' (long numbers masked)'}")
+
+
+def save(out: Path, text: str) -> None:
+    """Write the run whole or not at all (an existing file is replaced only once the new one is
+    written). With REAL_DATA=1 the file holds customer text, so only its owner may read it (0600)."""
+    tmp = out.with_name(out.name + ".tmp")
+    tmp.unlink(missing_ok=True)          # a leftover would keep its own permissions
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 if real_data() else 0o644)
+    try:
+        with open(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, out)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 if __name__ == "__main__":

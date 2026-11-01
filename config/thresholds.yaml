@@ -10,3 +10,9 @@ confidence:
 priority:
   large_amount_iqd: 1000000   # amounts at or above this raise priority one level
   large_amount_usd: 750       # the same rule for dollar amounts (about 1,000,000 IQD)
+
+# Hard limits on input size, checked before any model call (src/pipeline/config.py limits()).
+limits:
+  max_ticket_chars: 4000      # longer tickets are escalated before any model call
+  max_batch_tickets: 1000     # run_batch refuses bigger files
+  max_request_bytes: 65536    # viewer: largest POST body accepted

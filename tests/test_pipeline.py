@@ -258,11 +258,14 @@ def test_run_confident_ticket_is_drafted(monkeypatch):
 # --- experiment harness: fix flags and the response cache ---
 
 def test_fix_flags_off_by_default_and_reject_unknown(monkeypatch):
-    """No flag is open since the adopted fixes became the normal code (30 Oct); the mechanism stays."""
+    """The adopted fixes became the normal code (30 Oct). Since 1 Nov three security rules are open
+    as flags, off until measured with and without; the mechanism stays."""
     from pipeline import fixes
 
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert fixes.active() == frozenset() and fixes.FIXES == {}
+    assert fixes.active() == frozenset()
+    assert set(fixes.FIXES) == {"hold_reason", "sensitive_number", "escalate_account_risk"}
+    assert not any(fixes.enabled(name) for name in fixes.FIXES)
     monkeypatch.setenv("PIPELINE_FIXES", "draft_check")                    # adopted, so no longer a flag
     try:
         fixes.active()
@@ -323,7 +326,11 @@ def test_draft_check_catches_each_problem():
     assert problems("هلا بيك، ممكن تدزلنا الرمز اللي وصلك؟", given) == ["asks_secret"]
     assert problems("هلا بيك، لا تشارك الرمز ويه أي احد.", given) == []
     assert problems("هلا بيك، الرسوم 2,500 دينار.", given) == ["unknown_number"]
-    assert problems("هلا بيك، الرد خلال ٢٤ ساعة.", given + "; Expected response time: خلال ٢٤ ساعة") == []
+    # an allowed time comes only from the policy facts, never from the ticket (1 Nov, finding 4);
+    # the drafter prompt carries the facts too, so their numbers are known
+    facts = "Expected response time for this issue: خلال ٢٤ ساعة"
+    assert problems("هلا بيك، الرد خلال ٢٤ ساعة.", given + "; " + facts, facts) == []
+    assert problems("هلا بيك، الرد خلال ٢٤ ساعة.", given + "; " + facts) == ["promise"]
 
 
 def test_draft_problems_flag_the_ticket(monkeypatch):
@@ -360,7 +367,8 @@ def test_draft_check_v2_avoids_round1_false_alarms():
     assert problems("رفعنا الموضوع للقسم، وراح نرجع نخبرك بعد المراجعة.", "…") == []
     assert problems("فلوسك راح ترجع لحسابك.", "…") == ["promise"]
     # a known response time written with other digits is still the known fact
-    assert problems("يكون عدنا رد خلال 24 ساعة.", "Known facts: Expected response time: خلال ٢٤ ساعة") == []
+    facts = "Expected response time for this issue: خلال ٢٤ ساعة"
+    assert problems("يكون عدنا رد خلال 24 ساعة.", "Known facts: " + facts, facts) == []
     # "الف وحدة" in the ticket allows 1,000 in the draft
     assert problems("وتتوقع تكون العمولة 1,000.", "المفروض الف وحدة") == []
 

@@ -236,6 +236,9 @@ let META = null, TICKETS = [], current = null, busy = false, RUN = null;
 const status = {}; // ticket key -> outcome
 
 const $ = (s, r = document) => r.querySelector(s);
+// The server puts a per-process token in the page; every /api/ call must send it back.
+const TOKEN = document.querySelector('meta[name="viewer-token"]')?.content || "";
+const api = (url, opts = {}) => fetch(url, { ...opts, headers: { ...(opts.headers || {}), "X-Viewer-Token": TOKEN } });
 function el(tag, attrs = {}, ...kids) {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -249,7 +252,7 @@ const subLabel = (k) => META.subcategories[k] ? `${META.subcategories[k].categor
 const norm = (s) => s ? String(s).replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[^0-9A-Za-z]/g, "").toLowerCase() : null;
 
 async function init() {
-  const [meta, sets, runs] = await Promise.all(["/api/meta", "/api/sets", "/api/runs"].map(u => fetch(u).then(r => r.json())));
+  const [meta, sets, runs] = await Promise.all(["/api/meta", "/api/sets", "/api/runs"].map(u => api(u).then(r => r.json())));
   META = meta;
   const src = $("#source");
   const g1 = el("optgroup", { label: "تشغيل مباشر" });
@@ -274,11 +277,11 @@ async function loadSource(v) {
   const [kind, name] = [v.slice(0, 3), v.slice(4)];
   current = null; for (const k in status) delete status[k];
   if (kind === "set") {
-    RUN = null; TICKETS = await fetch(`/api/tickets?set=${encodeURIComponent(name)}`).then(r => r.json());
+    RUN = null; TICKETS = await api(`/api/tickets?set=${encodeURIComponent(name)}`).then(r => r.json());
     $("#showOverview").hidden = true;
     $("#main").replaceChildren(el("p", { class: "empty", text: "اختار تذكرة من القائمة أو الصق وحدة جديدة، وراح تشوف شلون تمر بكل مرحلة." }));
   } else {
-    RUN = await fetch(`/api/run?name=${encodeURIComponent(name)}`).then(r => r.json());
+    RUN = await api(`/api/run?name=${encodeURIComponent(name)}`).then(r => r.json());
     TICKETS = RUN.tickets.map(r => r.ticket);
     RUN.tickets.forEach(r => (status[r.ticket.id] = r.result.outcome));
     $("#showOverview").hidden = false;
@@ -472,17 +475,42 @@ function run(ticket, key) {
     busy = true; current = key; status[key] = "running"; renderQueue(); buildView(ticket);
     if (window.innerWidth <= 900) $("#main").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     for (const btn of ["#runNew", "#runAll"]) $(btn).disabled = true;
-    const es = new EventSource(`/api/stream?text=${encodeURIComponent(ticket.text)}`);
     let outcome = null;
-    es.onmessage = m => { const e = JSON.parse(m.data); if (e.stage === "result") outcome = e.data.outcome; render(e); };
     const done = () => {
-      es.close(); busy = false; status[key] = outcome || ""; renderQueue();
+      busy = false; status[key] = outcome || ""; renderQueue();
       for (const btn of ["#runNew", "#runAll"]) $(btn).disabled = false;
       resolve();
     };
-    es.addEventListener("end", done);
-    es.onerror = () => { if (!outcome) $("#result").replaceChildren(el("div", { class: "result escalated" }, el("p", { class: "outcome", text: "انقطع الاتصال بالخادم" }), el("div", { class: "note", text: "تأكد إن python app/server.py بعده شغّال، وجرب مرة ثانية." }))); done(); };
+    const fail = (title, note) => { if (!outcome) $("#result").replaceChildren(el("div", { class: "result escalated" }, el("p", { class: "outcome", text: title }), el("div", { class: "note", text: note }))); };
+    stream(ticket.text, e => { if (e.stage === "result") outcome = e.data.outcome; render(e); })
+      .catch(err => err instanceof ServerRefused
+        ? fail("ما انشغلت التذكرة", err.message)
+        : fail("انقطع الاتصال بالخادم", "تأكد إن python app/server.py بعده شغّال، وجرب مرة ثانية."))
+      .finally(done);
   });
+}
+
+// The server refused the run (too long, another ticket running, ...): its Arabic message is shown.
+class ServerRefused extends Error {}
+
+// POST the ticket and read the event stream: "data: {...}" blocks, then "event: end".
+async function stream(text, onEvent) {
+  const r = await api("/api/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+  if (!r.ok) throw new ServerRefused(await r.json().then(j => j.error, () => null) || `HTTP ${r.status}`);
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) throw new Error("stream closed before its end");
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      if (/^event: end$/m.test(block)) { reader.cancel().catch(() => {}); return; }
+      const data = block.split("\n").filter(l => l.startsWith("data: ")).map(l => l.slice(6)).join("\n");
+      if (data) onEvent(JSON.parse(data));
+    }
+  }
 }
 
 function replay(i) {
