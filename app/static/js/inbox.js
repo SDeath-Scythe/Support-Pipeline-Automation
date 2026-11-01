@@ -15,7 +15,7 @@ import {
   itemsInTab, mostUrgent, openItems, outcomeOf, pauseClock, priorityRank, refreshDecisions, routeFor, runningItems,
   startClock, subOf, summarize, tabOf, uid, undo,
 } from "./state.js";
-import { setBanner, showToast } from "./ui.js";
+import { hideToastIf, setBanner, showToast } from "./ui.js";
 import {
   MOD, add, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, median, mono, num, plainText, richText,
   ticketsAr,
@@ -29,6 +29,7 @@ let composer = null;
 let deciding = false;
 let takeOverArmed = false;
 let fixOpenFor = null;   // uid of the ticket whose «صحّح» panel is open
+let refusal = null;      // {id, key, kind, reason}: the toast that refused an approve, while it still applies
 let shownKey = null;     // the ticket drawn last: a different one starts at the top of the pane
 
 // --- words ---
@@ -152,21 +153,15 @@ export function renderQueue({ focusRow = false } = {}) {
   if (S.agent.loading) return box.replaceChildren(queueSkeleton());
   const items = allItems();
   const decided = items.filter((i) => S.decisions.has(i.key)).length;
-  const esc = items.filter((i) => outcomeOf(i) === "escalated");
-  const reasons = new Map();
-  for (const it of esc) for (const f of flagsOf(it)) reasons.set(flagShort(f), (reasons.get(flagShort(f)) || 0) + 1);
-  const remaining = openItems().length;
   const bar = el("span", { class: "progress-fill" });
   bar.style.width = `${items.length ? (100 * decided) / items.length : 0}%`;
 
+  // Each number means one thing: the heading counts the agent's decisions, each tab what is still open
+  // in it, and the note what the system did with the whole run.
   const head = el("div", { class: "queue-head" },
     el("h2", { id: "queueTitle", class: "queue-title" }, "خلصت ", num(decided), " من ", num(items.length)),
     el("div", { class: "progress", "aria-hidden": "true" }, bar),
-    el("ul", { class: "throughput", "aria-label": "شغل الجلسة" },
-      el("li", {}, el("span", { class: "tp-k", text: "انحسمت" }), num(decided)),
-      el("li", {}, el("span", { class: "tp-k", text: "باقي" }), num(remaining)),
-      el("li", {}, el("span", { class: "tp-k", text: "متصعّدة" }), num(esc.length),
-        reasons.size ? el("span", { class: "tp-why" }, " (", [...reasons].map(([w, n], i) => [i ? "، " : "", `${w} `, num(n)]), ")") : null)),
+    runNote(),
     urgentHint());
 
   const counts = { done: decided };
@@ -194,6 +189,29 @@ export function renderQueue({ focusRow = false } = {}) {
   box.replaceChildren(head, tabs, el("div", { role: "tabpanel", id: "queuePanel", "aria-labelledby": `tab-${S.agent.tab}` }, lb, empty));
   if (focusRow || (had && !$(had))) (lb.querySelector('[tabindex="0"]') || $(`tab-${S.agent.tab}`))?.focus();
   else if (had) $(had).focus();
+}
+
+/** «بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال.»: the run's escalations and why, decided or not
+ *  (the «متصعّدة» tab counts the ones still open). Tickets pasted here are not part of the run. */
+function runNote() {
+  const run = S.agent.items;
+  if (!run.length) return null;
+  const esc = run.filter((i) => outcomeOf(i) === "escalated");
+  if (!esc.length) return el("p", { id: "runNote", class: "run-note", text: "بهالتشغيل النظام ما صعّد ولا تذكرة." });
+  const reasons = new Map();
+  for (const it of esc) for (const w of new Set(flagsOf(it).map(flagShort))) reasons.set(w, (reasons.get(w) || 0) + 1);
+  const sorted = [...reasons].sort((a, b) => b[1] - a[1]);
+  // One ticket: «صعّد تذكرة وحدة: احتمال احتيال.» More: «كلها …» for a reason they all share, then
+  // «منها 2 …» (after «كلها»: «، ومنها 2 …») for the others.
+  if (esc.length === 1) {
+    return el("p", { id: "runNote", class: "run-note" }, "بهالتشغيل النظام صعّد تذكرة وحدة",
+      sorted.length ? `: ${sorted.map(([w]) => w).join(" و")}` : "", ".");
+  }
+  const all = sorted.filter(([, n]) => n === esc.length).map(([w]) => w);
+  const some = sorted.filter(([, n]) => n < esc.length);
+  const parts = [all.length ? ["، كلها ", all.join(" و")] : "",
+    some.map(([w, n], i) => [i ? " و" : all.length ? "، ومنها " : "، منها ", num(n), ` ${w}`])];
+  return el("p", { id: "runNote", class: "run-note" }, "بهالتشغيل النظام صعّد ", ticketsAr(esc.length), parts, ".");
 }
 
 /** «اكو 6 عاجلة (P1) بـ«متصعّدة»»: a more urgent open ticket waits in another tab. */
@@ -329,6 +347,7 @@ export function renderTicket() {
   if (!items.length) return main.replaceChildren(emptyQueue());
   const it = findItem(S.agent.openKey);
   if (!it) {
+    settleRefusal(null);   // no ticket open (the summary, an empty tab): a refusal has nothing left to name
     const back = el("button", { type: "button", class: "btn btn-quiet back-btn", onclick: backToQueue }, icon("back"), "القائمة");
     if (!openItems().length && !runningItems().length) return main.replaceChildren(back, allDone());
     return main.replaceChildren(back, el("div", { class: "empty-state" },
@@ -336,6 +355,7 @@ export function renderTicket() {
       el("p", { text: "اختار تذكرة من القائمة." }), nextTabHint()));
   }
   main.replaceChildren(ticketView(it));
+  settleRefusal(it);
 }
 
 function titleChips(it) {
@@ -612,21 +632,29 @@ function refreshActions(it) {
   const hadFocus = old.contains(document.activeElement) ? document.activeElement.id : null;
   old.replaceWith(actionBar(it));
   if (hadFocus) $(hadFocus)?.focus();
+  settleRefusal(it);
 }
 
 function handoffSection(it) {
   const note = it.result?.handoff_ar || "";
   const lines = note.split("\n").map((l) => l.trim()).filter(Boolean);
+  // Every line comes from rules, except «الخلاصة»: a model wrote it from the ticket alone (handoff.py).
+  const SUMMARY = "الخلاصة";
   const dl = el("dl", { class: "handoff-list" }, lines.map((l) => {
     const i = l.indexOf(":");
-    return i > 0 && i < 20 ? el("div", {}, el("dt", { text: l.slice(0, i) }), el("dd", { dir: "rtl" }, richText(l.slice(i + 1).trim())))
+    const k = l.slice(0, i);
+    return i > 0 && i < 20 ? el("div", {}, el("dt", {}, k, k === SUMMARY ? el("span", { class: "dt-tag", text: "كتبها نموذج" }) : null),
+      el("dd", { dir: "rtl" }, richText(l.slice(i + 1).trim())))
       : el("div", {}, el("dd", { dir: "rtl" }, richText(l)));
   }));
+  const byModel = lines.some((l) => l.startsWith(`${SUMMARY}:`));
   const team = effective(it).team;
   return el("section", { class: "handoff", "aria-labelledby": "handoffTitle" },
     el("h3", { id: "handoffTitle", class: "section-title" }, "ملاحظة للقسم", team ? ` (${teamAr(team)})` : ""),
     lines.length ? dl : el("p", { class: "hint", text: "ماكو ملاحظة، اقرا التذكرة كاملة." }),
-    lines.length ? el("p", { class: "hint", text: "الملاحظة مكتوبة بالقواعد من اللي طلع بالتذكرة. ما بيها رد للزبون." }) : null);
+    lines.length ? el("p", { class: "hint", text: byModel
+      ? "الملاحظة مكتوبة بالقواعد من اللي طلع بالتذكرة، بس «الخلاصة» كتبها نموذج من نص التذكرة. ما بيها رد للزبون."
+      : "الملاحظة مكتوبة بالقواعد من اللي طلع بالتذكرة. ما بيها رد للزبون." }) : null);
 }
 
 function reasonsBox(it) {
@@ -705,6 +733,25 @@ function actionBar(it) {
 
 // --- decisions ---
 
+/** Refuse an approve with a toast that stays only while what it names is still true. */
+function refuse(it, reason, kind = "approve") {
+  refusal = { id: showToast(reason), key: it.key, kind, reason };
+}
+function refusalHolds(it) {
+  if (!refusal || !it || refusal.key !== it.key || S.decisions.has(it.key)) return false;
+  if (refusal.kind === "escalated") return escalatesNow(it);
+  const a = approval(it);
+  return !a.ok && a.reason === refusal.reason;
+}
+/** The tick is ticked, the code request is gone, the check answered, or another ticket is open: the
+ *  refusal no longer applies, so its toast goes (a newer toast stays). */
+function settleRefusal(it) {
+  if (refusal && !refusalHolds(it)) {
+    hideToastIf(refusal.id);
+    refusal = null;
+  }
+}
+
 function current() {
   const it = findItem(S.agent.openKey);
   return it && !S.decisions.has(it.key) && it.status !== "running" ? it : null;
@@ -735,8 +782,8 @@ export async function approve() {
   if (S.decisions.has(it.key)) return showToast(`هاي انحسمت. تكدر تتراجع (${MOD}+Z).`);
   if (it.status === "running") return;
   if (escalatesNow(it)) {
-    return showToast(effective(it).team ? `هاي متصعّدة: حوّلها${keys("F", "ب")} أو استلمها${keys("T", "ف")}.`
-      : `هاي متصعّدة: استلمها${keys("T", "ف")}، أو اختار القسم وحوّلها.`);
+    return refuse(it, effective(it).team ? `هاي متصعّدة: حوّلها${keys("F", "ب")} أو استلمها${keys("T", "ف")}.`
+      : `هاي متصعّدة: استلمها${keys("T", "ف")}، أو اختار القسم وحوّلها.`, "escalated");
   }
   if (!composer) return;
   const at = itemsInTab(S.agent.tab).findIndex((x) => x.key === it.key);
@@ -748,7 +795,7 @@ export async function approve() {
     const a = approval(it);
     const st = composer.state();
     if (!a.ok || !st.current) {
-      showToast(a.ok ? "التعديل ما انفحص بعد، جرب مرة ثانية." : a.reason);
+      refuse(it, a.ok ? "التعديل ما انفحص بعد، جرب مرة ثانية." : a.reason);
       if (a.needsAck) focusWhatToCheck();
       return;
     }
@@ -820,6 +867,7 @@ function after(it, record, at) {
   const msg = record.action === "forwarded"
     ? ["تحوّلت ", mono(it.key), ` ${toTeam(teamAr(effective(it).team))}`, " · الباقي ", num(remaining)]
     : [`${ACTION_WORD[record.action]} `, mono(it.key), " · الباقي ", num(remaining)];
+  if (next && S.agent.tab !== tab) msg.push(" · ", movedNote(tab, next, list));
   showToast(msg, () => undoKey(it.key, entry));
   S.agent.openKey = next ? next.key : null;
   startClock(next);
@@ -827,6 +875,14 @@ function after(it, record, at) {
   renderTicket();
   renderWhy();
   (next ? $("ticketTitle") : $("doneTitle"))?.focus();
+}
+
+/** Why the next ticket is in another tab: this tab is empty, or a more urgent ticket waits there. */
+function movedNote(from, next, leftHere) {
+  const to = `لـ«${tabLabel(tabOf(next))}»`;
+  if (!leftHere.length) return `ماكو بعد تذاكر «${tabLabel(from)}»، فانتقلنا ${to}`;
+  const p = effective(next).priority;
+  return `انتقلنا ${to}: فيها تذكرة ${p ? PRIORITY_AR[p] : "ما انعرفت أولويتها"}`;
 }
 
 export async function undoKey(key, entry = null) {

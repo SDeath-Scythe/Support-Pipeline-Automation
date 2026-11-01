@@ -8,8 +8,8 @@ import { CHANGE_AR, DECISION_AR, DIFF_AR, FIELD_AR, LIVE_CAUSE_AR, OUTCOME_AR, O
 import { QUICK_S, S, restoreDecisions, summarize } from "./state.js";
 import { showToast } from "./ui.js";
 import {
-  add, digitRuns, dict, el, fmtInt, ltr, median, mono, num, openDialog, plainText, reducedMotion, richText, ticketsAr,
-  westernDigits,
+  add, digitRuns, dict, el, fmtInt, ltr, median, mono, num, openDialog, plainText, reducedMotion, richText, stampOwn,
+  ticketsAr, westernDigits,
 } from "./util.js";
 
 const hooks = { toAgent: null, savePrefs: null, loadOnPick: null };
@@ -50,6 +50,12 @@ const backendAr = (b) => (b === "cli" ? "خطة Claude (تطوير)" : b === "ap
 const bidiAuto = (text) => el("bdi", { text: String(text) });
 /** Seconds in this view: «5.3 ث», like the inbox. */
 const secs = (x) => [num((Number(x) || 0).toFixed(1)), " ث"];
+/** A stage's own time (stampOwn), never the time since the ticket started: «خذت 3.2 ث». */
+const took = (ms) => (ms == null ? "" : ms < 50 ? "خذت أقل من 0.1 ث" : ["خذت ", num((ms / 1000).toFixed(1)), " ث"]);
+/** «classifier / drafter» as one left-to-right island (two islands swap places in a right-to-left line).
+ *  Each name stays whole; a narrow panel wraps the pair at the slash only. */
+const modelPair = (models) => el("bdi", { dir: "ltr", class: "mono" },
+  el("span", { class: "nowrap", text: models?.classifier || "" }), "\u00a0/ ", el("span", { class: "nowrap", text: models?.drafter || "" }));
 const BUSY_AR = "اكو تذكرة دتنعالج هسه، انتظر لما تخلص.";
 
 // --- the side list ---
@@ -112,12 +118,14 @@ function buildNav(nav) {
       el("label", { class: "field" }, el("span", { text: "الترتيب" }), sort),
       el("div", { class: "row-btns" }, overview, runAll, stop)),
     el("p", { id: "pMeta", class: "hint" }),
-    el("p", { class: "hint pnav-live" }, "التشغيل المباشر هنا: ", backendAr(S.meta.backend), " · ",
-      ltr(S.meta.models.classifier || "", "mono nowrap"), " / ", ltr(S.meta.models.drafter || "", "mono nowrap"),
+    el("p", { class: "hint pnav-live" }, "التشغيل المباشر هنا: ", backendAr(S.meta.backend),
       S.meta.mode !== "full" ? ` · الوضع ${S.meta.mode === "off" ? "موقف" : "تصنيف بس"}` : "",
+      S.meta.cache_only && S.meta.live.available ? " · إعادة من الكاش، بدون استدعاء" : "",
       // The technical cause stays here; the agent sees one plain sentence.
       // A setting name reads left to right; an Arabic cause («أداة claude مو موجودة») keeps its own order.
-      !S.meta.live.available && S.meta.live.cause ? [" · مو مفعّل: ", bidiAuto(LIVE_CAUSE_AR[S.meta.live.cause] || S.meta.live.cause)] : ""),
+      !S.meta.live.available && S.meta.live.cause ? [" · مو مفعّل: ", bidiAuto(LIVE_CAUSE_AR[S.meta.live.cause] || S.meta.live.cause)] : "",
+      // The models on a line of their own (like #pMeta): wrapped into the Arabic, the pair's halves scatter.
+      el("br"), modelPair(S.meta.models)),
     el("ul", { id: "pList", class: "plist", "aria-label": "التذاكر" }));
 }
 
@@ -147,7 +155,7 @@ async function loadSource(v) {
   $("pOverview").hidden = isSet;
   const m = P.run?.meta;
   $("pMeta").replaceChildren(...(m ? [`${m.set} · `, ltr((m.started || "").replace("T", " ").slice(0, 16)), " · ", backendAr(m.backend),
-    el("br"), ltr(m.models?.classifier || "", "mono nowrap"), " / ", ltr(m.models?.drafter || "", "mono nowrap")]
+    el("br"), modelPair(m.models)]
     : [ticketsAr(P.tickets.length), " بدون نتائج: شغّلها حتى تشوف المراحل."]));
 }
 
@@ -267,18 +275,19 @@ function buildView(ticket, origin) {
     el("div", { id: "pResult" })));
 }
 
-function setStage(id, st, ms) {
+function setStage(id, st, own, cached = false) {
   const n = $(`st-${id}`);
   if (!n) return null;
   n.className = `stage ${st}`;
-  const label = dict({ running: "يشتغل…", done: secs(ms / 1000), skipped: "تخطّى", error: "خطأ" })[st] || "";
-  n.querySelector(".state").replaceChildren(...[label].flat());
+  const label = dict({ running: "يشتغل…", done: took(own), skipped: "تخطّى", error: "خطأ" })[st] || "";
+  // A stored reply replayed (LLM_CACHE_ONLY, or a development cache): no model was called for it.
+  n.querySelector(".state").replaceChildren(...[label, st === "done" && cached ? " · من الكاش" : ""].flat());
   return n.querySelector(".stage-body");
 }
 
-function usageText(u) {
+function usageText(u, what = "") {
   if (!u || u.input_tokens == null) return null;
-  return el("p", { class: "note" }, "التوكنز: ", ltr(fmtInt(u.input_tokens)), " داخل / ", ltr(fmtInt(u.output_tokens)), " طالع",
+  return el("p", { class: "note" }, what, "التوكنز: ", ltr(fmtInt(u.input_tokens)), " داخل / ", ltr(fmtInt(u.output_tokens)), " طالع",
     u.cost_usd ? [" · الكلفة المحسوبة ", ltr(`$${u.cost_usd.toFixed(4)}`)] : "", u.cached ? " · من الكاش" : "");
 }
 
@@ -328,8 +337,8 @@ function scale(d) {
 
 function render(e) {
   const d = e.data || {};
-  if (e.stage === "result") return renderResultBox(d, P.tickets.find((t) => t.id === P.current));
-  const body = setStage(e.stage, e.status, e.ms);
+  if (e.stage === "result") return renderResultBox(d, P.tickets.find((t) => t.id === P.current), e.own);
+  const body = setStage(e.stage, e.status, e.own, !!d.usage?.cached);
   if (!body) return;
   body.replaceChildren();
   if (e.status === "skipped") return add(body, el("p", { class: "note", text: d.why ? `ما احتاجت: ${d.why}` : "ما احتاجت" }));
@@ -337,7 +346,7 @@ function render(e) {
   if (e.status === "running") return;
   if (e.stage === "received") add(body, el("p", { class: "note" }, num(d.chars), " حرف"));
   if (e.stage === "clean") {
-    add(body, el("div", { class: "cleaned", dir: "rtl", text: d.text }));
+    add(body, el("div", { class: "cleaned", dir: "rtl" }, digitRuns(plainText(d.text).text)));
     const ch = Object.entries(d.changes || {}).filter(([, n]) => n > 0);
     add(body, el("div", { class: "chips" }, ch.length ? ch.map(([k, n]) => el("span", { class: "chip" }, num(n), ` ${CHANGE_AR[k] || k}`)) : el("span", { class: "note", text: "ما احتاجت تنظيف" })));
   }
@@ -372,12 +381,17 @@ function render(e) {
   }
 }
 
-function renderResultBox(d, gold) {
+/** own: the result event's own time. On an escalation it is the team note's «الخلاصة», one call to the
+ *  classification model after the stages above (none of them shows it); the rest of the note is rules. */
+function renderResultBox(d, gold, own = null) {
+  const summary = /^الخلاصة:/m.test(d.handoff_ar || "");
   const box = el("div", { class: `result ${d.outcome}` },
     el("p", { class: "outcome", text: OUTCOME_AR[d.outcome] || d.outcome }),
     d.notes_ar?.length ? el("div", { class: "chips" }, d.notes_ar.map((n) => el("span", { class: "chip", text: n }))) : null,
     d.team ? el("p", { class: "note" }, `${S.meta.teams[d.team]?.label_ar || d.team} · `, ltr(d.priority || "—")) : null,
     d.handoff_ar ? el("div", { class: "handoff-box" }, el("p", { class: "note", text: "ملاحظة للقسم المستلم" }), el("p", { class: "handoff-body", dir: "rtl" }, richText(d.handoff_ar))) : null,
+    d.usage ? el("p", { class: "note" }, summary ? "«الخلاصة» بالملاحظة كتبها نموذج التصنيف، والباقي قواعد" : "استدعاء نموذج التصنيف للملاحظة",
+      own != null && own >= 50 ? [" · ", took(own)] : "") : null,
     d.usage ? usageText(d.usage) : null);
   const inAgent = P.run && S.agent.source && P.source === `run:${S.agent.source}` && gold?.id;
   if (inAgent) add(box, el("button", { type: "button", class: "btn btn-small", text: "افتحها بوضع الموظف", onclick: () => hooks.toAgent?.(gold.id) }));
@@ -412,7 +426,10 @@ function goldTable(g, d) {
 function replay(i, { instant = false } = {}) {
   const row = P.run.tickets[i];
   buildView(row.ticket, "إعادة عرض من تشغيل محفوظ");
-  $("processMain").querySelector(".trace").prepend(el("p", { class: "note" }, `تشغيل محفوظ · ${backendAr(P.run.meta.backend)} · `, secs(row.seconds)));
+  $("processMain").querySelector(".trace").prepend(el("p", { class: "note" }, `تشغيل محفوظ · ${backendAr(P.run.meta.backend)} · `,
+    secs(row.seconds), " بالمجموع، والوقت جنب كل مرحلة وقتها هي"));
+  // Own times from every event, the "running" ones too (a model stage took from its start to its end).
+  row.events.forEach((e, k) => stampOwn(row.events[k - 1], e));
   const evs = row.events.filter((e) => e.status !== "running");
   if (!evs.some((e) => e.stage === "result")) evs.push({ stage: "result", status: "done", data: row.result, ms: 0 });
   if (instant || reducedMotion()) {
@@ -448,7 +465,7 @@ async function runOne(t) {
     const status = await streamTicket(t.text, {
       signal: P.ctl.signal,
       onEvent: (e) => {
-        events.push(e);
+        events.push(stampOwn(events.at(-1), e));
         if (e.stage === "result") result = e.data;
         if (P.current === t.id && P.source === src) render(e);
       },
@@ -636,7 +653,7 @@ async function renderOverview() {
   $("processMain").replaceChildren(el("section", { class: "overview", "aria-labelledby": "ovTitle" },
     el("h2", { id: "ovTitle", class: "trace-title", tabindex: "-1" }, "ملخص تشغيل ", ticketsAr(n)),
     el("p", { class: "lede" }, `${m.set} · `, ltr((m.started || "").replace("T", " ")), ` · ${backendAr(m.backend)} · `,
-      ltr(`${m.models?.classifier} / ${m.models?.drafter}`), " · استغرق ", secs(m.wall_seconds || 0), " بالمجموع",
+      modelPair(m.models), " · التشغيل كله خذ ", secs(m.wall_seconds || 0), m.workers > 1 ? [" (", ticketsAr(m.workers), " سوة)"] : "",
       m.usage?.budget_hit ? el("strong", { class: "mark-no", text: " · وصل حد الصرف: الأرقام مو صالحة" }) : ""),
     stageStrip(rows),
     stats,
@@ -663,12 +680,12 @@ function decisionsSummary(recs) {
   const stat = (b, t) => el("div", { class: "stat" }, el("b", {}, typeof b === "string" ? ltr(b) : b), el("span", { text: t }));
   return el("div", {},
     el("div", { class: "stats" },
-      stat(String(s.n), "تذكرة انحسمت"), stat(pct(s.approved, s.drafts), "مسودات انعتمدت كما هي"),
+      stat(String(s.n), "تذاكر انحسمت"), stat(pct(s.approved, s.drafts), "مسودات انعتمدت كما هي"),
       stat(pct(s.edited, s.drafts), "مسودات انعدّلت"), stat(String(s.took_over), "استلمها الموظف"),
       stat(String(s.forwarded), "تحوّلت للقسم"), stat(med == null ? "—" : secs(med), "الوقت الوسيط لكل تذكرة"),
-      stat(String(s.corrected), "تصحيح للنوع أو القسم أو الأولوية"),
+      stat(String(s.corrected), "تصحيحات للنوع أو القسم أو الأولوية"),
       // Faster than reading the ticket and the draft: not an opinion on the draft.
-      stat(String(s.quick), `قرار أسرع من ${QUICK_S} ثواني (ما ينحسب رأي)`)),
+      stat(String(s.quick), `قرارات أسرع من ${QUICK_S} ثواني (ما تنحسب رأي)`)),
     s.reasons.length ? el("ul", { class: "reason-counts" }, s.reasons.map(([c, k]) => el("li", {}, el("span", { text: S.meta.reason_codes_ar[c] || c }), num(k))))
       : el("p", { class: "note", text: "ماكو أسباب مختارة." }),
     el("p", { class: "note", text: "من سجل القرارات (بدون نص الرد): آخر قرار لكل تذكرة ما انلغى." }));

@@ -10,7 +10,7 @@ A batch pipeline that sorts customer support tickets written in **Iraqi Arabic d
 
 | | test2 (80) |
 |---|---|
-| Ticket type correct | **78/80 (97.5%)** (77/80 as first scored; the author then corrected one label he hadn't checked) |
+| Ticket type correct | **78/80 (97.5%)** (77/80 as first scored; the author then corrected one label they hadn't checked) |
 | Priority correct | 79/80 |
 | Transaction reference extracted | 21/21 |
 | Fraud tickets escalated, none drafted | **6/6** |
@@ -46,7 +46,7 @@ A fixed workflow, not a free-roaming agent: predictable and testable. Models are
 - **Every change was tested with and without it** on the same tickets, with repeat runs to measure noise, before being adopted. Several that looked like improvements were noise or broke something else and were dropped; the log of every test is [`docs/experiments/LOG.md`](docs/experiments/LOG.md).
 - **Numbers come from the API.** Development runs used Claude Code on the author's plan (`LLM_BACKEND=cli`, free); every reported number and the thresholds come from the API (`LLM_BACKEND=api`).
 - **Data:** 400 synthetic tickets for development (dev 233, mvp_test 78, heldout 78), then 160 fresh ones for the final test (test2 80, and heldout2 80, sealed until the progress review). Written by Claude Opus from a seeded plan that crosses type × dialect × writing style × edge case, with code checks for dialect drift, invented numbers and near-duplicates.
-- **Human checks:** the author reviewed 34 dev labels (2 corrected), 13 drafts and 2 team notes, and 30 test2 labels before the final run. His rules as a native speaker are part of the code and the data (for example «ورقة» is a 100-dollar note, and no urgency word raises priority).
+- **Human checks:** the author reviewed 34 dev labels (2 corrected), 13 drafts and 2 team notes, and 30 test2 labels before the final run. The author's rules as a native speaker are part of the code and the data (for example «ورقة» is a 100-dollar note, and no urgency word raises priority).
 
 ## Known limits
 
@@ -59,21 +59,34 @@ A fixed workflow, not a free-roaming agent: predictable and testable. Models are
 
 ```bash
 pip install -r requirements-dev.txt             # adds pytest to requirements.txt
-pytest                                          # 642 tests, no model calls
+pytest                                          # 648 tests, no model calls
 python app/server.py                            # viewer: http://localhost:8000, no key needed
 
 export SUPPORT_PIPELINE_API_KEY=...             # or ANTHROPIC_API_KEY
-LLM_BACKEND=api python app/server.py            # the same viewer, able to run new tickets
+python app/server.py                            # the same viewer, able to run new tickets (API, spending cap)
 LLM_BACKEND=api python scripts/run_batch.py data/test2/tickets.jsonl
 ```
 
-**See the final test without a key:** start the viewer and pick "test2 · final" in the list. It replays the measured run ([`docs/runs/test2/final.json`](docs/runs/test2/final.json), committed as it was run on 30 Oct) and scores it against the current labels: type 78/80, priority 79/80.
+**See the final test without a key:** start the viewer. It opens on the final run («الاختبار النهائي (80 تذكرة)» in the agent's picker; "test2 · final" in «كيف يشتغل»). It replays the measured run ([`docs/runs/test2/final.json`](docs/runs/test2/final.json), committed as it was run on 30 Oct) and scores it against the current labels: type 78/80, priority 79/80.
 
 **Saved runs are masked:** `run_batch.py` hides phone, card, account and transaction numbers (7+ digits, also when split by `-`, `.` or spaces, keeping the first and last two) and codes written after a code word (`OTP 482913` → `OTP ******`) in the file it saves. `--no-mask` keeps them, for synthetic test sets scored against their gold labels; the experiment script uses it. Names are not masked.
 
 **Safety switches:** the viewer answers only on localhost, with a per-page token, and refuses tickets over 4,000 characters. `PIPELINE_MODE=off` sends every ticket to a person with no model call (`classify_only` writes no drafts). `REAL_DATA=1` refuses the development-only paths (the free backend, the response cache, `--no-mask`). Details: the 1 Nov entry in [`docs/experiments/LOG.md`](docs/experiments/LOG.md).
 
-The viewer (standard library only) replays saved runs with an overview (accuracy, outcomes, confidence vs. accuracy, cost) and shows any ticket stage by stage, including exactly what each model was sent and returned. You can also paste a new ticket and watch it go through live. Screenshots: [`docs/demo/`](docs/demo/).
+**The viewer** (standard library only, in Arabic, right to left) has two modes:
+
+- **«وضع الموظف», the agent's inbox,** opens first. A queue in four tabs (تحتاج تأكيد, متصعّدة, جاهزة, خلصت), most urgent first. One ticket at a time: the customer's text with the extracted facts underlined, the draft in an editable box with its checks, and a decision bar: approve (Ctrl+Enter), edit, take over, or forward an escalation to its team. Friction follows risk: a flagged ticket needs a tick on the one thing to check, a draft that asks for a code can't be approved, and an escalation has no draft, only the note for the team. Nothing is sent: each decision goes to a decision log (no reply text) and can be undone. A card on the first visit explains the tabs; `?` lists the keys.
+- **«كيف يشتغل», how it works,** holds the process: the stages (rule, model or person) with counts and an example ticket each, the confidence gate and the blind re-check, the results against the gold labels, calibration, cost and time, the decisions logged on the run, and any ticket stage by stage with exactly what each model was sent and returned.
+
+With a key you can also paste a new ticket («تذكرة جديدة») and watch it go through live; without one, the page says live runs are off.
+
+![The inbox on a first visit: the card explains the tabs](docs/demo/inbox-first-visit.png)
+
+![A flagged ticket: the two models disagreed on the type; approve stays off until the agent ticks what they checked](docs/demo/inbox-flagged.png)
+
+![«كيف يشتغل»: the stages of the final run, then the measured results](docs/demo/process-overview.png)
+
+More in [`docs/demo/`](docs/demo/). The session summary there (`inbox-done.png`) comes from the smoke test deciding all 80 tickets by script, under 3 s each, so its times are not a person's; the page says so.
 
 | Model role | Model | Used for |
 |---|---|---|

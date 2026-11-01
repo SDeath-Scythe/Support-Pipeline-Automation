@@ -2,14 +2,17 @@
 // models once the page goes away; this side aborts the stream when the agent cancels or leaves.
 
 import { NetworkError, ServerError, openStream, readEvents } from "./api.js";
+import { LIVE_TURN_ON_AR } from "./labels.js";
 import { S } from "./state.js";
-import { el, fmtInt, num, openDialog } from "./util.js";
+import { el, fmtInt, num, openDialog, richText, stampOwn } from "./util.js";
 
 const hooks = { started: null, updated: null, budget: null };
 export function setLiveHooks(h) { Object.assign(hooks, h); }
 
 const controllers = new Set();
 const BUSY_AR = "اكو تذكرة دتنعالج هسه، انتظر لما تخلص.";
+/** LLM_CACHE_ONLY=1 (the author's demo): what a pasted ticket gets. Said in a banner and in the dialog. */
+export const CACHE_AR = "التذكرة تاخذ أجوبة النموذج المحفوظة من قبل، بدون أي استدعاء، فالمراحل تخلص بلحظة. تذكرة ما إلها أجوبة محفوظة تروح لموظف.";
 addEventListener("pagehide", () => {
   for (const c of controllers) c.abort();
   // Pasted customer text is never kept by the page: not in the history entry either.
@@ -96,17 +99,24 @@ export function initNewTicket() {
     }
   });
 
+  const field = [document.querySelector('label[for="newText"]'), ta, count];
   return function openNew() {
     const st = liveState();
     err.textContent = "";
     note.replaceChildren();
-    if (!st.ok) note.append(el("strong", { text: st.reason }));
-    else if (S.liveBusy) note.append(el("strong", { text: BUSY_AR }));
+    if (!st.ok) {
+      // The agent's sentence, then what turns it on (for whoever runs the server; not after a spent budget).
+      const turnOn = S.liveBlocked ? null : LIVE_TURN_ON_AR[S.meta.live.cause];
+      note.append(el("strong", { text: st.reason }), ...(turnOn ? [el("br"), richText(turnOn)] : []));
+    } else if (S.liveBusy) note.append(el("strong", { text: BUSY_AR }));
     else if (S.meta.mode === "off") note.append(el("strong", { text: "النظام موقف: " }), "التذكرة ما تنرسل لأي نموذج، وتروح لموظف مباشرة.");
     else if (S.meta.mode === "classify_only") note.append(el("strong", { text: "المسودات موقفة: " }), "النظام يصنّفها ويوجّهها بس، والرد عليك.");
+    else if (S.meta.cache_only) note.append(el("strong", { text: "إعادة من الكاش: " }), CACHE_AR);
     else note.append("التذكرة تمر بالمراحل كلها وتطلع بالقائمة. ", el("strong", { text: "التذاكر الجديدة ما تنحفظ: " }), "إذا حدّثت الصفحة تروح.");
     note.classList.toggle("hint-warn", !st.ok);
     run.toggleAttribute("disabled", !st.ok);
+    // Nothing can run: no box that looks ready for typing but takes none.
+    for (const n of field) n.hidden = !st.ok;
     ta.readOnly = !st.ok;
     update();
     // Nothing can run: focus «رجوع», not a box that looks ready for typing but takes none.
@@ -130,7 +140,7 @@ async function probeAndRun(text, accepted) {
   let got = false;
   try {
     await readEvents(resp, (e) => {
-      item.events.push(e);
+      item.events.push(stampOwn(item.events.at(-1), e));
       if (e.stage === "result") { item.result = e.data; got = true; }
       if (e.status === "error" && e.data?.kind === "BudgetExceeded") {
         S.liveBlocked = e.data.error || "وصل التشغيل لحد الصرف.";

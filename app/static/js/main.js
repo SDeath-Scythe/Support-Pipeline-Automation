@@ -4,7 +4,7 @@
 import { NetworkError, ServerError, getJSON, onTrouble } from "./api.js";
 import * as inbox from "./inbox.js";
 import { initKeys } from "./keyboard.js";
-import { cancelLive, initNewTicket, liveState, rerun, setLiveHooks } from "./live.js";
+import { CACHE_AR, cancelLive, initNewTicket, liveState, rerun, setLiveHooks } from "./live.js";
 import * as proc from "./process.js";
 import { OUTCOME_SHORT } from "./labels.js";
 import { S, findItem, mostUrgent, pauseClock, restoreDecisions, startClock, tabOf, uid } from "./state.js";
@@ -25,6 +25,7 @@ async function init() {
   document.body.classList.toggle("keys-off", !S.prefs.singleKeys);
   document.body.dataset.screen = "queue";
   watchSizes();
+  initIntro();
   setMode(S.mode, { quiet: true });
   S.agent.loading = true;
   inbox.renderQueue();
@@ -149,6 +150,43 @@ function wire() {
   });
 }
 
+/**
+ * The first-visit card («أول مرة هنا؟»): what the page is and what each tab asks. Shown until «فهمت»,
+ * remembered in the preferences (when storage is blocked it shows again on the next visit, nothing
+ * breaks). It sits above the ticket; on a phone, where the queue is the first screen, above the queue.
+ * One node, moved between the two places (never drawn twice, so it is read once).
+ */
+function initIntro() {
+  const card = $("intro");
+  // Crossing 720 px drops the focus of a control in the card to <body>: the new width can hide the pane
+  // it is in before this code runs, and moving the node blurs it too. Remember what lost it, just now.
+  let left = null;
+  card.addEventListener("focusout", (e) => { left = { node: e.target, at: performance.now() }; });
+  document.addEventListener("focusin", () => { left = null; });
+  const place = () => {
+    const host = isPhone() ? $("agentNav") : $("main");
+    if (card.parentElement === host) return;
+    const a = document.activeElement;
+    const had = card.contains(a) ? a : (!a || a === document.body) && left && performance.now() - left.at < 1000 ? left.node : null;
+    host.prepend(card);
+    // Give it back once the layout has followed the width (the other listener picks the phone screen).
+    // On a phone's ticket screen the card is hidden with the queue: the ticket's heading takes it.
+    if (had) setTimeout(() => (card.offsetParent ? had : $("ticketTitle") || $("main")).focus(), 0);
+  };
+  place();
+  matchMedia("(max-width: 720px)").addEventListener("change", place);
+  card.hidden = !!S.prefs.introSeen;
+  $("introOk").addEventListener("click", () => {
+    S.prefs.introSeen = true;
+    save();
+    card.hidden = true;
+    // Focus goes on to the work, never to <body>: the open ticket, or on a phone's queue screen the list.
+    const onQueue = isPhone() && document.body.dataset.screen === "queue";
+    const next = onQueue ? $("queueList")?.querySelector('[tabindex="0"]') || $(`tab-${S.agent.tab}`) : $("ticketTitle");
+    (next || $("main")).focus();
+  });
+}
+
 /** The action bar's real height (it wraps on narrow screens) and the header's, as CSS variables: the
  *  scroll padding that keeps focus above the bar, the drawer's top and the toast follow them. */
 function watchSizes() {
@@ -182,11 +220,13 @@ function updateNewButton() {
   b.setAttribute("aria-describedby", "newTicketWhy");
   b.classList.toggle("is-unavailable", !st.ok);
   $("newTicketWhy").textContent = st.ok ? (S.liveBusy ? "اكو تذكرة دتنعالج هسه." : "") : st.reason;
+  b.title = st.ok ? "" : st.reason;   // the pointer's hint; a screen reader gets it from aria-describedby
 }
 
 function modeBanners() {
   if (S.meta.mode === "off") setBanner("mode", { kind: "warn", title: "النظام موقف.", text: "أي تذكرة جديدة تروح لموظف بدون ما تنرسل لنموذج. التشغيلات المحفوظة والقرارات تشتغل عادي." });
   else if (S.meta.mode === "classify_only") setBanner("mode", { kind: "warn", title: "المسودات موقفة.", text: "النظام يصنّف التذاكر ويوجّهها بس، والرد على الموظف." });
+  if (S.meta.cache_only && S.meta.live.available) setBanner("cache", { kind: "info", title: "إعادة من الكاش.", text: CACHE_AR });
 }
 
 /**
@@ -285,6 +325,7 @@ async function setMode(mode, { quiet = false } = {}) {
   if (mode !== "agent" && mode !== "process") mode = "agent";
   if (S.mode !== mode) {
     proc.stopProcess();
+    hideToast();   // its «تراجع» acts on the inbox, which is not on screen in the other mode
     // Both modes share the pane: the other mode's scroll would open this one part way down.
     $("main").scrollTop = 0;
     document.scrollingElement.scrollTop = 0;

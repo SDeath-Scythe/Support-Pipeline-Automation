@@ -7,12 +7,14 @@ const statusEl = () => document.getElementById("status");
 const undoBtn = () => document.getElementById("toastUndo");
 
 let timer = null;
+let shown = 0;         // which message is on screen (showToast's return value)
 let undoAction = null;
 let hovering = false;
 let returnTo = null;   // where focus was before it entered the toast
 
 /** Show a decision message for about 6 s (it waits while the pointer or focus is on it). One polite
- *  status region for the whole page: streamed stages are never announced. */
+ *  status region for the whole page: streamed stages are never announced. Returns the message's id
+ *  (for hideToastIf). */
 export function showToast(content, onUndo = null) {
   clearTimeout(timer);
   statusEl().replaceChildren(...[content].flat(Infinity).map((c) => (c?.nodeType ? c : document.createTextNode(String(c ?? "")))));
@@ -20,6 +22,11 @@ export function showToast(content, onUndo = null) {
   undoBtn().hidden = !onUndo;
   toast().classList.add("is-shown");
   arm();
+  return ++shown;
+}
+/** Hide the toast only if it still shows message `id` (a newer message stays). */
+export function hideToastIf(id) {
+  if (id === shown && toast().classList.contains("is-shown")) hideToast();
 }
 function arm() {
   clearTimeout(timer);

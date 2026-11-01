@@ -135,7 +135,9 @@ body.keys-off .kbd-single { display: none !important; }
 .btn-quiet:hover { background: var(--surface-2); border-color: var(--line); }
 .btn-small { min-height: 32px; padding: 4px 10px; font-size: 14px; }
 .icon-btn { padding: 4px 8px; min-width: 40px; justify-content: center; }
-.btn.is-unavailable { color: var(--muted); }
+/* Nothing can run (no key, a spent budget): visibly off, not only muted. The reason is in its title and,
+   for a screen reader, in #newTicketWhy. */
+.btn.is-unavailable { color: var(--muted); border-style: dashed; background: var(--surface-2); }
 .link-btn {
   border: 0; background: none; padding: 2px 0; color: var(--accent); cursor: pointer;
   font-size: 14px; display: inline-flex; align-items: center; gap: 4px; text-decoration: underline; text-underline-offset: 4px;
@@ -183,13 +185,36 @@ body.keys-off .kbd-single { display: none !important; }
   grid-template-columns: var(--nav-w) minmax(0, 1fr);
 }
 body.why-open[data-mode="agent"] .shell { grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--why-w); }
-.pane { min-height: 0; overflow-y: auto; }
+/* Positioned, so an absolutely placed node inside (a .sr-only caption) stays in its pane's scroll area
+   instead of growing the page under the panes. */
+.pane { min-height: 0; overflow-y: auto; position: relative; }
 .pane-nav { background: var(--surface); border-inline-end: 1px solid var(--line); }
 .pane-main { padding: 24px 32px 0; scroll-padding-bottom: calc(var(--bar-h) + 16px); scroll-padding-top: 16px; }
 .pane-main:focus { outline: none; }
 .pane-why { display: none; background: var(--surface); border-inline-start: 1px solid var(--line); padding: 16px 20px 32px; }
 body.why-open[data-mode="agent"] .pane-why { display: block; }
 #agentMain, #processMain { max-width: 860px; margin-inline: auto; }
+
+/* The first-visit card: in the ticket pane (on a phone, above the queue), in the flow, so it never
+   covers anything and never moves the action bar (sticky, or fixed on a phone). */
+.intro {
+  max-width: 860px; margin: 0 auto 20px; padding: 14px 18px 16px;
+  background: var(--accent-tint); border: 1px solid var(--line); border-inline-start: 4px solid var(--accent); border-radius: var(--radius);
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+}
+body[data-mode="process"] .intro { display: none; }
+.intro-title { font-size: 16px; font-weight: 600; }
+.intro-lede { font-size: 16px; line-height: 1.7; }
+/* Two columns: each tab's name (icon and word, like its rows) beside what it asks. */
+.intro-tabs { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; font-size: 15px; line-height: 1.6; }
+.intro-tabs > div { display: contents; }
+.intro-tabs dt { display: inline-flex; gap: 6px; align-items: center; align-self: start; font-weight: 600; }
+.intro-tabs dt .icon { width: 16px; height: 16px; align-self: center; }
+.intro-tabs .st-drafted dt { color: var(--ok); }
+.intro-tabs .st-flagged dt { color: var(--warn); }
+.intro-tabs .st-escalated dt { color: var(--bad); }
+.intro-tabs dd { color: var(--ink); }
+.intro .btn { margin-top: 4px; }
 
 /* --- the queue --- */
 
@@ -199,10 +224,8 @@ body.why-open[data-mode="agent"] .pane-why { display: block; }
 .queue-title { font-size: 17px; font-weight: 600; }
 .progress { height: 6px; border-radius: 3px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; }
 .progress-fill { display: block; height: 100%; background: var(--ok); transition: width .3s ease; }
-.throughput { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; }
-.throughput li { display: inline-flex; gap: 6px; align-items: baseline; }
-.tp-k { color: var(--muted); }
-.tp-why { color: var(--muted); font-size: 13px; }
+/* What the system did with the whole run: not what is still open (each tab counts that). */
+.run-note { font-size: 14px; color: var(--muted); line-height: 1.6; }
 
 .tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); z-index: 2; }
 .tab {
@@ -380,6 +403,8 @@ body.why-open .why-toggle { color: var(--accent); }
 .handoff-list { display: flex; flex-direction: column; gap: 8px; }
 .handoff-list > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; }
 .handoff-list dt { color: var(--muted); font-size: 14px; padding-top: 2px; }
+/* «كتبها نموذج» under «الخلاصة»: the one line of the team note a model wrote. */
+.dt-tag { display: block; font-size: 12px; line-height: 1.4; }
 .handoff-list dd { font-size: 16px; line-height: 1.75; }
 .handoff-list > div:has(> dd:only-child) { grid-template-columns: 1fr; }
 
@@ -673,6 +698,9 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   .shell, body.why-open[data-mode="agent"] .shell { display: block; overflow: visible; }
   .pane { overflow: visible; }
   .pane-nav { border-inline-end: 0; }
+  #agentNav > .intro { margin: 12px 16px 4px; padding: 12px 14px 14px; }
+  .intro-lede { font-size: 15px; }
+  .intro-tabs { font-size: 14px; column-gap: 10px; }
   .pane-main { padding: 16px 16px 0; }
   body[data-mode="agent"][data-screen="ticket"] .pane-nav { display: none; }
   body[data-mode="agent"][data-screen="queue"] .pane-main,
@@ -695,6 +723,7 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   .actionbar .btn-primary { flex: 1; justify-content: center; }
   .no-send { margin-inline-start: 0; flex-basis: 100%; justify-content: center; order: 4; border: 0; padding: 0; background: none; }
   .toast { inset-inline: 16px; bottom: calc(var(--bar-h) + 12px); max-width: none; flex-wrap: nowrap; }
+  #toastUndo kbd { display: none; }   /* no keyboard shortcut hint on a phone: the toast stays short */
   body[data-mode="process"] .pane-nav { border-bottom: 1px solid var(--line); }
   body[data-mode="process"] .plist { max-height: 45vh; overflow-y: auto; }
   .pane-main { scroll-padding-bottom: 0; }

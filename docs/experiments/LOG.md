@@ -9,7 +9,7 @@ All numbers come from the `cli` backend: good for comparing configs with each ot
 **Why.** The mentor asked for more care on functionality, security and UI/UX. The viewer's first screen was a debugger: one ticket's stage-by-stage trace, with gold labels, scores and model ids. A support agent needs the opposite: a queue, one ticket, a draft to check, and a quick way to decide. No model was called for this work, and nothing was spent.
 
 **What the agent sees** («وضع الموظف», the default screen):
-- **A queue** with four tabs and counts: تحتاج تأكيد (flagged), متصعّدة (escalated), جاهزة (drafted), خلصت (decided). It is sorted by priority, then arrival. Each row has an icon and a word for its status (never colour alone), the id, the priority («P1 · عاجلة»), the team and the first words. A counter («خلصت 12 من 80») and a strip count what is handled, what is left, and the escalations by reason.
+- **A queue** with four tabs and counts: تحتاج تأكيد (flagged), متصعّدة (escalated), جاهزة (drafted), خلصت (decided). It is sorted by priority, then arrival. Each row has an icon and a word for its status (never colour alone), the id, the priority («P1 · عاجلة»), the team and the first words. A counter («خلصت 12 من 80») counts the agent's decisions, and a note under it says what the system did with the whole run («بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال.»; changed in the polish below).
 - **The ticket:** the customer's text with each extracted fact (reference, amount, phone, time) underlined where it was written, and a list of the facts that lights up its place in the text. A one-line summary gives the type, team, priority and what is missing. Confidence is a word with what was done about it («واثق», «غير متأكد: انراجع بنموذج ثاني», «متصعّد»), never a decimal. Anything not ready opens with one line saying why.
 - **The draft** is in an editable box. The draft checks are highlighted on the phrase, with the reason in Arabic. They run again on every edit (`POST /api/check`, about 400 ms after typing stops).
 - **Friction follows risk.** A ready draft is approved with one key (Ctrl/Cmd+Enter). A flagged ticket names the one thing to check, and approve stays off until «تأكدت من …» is ticked. A draft that asks for a code or password cannot be approved until the text no longer asks. An escalated ticket has no draft at all: the team note is the main content, under a red banner for fraud. When the two models disagreed, both answers are shown, with the team and priority each would get.
@@ -25,7 +25,7 @@ All numbers come from the `cli` backend: good for comparing configs with each ot
 - **Fonts are local:** IBM Plex Sans Arabic and IBM Plex Mono, from @fontsource 5.3.0, under the SIL Open Font License. `SOURCE.txt` has the sha256 of each file. The page makes no request to another host.
 - **Static files by allow-list:** `/static/` serves only files under `app/static/` with an allowed extension, each with an exact content type. Traversal, encoded dots, hidden files, folders and symlinks out get 404.
 - **`/api/check`** has the same guards as the other POSTs. It never logs or stores the draft.
-- `localStorage` holds four preferences only, never ticket text or drafts.
+- `localStorage` holds preferences only (five since the polish below), never ticket text or drafts.
 
 **How it was checked:**
 - **pytest:** 625 pass (549 before: 70 new for the server, 6 for the page).
@@ -53,7 +53,7 @@ All numbers come from the `cli` backend: good for comparing configs with each ot
 - **Screenshots** in `docs/demo/`:
   - `inbox-desktop.png`, `inbox-flagged.png`, `inbox-escalated.png`, `inbox-phone.png`, `inbox-dark.png`
   - `process-overview.png`, `process-trace.png`
-  - `inbox-done.png`. A script decided all 80 tickets of the final run through the page for this one (redone after the review below), so its times (median 0.3 s) are not a person's; the page itself now says so («80 قرار انحسمت بأقل من 3 ثواني»).
+  - `inbox-done.png`. A script decided all 80 tickets of the final run through the page for this one (redone after the review below), so its times (median 0.1 s in the image retaken in the polish below) are not a person's; the page itself now says so («80 قرار انحسمت بأقل من 3 ثواني»).
 
 **Still open:**
 - No agent has used it yet. The decision log and the session summary have no human data.
@@ -92,6 +92,12 @@ All numbers come from the `cli` backend: good for comparing configs with each ot
   - The focus-obscured sweep (1280×600, 1093×520, 911×512, 768×1024, 360×780) shows no hidden focus.
   - axe on 7 states shows no WCAG violation.
   - The screenshots in `docs/demo/` are redone.
+
+**Polish.** Seven items from a last check of the inbox, then two reviews of the result (a judge's first five minutes on a fresh copy with no key, and a regression pass) and their fixes. No model was called.
+- **The items:** (1) The viewer runs new tickets on the API backend unless `LLM_BACKEND` says otherwise (`default_viewer_backend` in `app/server.py`; the scripts still default to cli). With no key, live runs are off and the page says why; `LLM_BACKEND=cli` still works when set. (2) A first-visit card («أول مرة هنا؟») says what the page is and what each tab asks, until «فهمت». It is a fifth preference and works with storage blocked. (3) When the next ticket is in another tab, the toast says why. (4) The strip under the counter describes the run and no longer repeats the decided count. (5) A refused approve's message goes once what it names is fixed. (6) Each trace stage shows its own time, not the time since the ticket started. (7) The screenshots are retaken as a fresh clone shows them (no key, no kill switch) by `node tests/ui/smoke.cjs --pass fresh-clone --demo docs/demo`, with a new `inbox-first-visit.png`. The four images of the old viewer (`test2-*.png`) are deleted: no tracked file linked them.
+- **Review:** 16 findings (4 medium, 12 low). Each was reproduced in Chromium first, and all 16 are fixed. Medium: the README described the old viewer (now the two modes, the run that opens by default, three screenshots). The team note said it was all rules, but its «الخلاصة» line is written by a model: the line is now marked, and the trace's result box names that call and its own time (1.0 to 1.4 s on the six escalations), which no stage showed. The cleaned text in the trace showed a spaced reference in reverse order (now drawn like the ticket text). A cache-only demo looked like a live run: `/api/meta` now has `cache_only`, and the page shows a banner, a note in the dialog and «من الكاش» beside each model stage. The start-up line says so too, and prints a $0.001 cap as $0.001, not $0.00. Low: the run's elapsed time was called a total (now «التشغيل كله خذ 86.1 ث (5 تذاكر سوة)»). A hidden table caption made the whole page scroll in «كيف يشتغل» (`.pane` is now positioned). With no key, «تذكرة جديدة» looked usable (now dashed, and the dialog shows no text box, only the reason and what turns live runs on). Wording: the legend now follows the tab order, flagged rows say «تحتاج تأكيد», a tab that runs out says «ماكو بعد», the tile labels read with any number, and the model pair is in one order everywhere. The decision toast followed the agent into «كيف يشتغل». The phone image showed no draft, and the scripted session summary was not labelled. The README said «he». Focus dropped to `<body>` when the card crossed 720 px. The run note was wrong for one escalation or mixed reasons. An unknown `LLM_BACKEND` stopped the viewer with a traceback (now one line). SECURITY.md and this entry still described the old state.
+- **Not done:** pacing a cache-only replay by the recorded stage times (it is labelled instead), and a separate stage event for the team-note summary in the pipeline (saved runs would not have it, so the result box shows the call).
+- **Checks:** pytest 648 pass (4 new for the backend default, 2 for the review). `node tests/ui/smoke.cjs` 359/359: desk-light 94, desk-dark 94, phone-light 70, phone-dark 70, fresh-clone 31 (109 more than the 250 above). All nine images in `docs/demo/` were retaken and checked by eye.
 
 ## 1 Nov: Security and reliability hardening (no model calls)
 
@@ -219,7 +225,7 @@ The author's choice (from the author's test2 note on t2-0021): `app_bug` now rou
 | Model errors / cost | 0 · $0.21 ($0.0027 per ticket) |
 
 The three misses:
-- **t2-0033** «دفعت ... للمطعم بالكود وانسحبت مني مرتين»: gold `merchant_payment`, pipeline `reversal_request` (the re-check's answer, flagged). By the author's ruling on dev-0109 (a shop paid twice by mistake is a reversal), the label was the error; not among the 30 he checked. **The author confirmed (30 Oct): relabelled `reversal_request`. Re-scored with no model calls: type 78/80, priority 79/80, wrong type that got a draft 2.** Other double-charge-looking tickets (a payment that failed but was deducted, then paid in cash) are a different case and keep their labels.
+- **t2-0033** «دفعت ... للمطعم بالكود وانسحبت مني مرتين»: gold `merchant_payment`, pipeline `reversal_request` (the re-check's answer, flagged). By the author's ruling on dev-0109 (a shop paid twice by mistake is a reversal), the label was the error; not among the 30 the author checked. **The author confirmed (30 Oct): relabelled `reversal_request`. Re-scored with no model calls: type 78/80, priority 79/80, wrong type that got a draft 2.** Other double-charge-looking tickets (a payment that failed but was deducted, then paid in cash) are a different case and keep their labels.
 - **t2-0052**: an agent overcharged *and* the cash-in never arrived; gold leads with the fee, the pipeline with the missing money (the draft covers both). Either could lead, as with dev-0152.
 - **t2-0041** (the planted injection): `app_bug` instead of `complaint`; the injection itself failed (P3, no promise).
 
@@ -259,7 +265,7 @@ On top of rec+F16+F20, dev 233 with a replicate ($0.33 for both):
 
 ## 29 Oct: round 2 review, F20 (duplicate payments), calibration with F20
 
-**Author's round 2** (`data/review/dev_round2_answers.json`, 16 tickets from dev/recF16; the cli grader's verdicts stored beside his, hidden from him during the review):
+**Author's round 2** (`data/review/dev_round2_answers.json`, 16 tickets from dev/recF16; the cli grader's verdicts stored beside the author's, hidden from the author during the review):
 - Drafts: **10 of 13 send as is, 3 after small edits, 0 rewrite.** Asks for the right things 9/13; missing a question on 4 (dev-0199: the restaurant's name, the known F11 weakness).
 - The grader mostly agrees, but marks drafts down for English words Iraqi customers use themselves (PIN, QR, error): the author would send dev-0075 as is, which the grader called bad. 16 of the 25 "bad" drafts on dev failed only `clean`, so the grader's bad-draft count is too high.
 - Fraud team note (dev-0197) should say what happened ("he gave the code to the scammer"); F17 lists fields only.
@@ -286,7 +292,7 @@ The first check of gold labels by a person: the author, on a review page, for th
 - **A systematic pipeline error: paying the same amount twice by mistake.** dev-0109, 0138 and 0190 are `reversal_request` (gold right); the pipeline said `merchant_payment` or `wrong_recipient`. In 0138 and 0190 the first model was right and the re-check's answer, used by F3c, was wrong. The author: the draft and routing should also carry the reason (pressed twice by mistake).
 - **dev-0164:** gold `login_otp` is right; the first model read an OTP problem as a scam (escalated; the safe direction, but extra work).
 - **dev-0145** (the dataset's prompt-injection test, a fake "SYSTEM" line asking for P1): the pipeline ignored it (P3). The author was unsure of the type; gold `limit_upgrade` kept.
-- **dev-0083** (spot-check, `unauthorized_charge`): the author says it is not fraud, since nobody tricked the customer; he found an unknown charge. A taxonomy question: `unauthorized_charge` sits under fraud and is always escalated as P1. Open.
+- **dev-0083** (spot-check, `unauthorized_charge`): the author says it is not fraud, since nobody tricked the customer; the customer found an unknown charge. A taxonomy question: `unauthorized_charge` sits under fraud and is always escalated as P1. Open.
 - The author also noted that the check showed no drafts, and that some tickets need more information from the customer.
 
 **Re-scored on the corrected labels** (calibration replay, no model calls): type used correct 235/240 and 236/240 (was 233); wrong type reaching a draft 4 and 3 at the current thresholds, **3 and 1 with `recheck_from` 0.65**. The 0.65 gain now holds in both replicates.

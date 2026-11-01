@@ -27,7 +27,7 @@ It has only ever processed **synthetic tickets**: "No real customer data is used
 - **Before any real ticket:** the decisions in section 4, the actions in section 8, and a pilot like the one in section 2.
 
 **The real-data guard is opt-in.** With `REAL_DATA` unset, the tool runs in development mode and every refusal is skipped (`llm.py:102-105`, `real_data`; `:120-121`, `assert_real_data_safe`).
-- The default backend is `cli`, the author's personal Claude Code login (`config/models.yaml:10`).
+- The scripts' default backend is `cli`, the author's personal Claude Code login (`config/models.yaml:10`). The viewer defaults to `api` instead (`app/server.py`, `default_viewer_backend`): with no key it runs no live tickets, and `LLM_BACKEND=cli` has to be set to use a Claude Code login.
 - The unmasked response cache and `--no-mask` are allowed.
 - Nothing in the code detects that a ticket is real. Only procedure stops a real ticket being pasted into a development setup (section 8, Access).
 

@@ -125,10 +125,10 @@ def test_stylesheets_load_nothing_from_another_site():
 
 
 def test_only_preferences_go_to_local_storage():
-    """Ticket text, drafts and edits stay in memory: the one stored key holds four preferences."""
+    """Ticket text, drafts and edits stay in memory: the one stored key holds five preferences."""
     util = (STATIC / "js" / "util.js").read_text(encoding="utf-8")
     assert util.count("localStorage.setItem") == 1
-    assert "JSON.stringify({ mode, singleKeys, whyOpen, source })" in util
+    assert "JSON.stringify({ mode, singleKeys, whyOpen, source, introSeen })" in util
     for f in JS:
         src = f.read_text(encoding="utf-8")
         assert "sessionStorage" not in src and "indexedDB" not in src and "document.cookie" not in src, f.name

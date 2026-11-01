@@ -3,13 +3,25 @@
 //
 //   node tests/ui/smoke.cjs                      run every pass, print a pass/fail list
 //   node tests/ui/smoke.cjs --screens <dir>      also save screenshots there
-//   node tests/ui/smoke.cjs --pass desk-light    run one pass (desk-light, desk-dark, phone-light, phone-dark)
+//   node tests/ui/smoke.cjs --pass desk-light    run one pass (desk-light, desk-dark, phone-light, phone-dark,
+//                                                fresh-clone)
+//   node tests/ui/smoke.cjs --pass fresh-clone --demo docs/demo
+//                                                retake the README screenshots (docs/demo/*.png)
 //
-// Each pass starts its own viewer (python app/server.py) with no API key in its environment,
-// PIPELINE_MODE=off (no model is ever called: a pasted ticket goes straight to a person) and a fresh
-// decision log in a temporary folder, then drives the agent inbox and the "كيف يشتغل" mode on the
-// committed final run (saved/test2/final). The server is stopped in a finally block. Exit code 0 only
-// if every check passed.
+// Each of the first four passes starts its own viewer (python app/server.py) with no API key in its
+// environment, PIPELINE_MODE=off (no model is ever called: a pasted ticket goes straight to a person) and
+// a fresh decision log in a temporary folder, then drives the agent inbox and the "كيف يشتغل" mode on
+// the committed final run (saved/test2/final).
+//
+// The fresh-clone pass starts the viewer as a fresh clone would: no key, no PIPELINE_MODE, no LLM_BACKEND
+// (so the viewer's default, the API) and no claude CLI. Live runs are then off and the page says so. It
+// pastes no ticket, and the browser refuses /api/stream anyway, so no model can be reached. It looks at
+// the first visit, decides all 80 tickets through the page (edits, a take-over, a correction, the rest
+// approved or forwarded) for the session summary, and with --demo saves the screenshots of docs/demo/.
+// A few of its checks feed the page a changed /api/meta or run file through a browser route (a cache-only
+// viewer, a run with one escalation); the server itself is never changed.
+//
+// Servers are stopped in a finally block. Exit code 0 only if every check passed.
 
 "use strict";
 
@@ -25,18 +37,23 @@ const PYTHON = process.env.PYTHON || "python";
 const RUN = "saved/test2/final";
 const EXPECT = { flagged: 9, escalated: 6, drafted: 65, total: 80, type: "78/80", priority: "79/80" };
 const SECRET_ASK = " دزلنا الرمز اللي وصلك";
+const LIVE_NO_KEY = "ماكو مفتاح API";   // «كيف يشتغل»'s cause when there is no key (labels.js LIVE_CAUSE_AR)
 
 const args = process.argv.slice(2);
 const argVal = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
 const SCREENS = argVal("--screens");
+const DEMO = argVal("--demo");
 const ONLY = argVal("--pass");
 if (SCREENS) fs.mkdirSync(SCREENS, { recursive: true });
+if (DEMO) fs.mkdirSync(DEMO, { recursive: true });
 
 const PASSES = [
   { name: "desk-light", viewport: { width: 1366, height: 850 }, scheme: "light", phone: false },
   { name: "desk-dark", viewport: { width: 1366, height: 850 }, scheme: "dark", phone: false },
   { name: "phone-light", viewport: { width: 360, height: 780 }, scheme: "light", phone: true },
   { name: "phone-dark", viewport: { width: 360, height: 780 }, scheme: "dark", phone: true },
+  // The README screenshots: 1280 × 800, and 390 × 844 for the phone.
+  { name: "fresh-clone", viewport: { width: 1280, height: 800 }, phoneViewport: { width: 390, height: 844 }, fresh: true },
 ].filter((p) => !ONLY || p.name === ONLY);
 
 const results = [];   // {pass, name, ok, detail}
@@ -52,12 +69,19 @@ function get(url) {
   });
 }
 
-async function startServer() {
+/** fresh: start it as a fresh clone would (no PIPELINE_MODE, no LLM_BACKEND, no claude CLI), else with
+ *  the kill switch on (PIPELINE_MODE=off). Never with a key. */
+async function startServer({ fresh = false } = {}) {
   for (let attempt = 0; attempt < 5; attempt++) {
     const port = 20000 + Math.floor(Math.random() * 30000);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "viewer-smoke-"));
     const decisions = path.join(dir, "decisions.jsonl");
     const env = { ...process.env, PIPELINE_MODE: "off", PORT: String(port), DECISIONS_FILE: decisions };
+    if (fresh) {
+      delete env.PIPELINE_MODE;
+      delete env.LLM_BACKEND;
+      env.CLAUDE_BIN = "/nonexistent/claude";
+    }
     // No key reaches the viewer, so even a broken kill switch could not call the API. No real-data
     // mode or candidate flags either: this runs on the committed synthetic run with today's defaults.
     for (const k of ["SUPPORT_PIPELINE_API_KEY", "ANTHROPIC_API_KEY", "REAL_DATA", "PIPELINE_FIXES",
@@ -184,6 +208,53 @@ async function runPass(browser, pass) {
   let meta = null;
   let run = null;
 
+  /** Polish 2: the first-visit card. Shown on a first visit, read once, reachable by keyboard; «فهمت»
+   *  hides it for good. On a phone it sits above the queue, so it never moves the ticket's action bar. */
+  async function introChecks() {
+    const where = await page.evaluate(() => {
+      const c = document.getElementById("intro");
+      const live = c.closest("[aria-live], [role=status], [role=alert], [role=log]");
+      return { parent: c.parentElement.id, first: c.parentElement.firstElementChild === c, live: !!live,
+        name: document.getElementById(c.getAttribute("aria-labelledby"))?.textContent,
+        tabs: [...c.querySelectorAll("dt")].map((d) => d.textContent.trim()) };
+    });
+    check(`first visit: the intro card is shown ${pass.phone ? "above the queue" : "above the ticket"}, named and not a live region`,
+      (await page.isVisible("#intro")) && where.parent === (pass.phone ? "agentNav" : "main") && where.first && !where.live
+      && where.name === "أول مرة هنا؟", JSON.stringify(where));
+    check("the intro explains the three working tabs in the tabs' own words and order (J8)", where.tabs.join("|") === "تحتاج تأكيد|متصعّدة|جاهزة"
+      && (await text("#intro")).includes("ما ينرسل شي للزبون بدونك"), where.tabs.join("|"));
+    if (pass.phone) {
+      await noHScroll("queue screen with the intro");
+      // Opening a ticket: the card stays with the queue; the ticket screen and its action bar are as always.
+      await page.locator("#queueList [role=option]").first().click();
+      await waitUntil(() => page.evaluate(() => document.body.dataset.screen === "ticket"), 3000, "the ticket screen");
+      const bar = await page.evaluate(() => [document.getElementById("actionBar").getBoundingClientRect().bottom, innerHeight,
+        document.getElementById("intro").getBoundingClientRect().height]);
+      check("phone: the intro does not move the ticket's action bar", Math.abs(bar[0] - bar[1]) <= 1 && bar[2] === 0, JSON.stringify(bar));
+      await page.locator("#agentMain .back-btn").first().click();
+      await page.focus("#helpBtn");   // the last control of the header: the card's button comes next
+    } else {
+      const node = await page.evaluateHandle(() => document.getElementById("intro"));
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.keyboard.press("j");
+      await page.keyboard.press("j");
+      await sleep(150);
+      check("the intro is drawn once (the same node after two ticket changes)", await page.evaluate((n) => n === document.getElementById("intro") && n.isConnected, node));
+      await page.focus(".skip");
+      await page.keyboard.press("Enter");   // the skip link lands on the ticket pane, the card first
+    }
+    await page.keyboard.press("Tab");
+    check("the intro's «فهمت» is the next stop by keyboard", (await page.evaluate(() => document.activeElement?.id)) === "introOk",
+      await page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName));
+    await shot(page, "first-visit");
+    await page.keyboard.press("Enter");
+    await sleep(100);
+    const after = await page.evaluate(() => ({ hidden: document.getElementById("intro").hidden, active: document.activeElement?.id || "",
+      saved: JSON.parse(localStorage.getItem("support-viewer-prefs-v1") || "{}").introSeen }));
+    check("«فهمت» hides the card, remembers it, and focus goes on to the work", after.hidden && after.saved === true
+      && (pass.phone ? after.active.startsWith("opt-") : after.active === "ticketTitle"), JSON.stringify(after));
+  }
+
   // --- 14. the 1 Nov review fixes (each check names its finding) ---
 
   async function freshPage(label, setup = null) {
@@ -284,6 +355,16 @@ async function runPass(browser, pass) {
         && (await t(p, "#titleChips")).includes((meta.teams[meta.subcategories[run.tickets.find((r) => r.ticket.id === flagged).result.recheck_alternative].team] || {}).label_ar || "?"),
       `${ticked} | ${await t(p, "#confirmBox")}`);
       await p.check('#choiceBox input[value="second"]');
+      // Polish 5: the refusal («أشّر على …») goes with its ticket.
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press("Control+Enter");
+      await waitUntil(async () => (await t(p, "#status")).includes("أشّر على"), 3000, "the refusal").catch(() => {});
+      const shownBefore = await p.evaluate(() => document.getElementById("toast").classList.contains("is-shown"));
+      await p.keyboard.press("j");
+      await sleep(200);
+      check("polish 5: the refusal goes when another ticket opens", shownBefore
+        && !(await p.evaluate(() => document.getElementById("toast").classList.contains("is-shown"))) && !(await t(p, "#ticketTitle")).includes(flagged),
+        `${shownBefore} | ${await t(p, "#status")}`);
     }
 
     // M2: a ticked promise is logged as an acknowledged warning (kinds only), and the tick says so.
@@ -493,8 +574,20 @@ async function runPass(browser, pass) {
     check("counter «خلصت 0 من 80»", /خلصت\s*0\s*من\s*80/.test(await text("#queueTitle")), await text("#queueTitle"));
     check("saved-run note and the no-send badge are shown",
       (await page.isVisible("#savedNote")) && (await text(".no-send")).includes("ما ينرسل شي للزبون تلقائياً"));
+    // Polish 4: each number on the strip means one thing. The note is about the whole run; the decided
+    // count is said once (the heading), with no «انحسمت» or «باقي» repeating it.
+    const head = await text(".queue-head");
+    check("the strip says what the system did with the run: «بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال.»",
+      (await text("#runNote")) === "بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال." && !head.includes("انحسمت") && !head.includes("باقي"),
+      `${await text("#runNote")} | ${head}`);
+    await introChecks();
     await shot(page, "inbox");
     if (pass.phone) await noHScroll("queue screen");
+    const pageFits = () => page.evaluate(() => [document.scrollingElement.scrollHeight, innerHeight]);
+    if (!pass.phone) {
+      const [sh, ih] = await pageFits();
+      check("agent mode: the page itself does not scroll, only its panes (J6)", sh <= ih, `${sh} > ${ih}`);
+    }
 
     // 2. No gold labels, model ids or marks anywhere in agent mode.
     {
@@ -552,6 +645,10 @@ async function runPass(browser, pass) {
 
     // 4. Undo with Ctrl+Z (the toast's button on a phone): logged as «undone» naming that decision.
     {
+      if (pass.phone) {
+        const kd = await page.evaluate(() => getComputedStyle(document.querySelector("#toastUndo kbd")).display);
+        check("phone: the toast's «تراجع» has no Ctrl+Z hint (J9)", kd === "none", kd);
+      }
       const approvedId = decisions().at(-1).id;
       const d = await act(() => (pass.phone ? page.click("#toastUndo") : page.keyboard.press("Control+z")), "the undo");
       check("undo logs «undone» with undoes = the approve's id", d.action === "undone" && d.undoes === approvedId && d.ticket_id === k1, JSON.stringify(d));
@@ -573,11 +670,26 @@ async function runPass(browser, pass) {
       if (pass.phone) await page.click("#approveBtn", { force: true }); else await page.keyboard.press("Control+Enter");
       await sleep(400);
       check("flagged: approving before the tick does nothing", decisions().length === n0 && (await selected()) === k2);
+      const toastOn = () => page.evaluate(() => document.getElementById("toast").classList.contains("is-shown"));
+      check("flagged: the refusal says what to tick", (await toastOn()) && (await text("#status")).includes("أشّر على"), await text("#status"));
       await shot(page, "flagged");
       await page.check("#ackBox");
       check("flagged: approve is enabled after the tick", (await page.getAttribute("#approveBtn", "aria-disabled")) === null);
+      check("a flagged row says «تحتاج تأكيد», like its tab (J8)", (await text(`#opt-${k2} .row-word`)) === "تحتاج تأكيد", await text(`#opt-${k2} .row-word`));
+      check("flagged: the refusal goes as soon as the box is ticked (polish 5)", !(await toastOn()) && !(await page.locator("#approveWhy").count()),
+        await text("#status"));
       const d = await act(() => page.click("#approveBtn"), "the flagged approve");
       check(`flagged approve logs «approved» for ${k2}`, d.action === "approved" && d.ticket_id === k2 && d.pipeline_outcome === "flagged", JSON.stringify(d));
+      // A P1 escalation waits, more urgent than every flagged P2: the inbox moves there and says why.
+      check("after the flagged approve the toast says the inbox moved to «متصعّدة» for an urgent ticket (polish 3)",
+        (await text("#status")).includes("انتقلنا لـ«متصعّدة»: فيها تذكرة عاجلة")
+        && (await page.getAttribute("#tab-escalated", "aria-selected")) === "true", await text("#status"));
+      // J9: the decision's toast (and its undo) stays with the inbox: «كيف يشتغل» opens without it.
+      await page.click("#modeProcess");
+      await page.waitForSelector("#ovTitle", { timeout: 10000 });
+      check("the decision's toast goes when «كيف يشتغل» opens (J9)", !(await toastOn()), await text("#status"));
+      await page.click("#modeAgent");
+      await page.waitForSelector("#ticketTitle", { state: "attached", timeout: 10000 });
     }
 
     // 6. An edit that asks for the code blocks approval until it is gone; a harmless edit logs «edited».
@@ -598,9 +710,13 @@ async function runPass(browser, pass) {
       await sleep(500);
       check("Ctrl+Enter inside a blocked draft does not approve", decisions().length === n0 && (await selected()) === k3);
       await shot(page, "blocked");
+      const refused = await page.evaluate(() => document.getElementById("toast").classList.contains("is-shown")
+        && document.getElementById("status").textContent.includes("رمز"));
       await page.click("text=رجّع المسودة الأصلية");
       await waitUntil(async () => (await page.getAttribute("#approveBtn", "aria-disabled")) === null, 4000, "approve to be enabled again");
       check("restoring the draft enables approval", true);
+      check("the refusal about the code goes once the request is gone (polish 5)", refused
+        && !(await page.evaluate(() => document.getElementById("toast").classList.contains("is-shown"))), await text("#status"));
       // a harmless edit: «edited», with a count of changed characters and no text in the log
       await page.click("#draft");
       await page.evaluate(() => { const t = document.getElementById("draft"); t.setSelectionRange(t.value.length, t.value.length); });
@@ -619,10 +735,18 @@ async function runPass(browser, pass) {
       k4 = await openTab("escalated");
       check(`escalated ${k4}: no draft box`, (await page.locator("#agentMain textarea").count()) === 0);
       check("escalated: the team note is shown, with the fraud banner", (await page.isVisible("#handoffTitle")) && (await text("#agentMain .callout-bad")).includes("احتمال احتيال"), await text("#agentMain .callout-bad"));
+      const handoff = run.tickets.find((r) => r.ticket.id === k4).result.handoff_ar || "";
+      if (/^الخلاصة:/m.test(handoff)) {
+        check("escalated: «الخلاصة» is marked as written by a model, the rest by rules (J2)", (await text(".handoff .dt-tag")) === "كتبها نموذج"
+          && (await text(".handoff .hint")).includes("بس «الخلاصة» كتبها نموذج"), await text(".handoff .hint"));
+      }
       if (pass.phone) await noHScroll("escalated ticket");
       await shot(page, "escalated");
       const d = await act(() => (pass.phone ? page.click("#forwardBtn") : page.keyboard.press("f")), "the forward");
       check(`forward logs «forwarded» for ${k4}`, d.action === "forwarded" && d.ticket_id === k4 && d.pipeline_outcome === "escalated", JSON.stringify(d));
+      check("after a forward the tab counts the 5 still open, the note still the run's 6",
+        (await text("#tab-escalated .tab-count")).replace(/\D/g, "") === "5" && (await text("#runNote")).includes("صعّد 6 تذاكر"),
+        `${await text("#tab-escalated .tab-count")} | ${await text("#runNote")}`);
     }
 
     // 8. Reload: the decided tickets come back from the log.
@@ -631,6 +755,7 @@ async function runPass(browser, pass) {
       await page.waitForSelector("#ticketTitle", { state: "attached", timeout: 15000 });
       await waitUntil(async () => /خلصت\s*4\s*من\s*80/.test(await text("#queueTitle")), 5000, "the counter after reload").catch(() => {});
       check("after a reload the counter is «خلصت 4 من 80»", /خلصت\s*4\s*من\s*80/.test(await text("#queueTitle")), await text("#queueTitle"));
+      check("after a reload the dismissed intro stays hidden", await page.evaluate(() => document.getElementById("intro").hidden));
       if (pass.phone) {
         if (await page.evaluate(() => document.body.dataset.screen === "ticket")) await page.locator("#agentMain .back-btn").first().click();
         await page.click("#tab-done");
@@ -659,6 +784,14 @@ async function runPass(browser, pass) {
       await page.waitForSelector("#ovTitle", { timeout: 10000 });
       const stats = await text(".overview .stats");
       check(`overview: type ${EXPECT.type}, priority ${EXPECT.priority}`, stats.includes(EXPECT.type) && stats.includes(EXPECT.priority), stats.slice(0, 200));
+      if (!pass.phone) {
+        const [sh, ih] = await pageFits();
+        check("process mode: the page itself does not scroll (no caption escapes its pane) (J6)", sh <= ih, `${sh} > ${ih}`);
+      }
+      await page.waitForSelector(".decisions-sum .stats", { timeout: 5000 }).catch(() => {});
+      const tiles = await text(".decisions-sum .stats");
+      check("the decision tiles read with any number («تذاكر انحسمت», «قرارات أسرع …») (J8)", tiles.includes("تذاكر انحسمت")
+        && tiles.includes("قرارات أسرع") && !tiles.includes("تذكرة انحسمت"), tiles);
       await shot(page, "process-overview");
       if (pass.phone) await noHScroll("process overview");
       await page.locator("table.grid tbody tr.click", { hasText: "t2-0001" }).first().click();   // drafted: classify and draft
@@ -667,6 +800,15 @@ async function runPass(browser, pass) {
       const gold = await text(".trace .gold .note");
       check(`trace shows the model input and output (${io} blocks), the rationale label and the gold table`, io >= 2
         && (await text(".trace")).includes("تفسير النموذج (إنكليزي)") && gold.includes("الجواب المتوقع") && !gold.includes("undefined"), gold);
+      // Polish 6: a stage shows its own time (since the event before it), not the time since the start.
+      const evs = run.tickets.find((r) => r.ticket.id === "t2-0001").events;
+      const want = {};
+      evs.forEach((e, i) => { if (e.status === "done" && e.stage !== "result") want[e.stage] = e.ms - (i ? evs[i - 1].ms : 0); });
+      const shown = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll(".stage")].map((x) => [x.id.slice(3), x.querySelector(".state").textContent])));
+      const label = (ms) => (ms < 50 ? "خذت أقل من 0.1 ث" : `خذت ${(ms / 1000).toFixed(1)} ث`);
+      const wrong = Object.entries(want).filter(([st, ms]) => shown[st] !== label(ms));
+      check(`trace: each stage shows its own time (classify ${shown.classify}, gate ${shown.gate}), the total says «بالمجموع»`,
+        wrong.length === 0 && want.gate < 50 && (await text(".trace > .note")).includes("بالمجموع"), JSON.stringify({ wrong, shown }));
       await shot(page, "process-trace");
       if (pass.phone) await noHScroll("process trace");
       await cspOf(page, "process");
@@ -763,6 +905,316 @@ async function runPass(browser, pass) {
   check("no console errors, CSP violations or requests to another host", problems.length === 0, problems.slice(0, 8).join(" | "));
 }
 
+// --- the fresh-clone pass: the first visit, the honest no-key state, the README screenshots ---
+
+async function runFresh(browser, pass) {
+  const srv = await startServer({ fresh: true });
+  const host = `127.0.0.1:${srv.port}`;
+  const problems = [];
+  let streams = 0;
+  const check = (name, ok, detail = "") => results.push({ pass: pass.name, name, ok: !!ok, detail: ok ? "" : String(detail) });
+  const demo = async (p, name) => { if (DEMO) await p.screenshot({ path: path.join(DEMO, `${name}.png`) }); };
+  const t = (p, sel) => p.locator(sel).first().textContent({ timeout: 2000 }).catch(() => "");
+  const shown = (p) => p.evaluate(() => document.getElementById("toast").classList.contains("is-shown"));
+  const decisions = () => readDecisions(srv.decisions);
+  const contexts = [];
+  async function open(viewport, scheme, label, init = null, setup = null) {
+    const ctx = await browser.newContext({ viewport, colorScheme: scheme, hasTouch: viewport.width < 500 });
+    contexts.push(ctx);
+    const p = await ctx.newPage();
+    p.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") problems.push(`${label} console ${m.type()}: ${m.text()}`); });
+    p.on("pageerror", (e) => problems.push(`${label} page error: ${e.message}`));
+    p.on("request", (r) => {
+      const u = r.url();
+      if (u.startsWith("data:")) return;
+      if (new URL(u).host !== host) problems.push(`${label} request to another host: ${u}`);
+      if (u.endsWith("/api/stream")) streams++;
+    });
+    // Belt and braces: this pass never starts a live run, and the browser could not send one.
+    await p.route("**/api/stream", (route) => route.abort());
+    await p.addInitScript(() => {
+      window.__csp = [];
+      document.addEventListener("securitypolicyviolation", (e) => window.__csp.push(`${e.violatedDirective} ${e.blockedURI}`));
+    });
+    if (init) await p.addInitScript(init);
+    if (setup) await setup(p);
+    await p.goto(srv.base);
+    await p.waitForSelector("#ticketTitle", { state: "attached", timeout: 15000 });
+    await p.evaluate(() => document.fonts.ready.then(() => true));
+    await sleep(250);
+    return p;
+  }
+  async function done(p, label) {
+    for (const x of await p.evaluate(() => window.__csp || []).catch(() => [])) problems.push(`${label} CSP violation: ${x}`);
+  }
+  /** Open a ticket by id on a desktop page: its tab (keys 1-4), then its row. */
+  async function openId(p, key) {
+    for (const k of ["1", "2", "3", "4"]) {
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press(k);
+      await sleep(60);
+      const row = p.locator(`#queueList [data-key="${key}"]`);
+      if (await row.count()) {
+        await row.click();
+        await sleep(150);
+        await p.evaluate(() => { document.getElementById("main").scrollTop = 0; });
+        return;
+      }
+    }
+    throw new Error(`no row for ${key}`);
+  }
+  const DRAFTED = "t2-0002", FLAGGED = "t2-0009", ESCALATED = "t2-0025";   // a P1 draft with facts, a disagreement, fraud
+
+  try {
+    const log = srv.log();
+    check("start-up line: the viewer runs on the API backend by default", log.includes("backend: api, the viewer's default"), log);
+    check("start-up line: with no key, live runs are off and it says why", log.includes("live runs off: no API key"), log);
+
+    // 1. Desktop, first visit.
+    const p = await open(pass.viewport, "light", "fresh");
+    const meta = await p.evaluate(async () => {
+      const token = document.querySelector('meta[name="viewer-token"]').content;
+      return fetch("/api/meta", { headers: { "X-Viewer-Token": token } }).then((r) => r.json());
+    });
+    check("/api/meta: the API backend, full mode, live runs off for want of a key", meta.backend === "api" && meta.mode === "full"
+      && meta.live.available === false && meta.live.cause === "no_key", JSON.stringify({ backend: meta.backend, mode: meta.mode, live: meta.live }));
+    check("no kill-switch banner (PIPELINE_MODE is not set)", await p.evaluate(() => document.getElementById("banners").hidden));
+    check("the new-ticket button is visibly off (dashed) and says why (J7)", (await p.getAttribute("#newTicket", "class")).includes("is-unavailable")
+      && (await t(p, "#newTicketWhy")) === meta.live.reason_ar && (await p.getAttribute("#newTicket", "title")) === meta.live.reason_ar
+      && (await p.evaluate(() => getComputedStyle(document.getElementById("newTicket")).borderStyle)) === "dashed", await t(p, "#newTicketWhy"));
+    check("first visit: the intro card is at the top of the ticket pane", (await p.isVisible("#intro"))
+      && await p.evaluate(() => document.getElementById("main").firstElementChild.id === "intro"));
+    await demo(p, "inbox-first-visit");
+    await p.click("#newTicket");
+    check("the new-ticket dialog says live runs are off and what turns them on, with no box to type in (J7)",
+      (await t(p, "#newNote")).startsWith(meta.live.reason_ar) && (await t(p, "#newNote")).includes("مفتاح API")
+      && await p.isDisabled("#newRun") && !(await p.isVisible("#newText")) && !(await p.isVisible("#newCount")), await t(p, "#newNote"));
+    await p.keyboard.press("Escape");
+    await p.click("#introOk");
+    check("«فهمت» hides the card", await p.evaluate(() => document.getElementById("intro").hidden));
+    const fits = (pg) => pg.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight);
+
+    // 2. The ticket kinds, for the screenshots.
+    await openId(p, DRAFTED);
+    check(`${DRAFTED}: a draft, approve on`, (await p.locator("#draft").count()) === 1 && (await p.getAttribute("#approveBtn", "aria-disabled")) === null);
+    await demo(p, "inbox-desktop");
+    await openId(p, FLAGGED);
+    await p.evaluate(() => document.getElementById("choiceBox").scrollIntoView({ block: "center" }));
+    await sleep(150);
+    check(`${FLAGGED}: the two models' answers are shown to choose from`, (await p.locator("#choiceBox input[type=radio]").count()) === 2
+      && await p.isVisible("#choiceBox"));
+    await demo(p, "inbox-flagged");
+    await openId(p, ESCALATED);
+    check(`${ESCALATED}: no draft, the team note and forward`, (await p.locator("#draft").count()) === 0 && await p.isVisible("#handoffTitle")
+      && await p.isVisible("#forwardBtn"));
+    await demo(p, "inbox-escalated");
+
+    // 3. «كيف يشتغل»: the overview, and a trace with each stage's own time.
+    await p.click("#modeProcess");
+    await p.waitForSelector("#ovTitle", { timeout: 10000 });
+    await sleep(300);
+    check("«كيف يشتغل» says live runs are off: no API key", (await t(p, ".pnav-live")).includes(LIVE_NO_KEY), await t(p, ".pnav-live"));
+    check("process mode: the page itself does not scroll (J6)", await fits(p));
+    const lede = await t(p, ".overview .lede");
+    check("the overview gives the run's elapsed time as such, with the tickets run at once (J5)", lede.includes("التشغيل كله خذ")
+      && lede.includes("5 تذاكر سوة") && !lede.includes("بالمجموع"), lede);
+    // J8e: the model pair reads the same way (classifier / drafter) in the lede and in the side panel.
+    const order = await p.evaluate(() => [".overview .lede", "#pMeta", ".pnav-live"].map((sel) => {
+      const x = (needle) => { const w = document.createTreeWalker(document.querySelector(sel), NodeFilter.SHOW_TEXT); let n;
+        while ((n = w.nextNode())) { const i = n.data.indexOf(needle); if (i >= 0) { const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 3); return r.getBoundingClientRect().left; } } return null; };
+      return x("claude-haiku") < x("claude-sonnet");
+    }));
+    check("the model pair reads classifier / drafter in the lede and the side panel (J8)", order.every(Boolean), JSON.stringify(order));
+    await demo(p, "process-overview");
+    await p.locator("table.grid tbody tr", { hasText: FLAGGED }).first().locator(".row-open").click();
+    await p.waitForSelector(".trace .gold table", { timeout: 10000 });
+    const times = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll(".stage")].map((x) => [x.id.slice(3), x.querySelector(".state").textContent])));
+    check(`trace of ${FLAGGED}: the rule-only gate shows its own time, not the time since the start`, times.gate === "خذت أقل من 0.1 ث"
+      && /^خذت \d+\.\d ث$/.test(times.recheck || ""), JSON.stringify(times));
+    await p.evaluate(() => {
+      const m = document.getElementById("main");
+      m.scrollTop += document.getElementById("st-classify").getBoundingClientRect().top - m.getBoundingClientRect().top - 16;
+    });
+    await sleep(150);
+    await demo(p, "process-trace");
+    // J3: the cleaned text reads a spaced reference in the order it was written, like the ticket above it.
+    await p.locator("#pList .prow", { hasText: DRAFTED }).first().click();
+    await p.waitForSelector(".trace .gold table", { timeout: 10000 });
+    const ref = await p.evaluate(() => [".slip", ".cleaned"].map((sel) => {
+      const x = (needle) => { const w = document.createTreeWalker(document.querySelector(sel), NodeFilter.SHOW_TEXT); let n;
+        while ((n = w.nextNode())) { const i = n.data.indexOf(needle); if (i >= 0) { const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + needle.length); return r.getBoundingClientRect().left; } } return null; };
+      return [x("9776"), x("593217")];
+    }));
+    check(`trace of ${DRAFTED}: «9776 593217» reads in the written order in the ticket and in the cleaned text (J3)`,
+      ref.every(([a, b]) => a != null && b != null && a < b), JSON.stringify(ref));
+    // RR-2: an escalation's last second is the team note's «الخلاصة» (a model call): the result box says so.
+    await p.locator("#pList .prow", { hasText: ESCALATED }).first().click();
+    await p.waitForSelector(".trace .gold table", { timeout: 10000 });
+    const res = await t(p, "#pResult .result");
+    check(`trace of ${ESCALATED}: the result box gives the summary call and its own time (RR-2)`,
+      res.includes("«الخلاصة» بالملاحظة كتبها نموذج التصنيف") && /خذت 1\.\d ث/.test(res), res.slice(0, 300));
+    // 4. Storage blocked (a private window, a policy): the page works, the card shows and closes.
+    const pb = await open(pass.viewport, "light", "no-storage", () => {
+      Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new DOMException("blocked", "SecurityError"); } });
+    });
+    const okB = (await pb.isVisible("#intro")) && (await pb.locator("#queueList [role=option]").count()) > 0;
+    await pb.focus("#introOk");
+    await pb.setViewportSize(pass.phoneViewport);
+    await sleep(250);
+    const toPhone = await pb.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
+    await pb.locator("#agentMain .back-btn").first().click();   // the phone's queue screen: the card shows there
+    await pb.focus("#introOk");
+    await pb.setViewportSize(pass.viewport);
+    await sleep(250);
+    const toDesk = await pb.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);
+    check("crossing 720 px with «فهمت» focused: focus stays on it, or on the ticket heading when the card is hidden (RR-1)",
+      toPhone === "ticketTitle" && toDesk === "introOk", `${toPhone} | ${toDesk}`);
+    await pb.click("#introOk");
+    check("with storage blocked the inbox works, and the card shows and closes", okB && await pb.evaluate(() => document.getElementById("intro").hidden));
+    await done(pb, "no-storage");
+
+    // 4b. Pages fed a changed /api/meta or run (routes in this browser only; the server is as above).
+    // J4: the author's cache-only demo is labelled as a replay: a banner, the dialog, the stage times.
+    const json = (pattern, edit) => (pg) => pg.route(pattern, async (r) => {
+      const res = await r.fetch();
+      const j = await res.json();
+      edit(j);
+      await r.fulfill({ response: res, json: j });
+    });
+    const pc = await open(pass.viewport, "light", "cache-only", null, async (pg) => {
+      await json("**/api/meta", (j) => { j.cache_only = true; j.live = { available: true, reason_ar: null }; })(pg);
+      await json("**/api/run?name=*", (j) => j.tickets.forEach((r) => r.events.forEach((e) => { if (e.data?.usage) e.data.usage.cached = true; })))(pg);
+    });
+    await pc.click("#introOk");
+    const banner = await t(pc, "#banners");
+    await pc.click("#newTicket");
+    const cacheNote = await t(pc, "#newNote");
+    await pc.keyboard.press("Escape");
+    await pc.click("#modeProcess");
+    await pc.waitForSelector("#ovTitle", { timeout: 10000 });
+    await pc.locator("table.grid tbody tr", { hasText: DRAFTED }).first().locator(".row-open").click();
+    await pc.waitForSelector(".trace .gold table", { timeout: 10000 });
+    const cls = await t(pc, "#st-classify .state");
+    check("cache-only: a banner, the dialog and the side panel say it replays stored replies, and each model stage «من الكاش» (J4)",
+      banner.includes("إعادة من الكاش") && cacheNote.includes("إعادة من الكاش") && (await t(pc, ".pnav-live")).includes("إعادة من الكاش")
+      && cls.includes("من الكاش") && !(await t(pc, "#st-gate .state")).includes("الكاش"), `${banner} | ${cacheNote} | ${cls}`);
+    await done(pc, "cache-only");
+    // RR-3: the run note with one escalation, and with a reason only some of them share.
+    const keepEsc = (keep, extra) => json("**/api/run?name=*", (j) => {
+      let n = 0;
+      j.tickets = j.tickets.filter((r) => r.result.outcome !== "escalated" || ++n <= keep);
+      if (extra) j.tickets.filter((r) => r.result.outcome === "escalated").slice(0, 2).forEach((r) => r.result.flags.push(extra));
+    });
+    const p1 = await open(pass.viewport, "light", "one-escalation", null, keepEsc(1));
+    const one = await t(p1, "#runNote");
+    await done(p1, "one-escalation");
+    const p6 = await open(pass.viewport, "light", "mixed-reasons", null, keepEsc(6, "account_risk"));
+    const mixed = await t(p6, "#runNote");
+    await done(p6, "mixed-reasons");
+    check("the run note: «صعّد تذكرة وحدة: احتمال احتيال.» and «كلها …، ومنها 2 …» (RR-3)",
+      one === "بهالتشغيل النظام صعّد تذكرة وحدة: احتمال احتيال." && mixed.startsWith("بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال، ومنها 2 "),
+      `${one} | ${mixed}`);
+
+    // 5. The phone (390 px): the card is above the queue; a ticket opens with its action bar in place.
+    const pp = await open(pass.phoneViewport, "light", "phone");
+    check("phone: the intro card is above the queue", (await pp.isVisible("#intro"))
+      && await pp.evaluate(() => document.getElementById("intro").parentElement.id === "agentNav"));
+    const [sw, iw] = await pp.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+    check("phone: no sideways scroll with the card", sw <= iw, `${sw} > ${iw}`);
+    await pp.click("#introOk");
+    await pp.click("#tab-drafted");
+    await pp.locator(`#queueList [data-key="${DRAFTED}"]`).click();
+    await waitUntil(() => pp.evaluate(() => document.body.dataset.screen === "ticket"), 3000, "the phone ticket screen");
+    await sleep(200);
+    const bar = await pp.evaluate(() => [document.getElementById("actionBar").getBoundingClientRect().bottom, innerHeight]);
+    check("phone: the action bar sits at the bottom", Math.abs(bar[0] - bar[1]) <= 1, JSON.stringify(bar));
+    // For the image: the end of the customer's message, the draft and the action bar on one screen.
+    const seen = await pp.evaluate(() => {
+      const c = document.querySelector(".composer").getBoundingClientRect();
+      const top = document.getElementById("actionBar").getBoundingClientRect().top;
+      scrollBy(0, c.height <= top - 140 ? c.bottom - (top - 12) : c.top - 140);
+      const head = document.querySelector(".composer-label").getBoundingClientRect(), box = document.getElementById("draft").getBoundingClientRect();
+      return [head.top >= 0 && head.bottom <= document.getElementById("actionBar").getBoundingClientRect().top, box.top < document.getElementById("actionBar").getBoundingClientRect().top - 60];
+    });
+    await sleep(150);
+    check("phone: the draft's heading and text show above the action bar (J10)", seen.every(Boolean), JSON.stringify(seen));
+    await demo(pp, "inbox-phone");
+    await done(pp, "phone");
+
+    // 6. Dark.
+    const pd = await open(pass.viewport, "dark", "dark");
+    await pd.click("#introOk");
+    await openId(pd, DRAFTED);
+    await demo(pd, "inbox-dark");
+    await done(pd, "dark");
+
+    // 7. Decide all 80 through the page: two edits, a take-over and a priority correction with their
+    // reasons, every other draft approved (ticked first where it asks) and every escalation forwarded.
+    // A script decides in well under 3 s each: the summary itself says these are not an opinion.
+    await p.click("#modeAgent");   // back from «كيف يشتغل» only now: the clock was paused meanwhile
+    await p.waitForSelector("#ticketTitle", { state: "attached" });
+    await p.evaluate(() => document.getElementById("main").focus());
+    let edits = 0, took = 0, fixed = 0, moved = 0, ranOut = 0;
+    for (let guard = 0; guard < 200; guard++) {
+      if (await p.locator("#doneTitle").count()) break;
+      const st = await p.evaluate(() => ({ fwd: !!document.getElementById("forwardBtn"), ack: !!document.getElementById("ackBox"),
+        draft: !!document.getElementById("draft"), key: document.querySelector("#queueList [aria-selected=true]")?.dataset.key }));
+      const n0 = decisions().length;
+      if (st.fwd) {
+        await p.click("#forwardBtn");
+      } else if (st.draft && !st.ack && edits < 2) {
+        edits++;
+        await p.focus("#draft");
+        await p.evaluate(() => { const x = document.getElementById("draft"); x.setSelectionRange(x.value.length, x.value.length); });
+        await p.keyboard.type(" وشكراً لصبرك.");
+        await p.evaluate(() => { document.getElementById("reasonBox").open = true; });
+        await p.locator(".reason-chip", { hasText: "الأسلوب ما يناسب" }).click();
+        await waitUntil(async () => !(await p.locator("#draftChecks .checks-state").count())
+          && (await p.getAttribute("#approveBtn", "aria-disabled")) === null, 5000, "the edit to be checked");
+        await p.click("#approveBtn");
+      } else if (st.draft && !st.ack && took < 1) {
+        took++;
+        await p.click("#takeBtn");
+        await p.locator(".reason-chip", { hasText: "ناقصه سؤال للزبون" }).click();
+        await p.click("#takeBtn");
+      } else if (st.draft && !st.ack && fixed < 1) {
+        fixed++;
+        await p.click("#fixToggle");
+        await p.selectOption("#fixPrio", (await p.inputValue("#fixPrio")) === "P1" ? "P2" : "P1");
+        await p.evaluate(() => { document.getElementById("reasonBox").open = true; });
+        await p.locator(".reason-chip", { hasText: "الأولوية غلط" }).click();
+        await p.click("#approveBtn");
+      } else {
+        if (st.ack) await p.check("#ackBox");
+        await p.click("#approveBtn");
+      }
+      await waitUntil(() => decisions().length > n0, 5000, `the decision on ${st.key}`);
+      await waitUntil(async () => (await t(p, "#status")).includes(st.key), 3000, "its toast");
+      if ((await t(p, "#status")).includes("انتقلنا")) moved++;
+      if ((await t(p, "#status")).includes("ماكو بعد تذاكر «")) ranOut++;
+    }
+    await p.waitForSelector("#doneTitle", { timeout: 5000 });
+    await p.click("#toastClose").catch(() => {});
+    await sleep(300);
+    const sum = await t(p, ".all-done");
+    check("all 80 decided through the page: the session summary counts them", decisions().length === 80
+      && (await t(p, "#queueTitle")).replace(/\s+/g, " ").includes("خلصت 80 من 80") && sum.includes("قررت على 80 تذكرة")
+      && sum.includes("انحسمت بأقل من 3 ثواني"), `${decisions().length} | ${sum.slice(0, 160)}`);
+    check(`each move to another tab was said in the toast (${moved} times)`, moved >= 2, String(moved));
+    check(`a tab that ran out was said with «ماكو بعد», «خلصت» kept for decisions (${ranOut} times) (J8)`, ranOut >= 1
+      && !(await t(p, "#status")).includes("خلصت تذاكر"), String(ranOut));
+    await demo(p, "inbox-done");
+    await done(p, "fresh");
+    check("no live run was started (no request to /api/stream)", streams === 0, String(streams));
+  } catch (e) {
+    check("the pass ran to its end", false, e.stack || e.message);
+  } finally {
+    for (const c of contexts) await c.close().catch(() => {});
+    await stopServer(srv);
+  }
+  check("no console errors, CSP violations or requests to another host", problems.length === 0, problems.slice(0, 8).join(" | "));
+}
+
 // --- main ---
 
 (async () => {
@@ -772,7 +1224,7 @@ async function runPass(browser, pass) {
     browser = await chromium.launch();
     for (const pass of PASSES) {
       const t0 = Date.now();
-      await runPass(browser, pass);
+      await (pass.fresh ? runFresh(browser, pass) : runPass(browser, pass));
       const mine = results.filter((r) => r.pass === pass.name);
       console.log(`\n${pass.name} (${((Date.now() - t0) / 1000).toFixed(1)} s): ${mine.filter((r) => r.ok).length}/${mine.length} passed`);
       for (const r of mine) console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.name}${r.ok ? "" : `\n         ${r.detail.split("\n").slice(0, 6).join("\n         ")}`}`);

@@ -728,10 +728,85 @@ def test_edit_chars_is_fast_on_long_rewrites():
 def test_main_refuses_a_bad_budget(monkeypatch, capsys):
     monkeypatch.setenv("LLM_BUDGET_USD", "nan")
     monkeypatch.delenv("REAL_DATA", raising=False)
+    monkeypatch.setenv("LLM_BACKEND", "api")   # main() sets the viewer's default when it is unset
     monkeypatch.setattr(server, "make_server", lambda *a, **k: pytest.fail("the server must not start"))
     with pytest.raises(SystemExit) as stop:
         server.main()
     assert stop.value.code == 1 and "LLM_BUDGET_USD" in capsys.readouterr().err
+
+
+def test_viewer_backend_default_is_the_api_unless_llm_backend_is_set():
+    env = {}
+    assert server.default_viewer_backend(env) is True and env["LLM_BACKEND"] == "api"
+    env = {"LLM_BACKEND": "  "}   # blank counts as unset (backend() would refuse it)
+    assert server.default_viewer_backend(env) is True and env["LLM_BACKEND"] == "api"
+    for given in ("cli", "api", "nonsense"):   # an explicit value is kept; a wrong one is refused at start-up
+        env = {"LLM_BACKEND": given}
+        assert server.default_viewer_backend(env) is False and env == {"LLM_BACKEND": given}
+
+
+class _NoServe:
+    """make_server() stand-in: start-up prints its line, then serve_forever() returns at once."""
+    server_address = ("127.0.0.1", 8123)
+
+    def serve_forever(self):
+        raise KeyboardInterrupt
+
+
+def _start_viewer(monkeypatch, capsys, **env):
+    # setenv first: monkeypatch then restores even a variable main() sets that was not there before.
+    for k in ("LLM_BACKEND", "SUPPORT_PIPELINE_API_KEY", "ANTHROPIC_API_KEY", "PIPELINE_MODE", "LLM_BUDGET_USD",
+              "REAL_DATA", "LLM_CACHE_DIR", "LLM_CACHE_ONLY", "LLM_PROFILE", "PIPELINE_FIXES"):
+        monkeypatch.setenv(k, "x")
+        monkeypatch.delenv(k)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(server, "make_server", lambda *a, **k: _NoServe())
+    server.main()
+    return capsys.readouterr().out, os.environ.get("LLM_BACKEND")
+
+
+def test_viewer_starts_on_the_api_backend_with_live_runs_off_and_no_key(monkeypatch, capsys):
+    out, chosen = _start_viewer(monkeypatch, capsys)
+    assert chosen == "api"
+    assert "backend: api, the viewer's default" in out
+    assert "live runs off: no API key; set SUPPORT_PIPELINE_API_KEY" in out
+    assert server.live_status()["available"] is False and server.live_status()["cause"] == "no_key"
+    assert server.meta()["backend"] == "api"
+
+
+def test_viewer_with_a_key_runs_live_on_the_api_under_the_cap(monkeypatch, capsys):
+    out, chosen = _start_viewer(monkeypatch, capsys, SUPPORT_PIPELINE_API_KEY="placeholder-not-a-real-key")
+    assert chosen == "api" and server.live_status()["available"] is True
+    assert f"live runs on, API spending capped at ${server.budget_usd():g} for this viewer" in out
+    assert "LLM_CACHE_ONLY" not in out and server.meta()["cache_only"] is False
+
+
+def test_viewer_says_when_it_replays_the_cache_and_keeps_a_small_cap_readable(monkeypatch, capsys):
+    # The author's demo: a placeholder key, cache only, a $0.001 cap. Nothing is called (make_server is stubbed).
+    out, _ = _start_viewer(monkeypatch, capsys, SUPPORT_PIPELINE_API_KEY="placeholder-not-a-real-key",
+                           LLM_BACKEND="api", LLM_CACHE_ONLY="1", LLM_CACHE_DIR="runs/cache", LLM_BUDGET_USD="0.001")
+    assert "API spending capped at $0.001 for this viewer" in out   # not "$0.00"
+    assert "replaying the response cache only (LLM_CACHE_ONLY=1), so no model is called" in out
+    assert server.meta()["cache_only"] is True
+
+
+def test_viewer_refuses_an_unknown_backend_in_one_line(monkeypatch, capsys):
+    monkeypatch.setattr(server, "make_server", lambda *a, **k: pytest.fail("the server must not start"))
+    for k in ("REAL_DATA", "PIPELINE_MODE", "LLM_BUDGET_USD"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("LLM_BACKEND", "nonsense")
+    with pytest.raises(SystemExit) as stop:
+        server.main()
+    err = capsys.readouterr().err
+    assert stop.value.code == 1 and "Not starting the viewer: Unknown LLM backend 'nonsense'" in err
+    assert "Traceback" not in err
+
+
+def test_viewer_keeps_an_explicit_cli_backend(monkeypatch, capsys):
+    out, chosen = _start_viewer(monkeypatch, capsys, LLM_BACKEND="cli", CLAUDE_BIN="/nonexistent/claude")
+    assert chosen == "cli"
+    assert "backend: cli, from LLM_BACKEND" in out and "live runs off: no claude CLI" in out
 
 
 def test_edit_chars_counts_changed_characters():

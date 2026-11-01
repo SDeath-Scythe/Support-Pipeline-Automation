@@ -116,6 +116,15 @@ export function fmtSeconds(s) {
   return [num(String(m)), " د ", num(String(r)), " ث"];
 }
 
+/** A pipeline event's own time in ms (e.own): its e.ms counts from the ticket's start, and the stages run
+ *  one after another, so a stage took the time since the event just before it. Sets and returns e. */
+export function stampOwn(prev, e) {
+  if (e && typeof e.ms === "number" && e.own == null) {
+    e.own = Math.max(0, e.ms - (typeof prev?.ms === "number" ? prev.ms : 0));
+  }
+  return e;
+}
+
 export function median(xs) {
   const a = xs.filter((x) => typeof x === "number" && isFinite(x)).sort((p, q) => p - q);
   if (!a.length) return null;
@@ -222,7 +231,8 @@ export function spanned(text, spans, plain = (t) => t) {
 // --- preferences: never ticket text, drafts or edits ---
 
 const PREF_KEY = "support-viewer-prefs-v1";
-const PREF_DEFAULTS = { mode: "agent", singleKeys: true, whyOpen: true, source: null };
+// introSeen: the first-visit card («أول مرة هنا؟») was dismissed with «فهمت».
+const PREF_DEFAULTS = { mode: "agent", singleKeys: true, whyOpen: true, source: null, introSeen: false };
 export function loadPrefs() {
   try {
     const raw = JSON.parse(localStorage.getItem(PREF_KEY) || "{}");
@@ -231,6 +241,7 @@ export function loadPrefs() {
     if (typeof raw.singleKeys === "boolean") out.singleKeys = raw.singleKeys;
     if (typeof raw.whyOpen === "boolean") out.whyOpen = raw.whyOpen;
     if (typeof raw.source === "string" && raw.source.length < 300) out.source = raw.source;
+    if (typeof raw.introSeen === "boolean") out.introSeen = raw.introSeen;
     return out;
   } catch {
     return { ...PREF_DEFAULTS };
@@ -238,8 +249,8 @@ export function loadPrefs() {
 }
 export function savePrefs(prefs) {
   try {
-    const { mode, singleKeys, whyOpen, source } = prefs;
-    localStorage.setItem(PREF_KEY, JSON.stringify({ mode, singleKeys, whyOpen, source }));
+    const { mode, singleKeys, whyOpen, source, introSeen } = prefs;
+    localStorage.setItem(PREF_KEY, JSON.stringify({ mode, singleKeys, whyOpen, source, introSeen }));
   } catch { /* private window or blocked storage: the page works without it */ }
 }
 

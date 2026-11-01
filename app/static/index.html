@@ -50,6 +50,28 @@
   </nav>
 
   <main id="main" class="pane pane-main" tabindex="-1">
+    <!-- The first-visit card (main.js shows it until «فهمت»). Drawn once, never re-rendered and not a live
+         region, so it is read once in reading order. On a phone main.js moves it above the queue. The tabs
+         are explained in the queue's order. -->
+    <section id="intro" class="intro" aria-labelledby="introTitle" hidden>
+      <h2 id="introTitle" class="intro-title">أول مرة هنا؟</h2>
+      <p class="intro-lede">النظام رتّب التذاكر وكتب مسودات ردود. انت تقرر: ما ينرسل شي للزبون بدونك.</p>
+      <dl class="intro-tabs">
+        <div class="st-flagged">
+          <dt><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>تحتاج تأكيد</dt>
+          <dd>تأكد من النقطة المكتوبة فوق المسودة، وبعدين اعتمدها.</dd>
+        </div>
+        <div class="st-escalated">
+          <dt><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 4 6v6c0 5 3.4 8.5 8 9 4.6-.5 8-4 8-9V6z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>متصعّدة</dt>
+          <dd>ماكو مسودة، حوّلها للقسم أو استلمها بنفسك.</dd>
+        </div>
+        <div class="st-drafted">
+          <dt><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"/></svg>جاهزة</dt>
+          <dd>اقرا المسودة واعتمدها بضغطة.</dd>
+        </div>
+      </dl>
+      <button type="button" id="introOk" class="btn btn-primary btn-small">فهمت</button>
+    </section>
     <div id="agentMain"></div>
     <div id="processMain" hidden></div>
   </main>

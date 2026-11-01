@@ -1,7 +1,11 @@
 """Pipeline viewer: watch tickets go through every stage, live, and record what the agent decides.
 
-    python app/server.py            # then open http://localhost:8000
-    LLM_BACKEND=api python app/server.py
+    python app/server.py                  # then open http://localhost:8000
+    LLM_BACKEND=cli python app/server.py  # live runs through this computer's Claude Code login (development)
+
+The viewer runs new tickets on the API backend unless LLM_BACKEND says otherwise (config/models.yaml
+defaults to cli for the scripts): with no key, live runs are off and the page says so; with a key
+they run the measured configuration under the spending cap (budget_usd, LLM_BUDGET_USD).
 
 Standard library only. Streams pipeline events to the browser with Server-Sent Events.
 
@@ -48,8 +52,8 @@ from pipeline import draft as drf  # noqa: E402
 from pipeline import draft_check, fixes, handoff  # noqa: E402
 from pipeline.config import CONFIG_DIR, limits, models, pipeline_mode, taxonomy  # noqa: E402
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
-from pipeline.llm import (BackendError, api_key, assert_real_data_safe, backend, budget_usd, model_for,  # noqa: E402
-                          real_data)
+from pipeline.llm import (BackendError, api_key, assert_real_data_safe, backend, budget_usd, cache_only,  # noqa: E402
+                          model_for, real_data)
 from pipeline.run import FLAG_AR, process  # noqa: E402
 
 STATIC = Path(__file__).parent / "static"
@@ -386,7 +390,23 @@ def with_current_gold(f: Path) -> dict:
 # The same causes in English, for the start-up line in the terminal.
 LIVE_OFF_EN = {"pipeline_off": "PIPELINE_MODE=off", "bad_backend": "unknown LLM_BACKEND",
                "no_key": "no API key; set SUPPORT_PIPELINE_API_KEY",
-               "no_cli": "no claude CLI; for the API set LLM_BACKEND=api and SUPPORT_PIPELINE_API_KEY"}
+               "no_cli": "no claude CLI; for the API unset LLM_BACKEND and set SUPPORT_PIPELINE_API_KEY"}
+
+# The viewer's backend when LLM_BACKEND is not set. config/models.yaml says cli: free development runs on
+# the author's Claude plan, for the scripts. The viewer is what a reader starts, so it runs the measured
+# configuration instead: on someone else's computer, cli would run pasted tickets on their own Claude
+# Code login, with a setup no number in this project was measured on.
+VIEWER_BACKEND = "api"
+
+
+def default_viewer_backend(environ=None) -> bool:
+    """Set LLM_BACKEND to VIEWER_BACKEND in `environ` (os.environ) when it is unset or blank. An explicit
+    LLM_BACKEND (cli, or a wrong value that start-up then refuses) is left as it is. True if it set it."""
+    env = os.environ if environ is None else environ
+    if (env.get("LLM_BACKEND") or "").strip():
+        return False
+    env["LLM_BACKEND"] = VIEWER_BACKEND
+    return True
 
 
 def live_status() -> dict:
@@ -424,6 +444,8 @@ def meta() -> dict:
         "priority_rules": load_thresholds()["priority"],
         "teams": tax.teams,
         "live": live_status(),
+        # LLM_CACHE_ONLY=1: a pasted ticket gets the stored model replies, with no call (the page says so).
+        "cache_only": cache_only(),
         "limits": limits(),
         "mode": pipeline_mode(),
         "real_data": real_data(),
@@ -1049,7 +1071,9 @@ def make_server(port: int = 8000, host: str = "127.0.0.1") -> ViewerServer:
 
 
 def main() -> None:
+    defaulted = default_viewer_backend()   # before anything reads the backend
     try:
+        backend()                # an unknown LLM_BACKEND stops here, with one line and no traceback
         assert_real_data_safe()
         mode = pipeline_mode()   # a bad PIPELINE_MODE, budget, limits block or PIPELINE_FIXES stops here,
         budget_usd()             # not on the first ticket or the page's first /api/meta
@@ -1072,8 +1096,13 @@ def main() -> None:
     elif backend() == "cli":   # a pasted ticket would run on this computer's Claude Code login
         live_word = "live runs on, through the claude CLI and its login"
     else:
-        live_word = "live runs on"
-    print(f"Pipeline viewer on http://localhost:{port}  (backend: {backend()}, mode: {mode}, Ctrl+C to stop)\n"
+        cap = budget_usd()   # :g keeps a small cap readable ($0.001, not $0.00)
+        live_word = (f"live runs on, API spending capped at ${cap:g} for this viewer" if cap
+                     else "live runs on, with no spending cap (LLM_BUDGET_USD=0)")
+    if live["available"] and cache_only():
+        live_word += "; replaying the response cache only (LLM_CACHE_ONLY=1), so no model is called"
+    which = f"{backend()}, the viewer's default" if defaulted else f"{backend()}, from LLM_BACKEND"
+    print(f"Pipeline viewer on http://localhost:{port}  (backend: {which}; mode: {mode}; Ctrl+C to stop)\n"
           f"  {live_word}. Saved runs replay with no key.")
     try:
         server.serve_forever()

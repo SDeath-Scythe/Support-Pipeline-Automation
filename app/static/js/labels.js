@@ -18,7 +18,7 @@ export const TABS = [
 // A row's status: an icon and a word, never colour alone.
 export const STATUS = dict({
   drafted: { icon: "ready", word: "جاهزة" },
-  flagged: { icon: "check", word: "تأكيد" },
+  flagged: { icon: "check", word: "تحتاج تأكيد" },   // the tab's own words
   escalated: { icon: "escalated", word: "متصعّدة" },
   running: { icon: "running", word: "تنعالج" },
   lost: { icon: "lost", word: "انقطعت" },
@@ -126,4 +126,10 @@ export const TAG_AR = dict({
 // Why live runs are off, for "كيف يشتغل" (the agent sees one plain sentence).
 export const LIVE_CAUSE_AR = dict({
   pipeline_off: "PIPELINE_MODE=off", bad_backend: "LLM_BACKEND", no_key: "ماكو مفتاح API", no_cli: "أداة claude مو موجودة",
+});
+// The new-ticket dialog, under the agent's sentence: what turns live runs on, for whoever runs the server.
+export const LIVE_TURN_ON_AR = dict({
+  no_key: "يشتغل لما يكون عند الخادم مفتاح API.",
+  no_cli: "يشتغل لما تكون أداة claude موجودة على الخادم.",
+  bad_backend: "يشتغل لما يكون LLM_BACKEND صحيح على الخادم.",
 });

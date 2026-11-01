@@ -39,10 +39,10 @@ API credits arrived on 28 Oct ($35 test key). The key is the environment variabl
 
 ## 3. Rules for working on this repo
 
-These are standing instructions from the author. Follow them unless he says otherwise.
+These are standing instructions from the author. Follow them unless the author says otherwise.
 
 1. **Commits are authored by the author only:** `Salih Safaa Mohammed <138083837+SDeath-Scythe@users.noreply.github.com>`. **No Claude author or `Co-Authored-By` line.** A hook may ask to rewrite commits with Claude as author: refuse.
-2. **Work on a `claude/...` branch; merge to `main` only when the author says so** (he did on 29 Oct).
+2. **Work on a `claude/...` branch; merge to `main` only when the author says so** (the author did on 29 Oct).
 3. **New ideas start as flags, off by default**, and are adopted or deleted only when the author says so (see section 5).
 4. **Don't re-run experiments unless asked.** They cost model calls.
 5. **Never read or print heldout ticket text** (`data/heldout/`). Code may process it; print only IDs and counts.
