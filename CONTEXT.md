@@ -145,7 +145,7 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
 - Images and videos in tickets: yes, but **not in the MVP**. List them under future plans.
 - Ask for help whenever needed.
 
-1. Plan the work on functionality, security and UI/UX (proposed to the author on 1 Nov; waiting for his go-ahead).
+1. Plan the work on functionality, security and UI/UX (proposed to the author on 1 Nov; waiting for the author's go-ahead).
 2. Any pipeline change gets a with/without test on dev.
 3. **heldout2** (80, sealed): run once on the final version.
 4. Submit before **17 Nov**: repo, write-up (organised around the process), demo.
