@@ -139,10 +139,18 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
 
 ## 8. Next steps, in order
 
-1. **Mentor session, Sun 1 Nov, 5:40 PM.** Deck and prep page ready. Write down the feedback.
-2. Act on the feedback, with a with/without test for any pipeline change.
-3. **heldout2** (80, sealed): run once at the progress review.
-4. Submit before **17 Nov**: repo, write-up, demo.
+**Mentor feedback (Sun 1 Nov, 1-on-1 call; no slides were used):**
+- Care more about **functionality, security and UI/UX**.
+- Care about **the process more than the results**.
+- Images and videos in tickets: yes, but **not in the MVP**. List them under future plans.
+- Ask for help whenever needed.
+
+1. Plan the work on functionality, security and UI/UX (proposed to the author on 1 Nov; waiting for his go-ahead).
+2. Any pipeline change gets a with/without test on dev.
+3. **heldout2** (80, sealed): run once on the final version.
+4. Submit before **17 Nov**: repo, write-up (organised around the process), demo.
+
+**Future plans (not in the MVP):** images and videos in tickets (screenshots of an error or a receipt, voice notes).
 
 Known limits to state in the write-up: tickets and most labels are model-written (64 checked by the author); one model family writes, runs and grades; the drafter sometimes misses asking for a shop or agent name (F11b, the fix tried, made drafts worse); unknown charges go to the fraud team; masking covers numbers but not names, and the response cache (development only) keeps replies in full.
 
