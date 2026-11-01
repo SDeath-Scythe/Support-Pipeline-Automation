@@ -68,13 +68,13 @@ FLAG_AR = {
 # What an error event says: fixed text by exception type. The message itself never leaves stderr.
 _ERROR_AR = {
     "BudgetExceeded": "وصل التشغيل لحد الصرف المسموح، فما انرسل الطلب للنموذج",
-    "CacheMiss": "ما اكو رد محفوظ لهالطلب، والتشغيل على الردود المحفوظة بس",
+    "CacheMiss": "ماكو رد محفوظ لهالطلب، والتشغيل على الردود المحفوظة بس",
     "BackendError": "إعدادات الاتصال بالنموذج ما تسمح بهالطلب",
 }
 _REFUSALS = (BudgetExceeded, CacheMiss, BackendError)   # expected refusals: one log line, no traceback
 
 # If even the normal closing path fails, the team still gets a note.
-_LAST_RESORT_NOTE = "سبب التصعيد: صار خطأ داخلي بالنظام. اقرأ التذكرة كاملة."
+_LAST_RESORT_NOTE = "سبب التصعيد: صار خطأ داخلي بالنظام. اقرا التذكرة كاملة."
 
 
 def _error(e: BaseException, *, internal: bool = False) -> dict[str, str]:
@@ -378,7 +378,7 @@ def process(raw_text: str, emit: Emit = lambda e: None,
             send("draft", "error", _error(e))
             return finish(Outcome.ESCALATED, flags + ["model_error"], team=team, priority=priority)
         # A time («خلال يومين») is allowed only from the policy facts, never because the customer wrote it.
-        facts_text = "\n".join(drf.known_facts(ex))
+        facts_text = drf.facts_text(ex.subcategory)
         checks = draft_check.problems(reply, user, facts_text=facts_text)
         spans = draft_check.findings(reply, user, facts_text=facts_text)
         flags += [f"draft:{p}" for p in checks]

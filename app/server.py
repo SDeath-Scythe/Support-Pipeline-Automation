@@ -10,6 +10,10 @@ sent) is this machine, so another web page, or a DNS name re-pointed at 127.0.0.
 Every /api/ call must carry the token the page is served with. A live run spends money, so it is a
 POST, one at a time, and stops calling models once the browser goes away. No request is logged:
 URLs and bodies can carry ticket text.
+
+The page is index.html at /, plus its scripts, styles and fonts under /static/ (an allow-list of file
+types, nothing outside app/static). The Content-Security-Policy allows nothing inline and nothing from
+another site, so a ticket or a model reply that gets into the page as markup still can't run a script.
 """
 
 from __future__ import annotations
@@ -41,8 +45,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pipeline import classify as cls  # noqa: E402
 from pipeline import draft as drf  # noqa: E402
-from pipeline import handoff  # noqa: E402
-from pipeline.config import limits, models, pipeline_mode, taxonomy  # noqa: E402
+from pipeline import draft_check, fixes, handoff  # noqa: E402
+from pipeline.config import CONFIG_DIR, limits, models, pipeline_mode, taxonomy  # noqa: E402
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.llm import (BackendError, api_key, assert_real_data_safe, backend, budget_usd, model_for,  # noqa: E402
                           real_data)
@@ -66,12 +70,13 @@ SEALED_IDS = ("hold-", "h2-")
 TOKEN = secrets.token_urlsafe(32)
 LOOPBACK = ("localhost", "127.0.0.1", "[::1]")
 
+# Nothing inline (no <script> or <style> blocks, style="" or onclick=) and nothing from another site:
+# scripts, styles and fonts come from /static/ only.
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; "
+       "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+
 SECURITY_HEADERS = {
-    "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; "
-        "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
-        "frame-ancestors 'none'; form-action 'none'"),
+    "Content-Security-Policy": CSP,
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
@@ -93,10 +98,16 @@ ERR_AR = {
     "empty": "اكتب نص التذكرة أول",
     "bad_text": "نص التذكرة بيه رموز مو صحيحة: انسخه مرة ثانية",
     "too_long": "التذكرة أطول من الحد المسموح ({limit} حرف)",
-    "busy": "فيه تذكرة تنعالج هسه، انتظر تخلص",
+    "busy": "اكو تذكرة دتنعالج هسه، انتظر لما تخلص",
     "field": "قيمة غلط بالحقل: {field}",
+    "text_too_long": "النص أطول من الحد المسموح ({limit} حرف)",
     "run_param": "حدد التشغيل (run)",
     "internal": "صار خطأ داخلي، جرب مرة ثانية",
+    # 409: the decision clashes with what the log already holds (another tab decided it, or the reply
+    # still has something that blocks an approval).
+    "decided": "هالتذكرة انحسمت قبل، بصفحة ثانية على الأغلب. حدّث القائمة",
+    "undo_stale": "هالقرار مو آخر قرار على التذكرة، فما ينلغى. حدّث القائمة",
+    "blocked": "{why}، فما ينعتمد. صلّح الرد أول",
 }
 
 # The agent's decision on a ticket (POST /api/decision), and why a draft needed changing.
@@ -113,10 +124,33 @@ REASON_CODES_AR = {"wrong_type": "نوع المشكلة غلط", "wrong_team": "
 OUTCOMES = ("drafted", "flagged", "escalated")
 PRIORITIES = ("P1", "P2", "P3")
 DECISION_FIELDS = {"run", "ticket_id", "action", "pipeline_outcome", "flags", "reason_codes", "seconds",
-                   "draft_text", "final_text", "corrected", "undoes"}
+                   "draft_text", "final_text", "corrected", "undoes", "visits", "warnings_acknowledged"}
 _TICKET_ID = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 _FLAG = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 _DECISION_ID = re.compile(r"[0-9a-f]{32}")
+
+# The draft checks that stop an approval: the agent fixes the draft first (POST /api/check says when it
+# is clean). The other kinds are warnings the agent reads and decides on.
+BLOCKING_CHECKS = ("asks_secret", "hold_reason", "sensitive_number")
+CHECK_FIELDS = {"draft", "allowed_text", "subcategory"}
+# Why the server refuses an approval whose reply still has a blocking check (409; the page blocks it first).
+BLOCKED_AR = {"asks_secret": "الرد يطلب رمز أو كلمة سر من الزبون",
+              "hold_reason": "الرد يذكر تحقيق أو اشتباه أو بلاغ",
+              "sensitive_number": "الرد يكرر رقم بطاقة أو رمز"}
+# What an agent can tick "I checked it" for and approve anyway: the warnings that do not block, and a
+# draft written for another type than the one the agent chose. Logged as kinds, never text.
+ACK_KINDS = tuple(k for k in draft_check.KINDS if k not in BLOCKING_CHECKS) + ("draft_for_other_type",)
+
+# Files under /static/: these types only, each with its exact content type. index.html is served at /.
+STATIC_TYPES = {
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".woff2": "font/woff2",
+    ".svg": "image/svg+xml",
+    ".txt": "text/plain; charset=utf-8",
+}
+_STATIC_PART = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}")   # no dot first: no "..", no hidden file
+_STATIC_MAX_PATH = 256
 
 POLL_S = 0.25          # how often a live stream checks whether the browser is still there
 DRAIN_CAP = 1 << 20    # an unread request body up to this size is read before refusing it
@@ -132,6 +166,32 @@ def load_tickets(name: str) -> list[dict]:
         return []
     path = ROOT / "data" / name / "tickets.jsonl" if name in SPLITS else PROBES / f"{name}.jsonl"
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+# --- static files ---
+
+def static_file(rel: str) -> tuple[Path, str] | None:
+    """The file that /static/<rel> names, and its content type; None for anything else. rel is the URL
+    path as sent (never percent-decoded): each part must be a plain name that doesn't start with a dot,
+    so "..", "%2e%2e", a hidden file, a backslash, a NUL and an empty part ("js/", "//") are all None.
+    The file must have an allowed type, exist, and still be inside app/static once symlinks are
+    followed. A folder is never listed."""
+    if len(rel) > _STATIC_MAX_PATH:
+        return None
+    parts = rel.split("/")
+    if not all(_STATIC_PART.fullmatch(p) for p in parts):
+        return None
+    ctype = STATIC_TYPES.get(Path(parts[-1]).suffix)   # exact: ".CSS" or ".js.map" is not served
+    if ctype is None:
+        return None
+    root = STATIC.resolve()
+    try:
+        f = root.joinpath(*parts).resolve(strict=True)
+    except (OSError, RuntimeError):   # missing, or a symlink loop
+        return None
+    if not f.is_relative_to(root) or not f.is_file():
+        return None
+    return f, ctype
 
 
 # --- saved runs ---
@@ -176,7 +236,7 @@ def _summary(f: Path) -> dict | None:
     except (OSError, ValueError):
         data = None
     ok = isinstance(data, dict) and isinstance(data.get("meta"), dict) and isinstance(data.get("tickets"), list)
-    summary = {"meta": data["meta"], "sealed_ids": _has_sealed_ids(data["tickets"])} if ok else None
+    summary = {"meta": data["meta"], "sealed_ids": _has_sealed_ids(data["tickets"]), "n": len(data["tickets"])} if ok else None
     with _summaries_lock:
         _summaries[f] = (stamp, summary)
     return summary
@@ -194,7 +254,7 @@ def _index() -> list[tuple[dict, Path]]:
         meta = {**s["meta"], "set": f.parent.name} if by_folder else s["meta"]   # every split's file is tickets.jsonl
         if _sealed(meta.get("set")):
             continue
-        out.append(({**meta, "name": name, "experiment": by_folder}, f))
+        out.append(({**meta, "name": name, "experiment": by_folder, "n": s.get("n")}, f))
     return out
 
 
@@ -218,11 +278,97 @@ def _gold_file(name: str) -> Path | None:
     return src if src.exists() else None
 
 
+_recomputed: dict[Path, tuple[tuple, dict]] = {}   # kept like _summaries: until the file (or what the checks read) changes
+
+
+def _draft_subcategory(result: dict) -> str | None:
+    """The issue type the draft was written for (after a re-check swap, the re-check's), if it is
+    still in the taxonomy: its policy facts are what the draft was checked against."""
+    ex = result.get("extraction")
+    sub = ex.get("subcategory") if isinstance(ex, dict) else None
+    return sub if isinstance(sub, str) and sub in taxonomy().subcategories else None
+
+
+def recompute_checks(tickets: list) -> dict[int, dict]:
+    """For runs made before 1 Nov, which saved no spans: per ticket (by its index in the file), the
+    draft "done" events that have no check_spans ({event index: findings}) and, when result.draft_checks
+    is missing or null, the result's (key "result"). Computed exactly as run.py does now:
+    draft_check.findings(reply, user_prompt, facts) with the policy facts for the draft's issue type.
+    A ticket with no draft, or no drafter prompt to check against, gets nothing."""
+    out: dict[int, dict] = {}
+    facts_by_sub: dict[str | None, str] = {}
+    for i, row in enumerate(tickets):
+        if not isinstance(row, dict):
+            continue
+        result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        events = row.get("events") if isinstance(row.get("events"), list) else []
+        sub = _draft_subcategory(result)
+        if sub not in facts_by_sub:
+            facts_by_sub[sub] = drf.facts_text(sub)
+        facts = facts_by_sub[sub]
+        patch: dict = {}
+        prompt = None
+        for j, ev in enumerate(events):
+            data = ev.get("data") if isinstance(ev, dict) else None
+            if not (isinstance(data, dict) and ev.get("stage") == "draft" and ev.get("status") == "done"):
+                continue
+            reply, user = data.get("reply"), data.get("user_prompt")
+            if not (isinstance(reply, str) and isinstance(user, str)):
+                continue
+            prompt = user
+            if "check_spans" not in data:
+                patch[j] = draft_check.findings(reply, user, facts)
+        if result.get("draft_checks") is None and isinstance(result.get("draft_ar"), str) and prompt is not None:
+            patch["result"] = draft_check.findings(result["draft_ar"], prompt, facts)
+        if patch:
+            out[i] = patch
+    return out
+
+
+def _with_checks(f: Path, run: dict, stamp: tuple | None) -> None:
+    """Add the recomputed spans (see recompute_checks) to a run as read from f, marking each one
+    recomputed. Nothing else changes. The spans are kept until the file, the policy facts or the
+    active check flags change."""
+    tickets = run.get("tickets")
+    if not isinstance(tickets, list):
+        return
+    try:
+        pst = (CONFIG_DIR / "policy.yaml").stat()
+        policy_stamp = (pst.st_mtime_ns, pst.st_size)
+    except OSError:
+        policy_stamp = None
+    key = (stamp, policy_stamp, fixes.active())
+    with _summaries_lock:
+        hit = _recomputed.get(f)
+    if stamp is not None and hit and hit[0] == key:
+        patches = hit[1]
+    else:
+        patches = recompute_checks(tickets)
+        if stamp is not None:
+            with _summaries_lock:
+                _recomputed[f] = (key, patches)
+    for i, patch in patches.items():
+        row = tickets[i]
+        for j, spans in patch.items():
+            if j == "result":
+                row["result"] = {**row["result"], "draft_checks": spans, "draft_checks_recomputed": True}
+            else:
+                ev = row["events"][j]
+                ev["data"] = {**ev["data"], "check_spans": spans, "check_spans_recomputed": True}
+
+
 def with_current_gold(f: Path) -> dict:
     """A saved run with each ticket's gold label taken from its set file as it is now, so a label
     corrected after the run (e.g. the author's t2-0033) is scored the same way as in the reports.
-    A sealed set's file is never read."""
-    run = json.loads(f.read_text(encoding="utf-8"))
+    A sealed set's file is never read. Drafts from runs made before 1 Nov get their check spans
+    (recompute_checks)."""
+    before = f.stat()
+    raw = f.read_text(encoding="utf-8")
+    after = f.stat()
+    run = json.loads(raw)
+    stamp = (after.st_mtime_ns, after.st_size)
+    if isinstance(run, dict):   # a file rewritten while it was read is checked but not kept
+        _with_checks(f, run, stamp if stamp == (before.st_mtime_ns, before.st_size) else None)
     if f.parent.parent in (RUNS / "exp", SAVED):
         name = f.parent.name
         run["meta"] = {**run.get("meta", {}), "set": name}
@@ -237,18 +383,27 @@ def with_current_gold(f: Path) -> dict:
 
 # --- meta ---
 
+# The same causes in English, for the start-up line in the terminal.
+LIVE_OFF_EN = {"pipeline_off": "PIPELINE_MODE=off", "bad_backend": "unknown LLM_BACKEND",
+               "no_key": "no API key; set SUPPORT_PIPELINE_API_KEY",
+               "no_cli": "no claude CLI; for the API set LLM_BACKEND=api and SUPPORT_PIPELINE_API_KEY"}
+
+
 def live_status() -> dict:
     """Whether the page can run a new ticket, and if not, why (in Arabic, for the page)."""
     if pipeline_mode() == "off":
-        return {"available": False, "reason_ar": "النظام موقف (PIPELINE_MODE=off): التذاكر الجديدة يستلمها موظف يدوياً"}
+        return {"available": False, "reason_ar": "النظام موقف، فالتذاكر الجديدة يستلمها موظف بدون نموذج.",
+                "cause": "pipeline_off"}
+    # The agent gets one plain sentence; "cause" names the setting for «كيف يشتغل» and the logs.
+    not_here = "التشغيل المباشر مو مفعّل على هذا الجهاز. تكدر تشتغل على التشغيلات المحفوظة بس."
     try:
         name = backend()
     except BackendError:
-        return {"available": False, "reason_ar": "إعداد LLM_BACKEND غلط: التشغيل المباشر موقف"}
+        return {"available": False, "reason_ar": not_here, "cause": "bad_backend"}
     if name == "api" and not api_key():
-        return {"available": False, "reason_ar": "ماكو مفتاح API: تكدر تشوف التشغيلات المحفوظة بس"}
+        return {"available": False, "reason_ar": not_here, "cause": "no_key"}
     if name == "cli" and not shutil.which(os.getenv("CLAUDE_BIN") or "claude"):
-        return {"available": False, "reason_ar": "أداة claude مو موجودة على هذا الجهاز: تكدر تشوف التشغيلات المحفوظة بس"}
+        return {"available": False, "reason_ar": not_here, "cause": "no_cli"}
     return {"available": True, "reason_ar": None}
 
 
@@ -258,8 +413,15 @@ def meta() -> dict:
         "backend": backend(),
         "models": {role: model_for(role) for role in models()},
         "thresholds": load_thresholds()["confidence"],
+        # team and default_priority let the page show what another answer (the first model's, or the
+        # agent's correction) would be routed to: priority_rules is the one rule that raises it (route.py).
         "subcategories": {k: {"label": s.label_ar, "category": s.category,
-                              "category_label": tax.categories_ar[s.category]} for k, s in tax.subcategories.items()},
+                              "category_label": tax.categories_ar[s.category],
+                              "team": s.team, "default_priority": s.default_priority,
+                              # never drafted: a person takes it (the page re-gates an agent's correction)
+                              "always_escalate": s.always_escalate}
+                          for k, s in tax.subcategories.items()},
+        "priority_rules": load_thresholds()["priority"],
         "teams": tax.teams,
         "live": live_status(),
         "limits": limits(),
@@ -270,7 +432,57 @@ def meta() -> dict:
         "decision_actions_ar": DECISION_ACTIONS_AR,
         "reason_codes": list(REASON_CODES),
         "reason_codes_ar": REASON_CODES_AR,
+        "blocking_checks": list(BLOCKING_CHECKS),
+        "check_ar": CHECK_AR,
+        "checks_active": checks_active(),
     }
+
+
+def checks_active() -> list[str]:
+    """The draft_check kinds that run now: hold_reason and sensitive_number only when their flag is on
+    (PIPELINE_FIXES), so the page can tell a clean draft from one that was never checked for them."""
+    on = fixes.active()
+    return [k for k in draft_check.KINDS if k not in ("hold_reason", "sensitive_number") or k in on]
+
+
+# One line per draft_check kind, for the page to show beside a highlighted span (the flag wording).
+CHECK_AR = {kind: FLAG_AR[f"draft:{kind}"] for kind in draft_check.KINDS}
+
+
+# --- checking a draft the agent edits ---
+
+class TooLong(ValueError):
+    """A /api/check text over its limit (413)."""
+
+    def __init__(self, field: str, limit: int):
+        super().__init__(field)
+        self.field, self.limit = field, limit
+
+
+def check_request(body: dict) -> tuple[str, str, str | None]:
+    """(draft, allowed_text, subcategory) from a POST /api/check body. Raises BadField (400) or TooLong
+    (413). The draft may be up to twice the ticket limit (room for any reply, as in the decision log);
+    allowed_text, the drafter's whole prompt, up to four times."""
+    unknown = set(body) - CHECK_FIELDS
+    if unknown:
+        raise BadField(sorted(unknown)[0])
+    limit = limits()["max_ticket_chars"]
+    out = []
+    for key, most in (("draft", 2 * limit), ("allowed_text", 4 * limit)):
+        value = body.get(key)
+        if not isinstance(value, str):
+            raise BadField(key)
+        if len(value) > most:
+            raise TooLong(key, most)
+        try:
+            value.encode("utf-8")   # a lone surrogate ("\ud83d") can't be checked or shown
+        except UnicodeEncodeError:
+            raise BadField(key) from None
+        out.append(value)
+    sub = body.get("subcategory")
+    if sub is not None and (not isinstance(sub, str) or sub not in taxonomy().subcategories):
+        raise BadField("subcategory")
+    return out[0], out[1], sub
 
 
 # --- the decision log ---
@@ -381,28 +593,82 @@ def decision_record(body: dict) -> dict:
             isinstance(undoes, str) and _DECISION_ID.fullmatch(undoes)
             and any(d.get("id") == undoes and d.get("ticket_id") == ticket_id for d in read_decisions(run)))):
         raise BadField("undoes")
+    visits = body.get("visits")   # how many times the ticket was opened before this decision
+    if visits is not None and (isinstance(visits, bool) or not isinstance(visits, int) or not 1 <= visits <= 10000):
+        raise BadField("visits")
+    acked = body.get("warnings_acknowledged", [])
+    if not isinstance(acked, list) or not all(isinstance(k, str) and k in ACK_KINDS for k in acked):
+        raise BadField("warnings_acknowledged")
     draft, final = _text_field(body, "draft_text"), _text_field(body, "final_text")
+    if action in ("approved", "edited") and not isinstance(final, str):
+        raise BadField("final_text")   # an approval names the reply, so the checks below can read it
     return {
         "id": uuid.uuid4().hex,
         "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "reviewer": reviewer(),
         "run": run, "ticket_id": ticket_id, "action": action, "pipeline_outcome": outcome,
         "flags": flags, "reason_codes": list(dict.fromkeys(codes)), "seconds": seconds,
-        "corrected": _corrected(body.get("corrected")), "undoes": undoes,
+        "corrected": _corrected(body.get("corrected")), "undoes": undoes, "visits": visits,
+        "warnings_acknowledged": list(dict.fromkeys(acked)),
         "models": {role: model_for(role) for role in models()},
         "prompt_sha256": {"classifier": _sha256(cls.system_prompt()), "drafter": _sha256(drf.system_prompt())},
         "draft_sha256": _sha256(draft),
         "final_sha256": _sha256(final),
         "edit_chars": edit_chars(draft, final),
+        # Kept for the checks in append_decision; never written to the log.
+        "_final": final,
     }
+
+
+class Conflict(ValueError):
+    """A decision the log can't take (409): its key in ERR_AR, and the text for {why} if any."""
+
+    def __init__(self, key: str, why: str = ""):
+        super().__init__(key)
+        self.key, self.why = key, why
+
+
+def blocking_in(reply: str | None) -> list[str]:
+    """The blocking draft checks in a reply (BLOCKING_CHECKS). They don't read the drafter's prompt, so
+    the server can run them on any reply, the same rules as POST /api/check."""
+    if not reply:
+        return []
+    return [f["kind"] for f in draft_check.findings(reply, "", "") if f["kind"] in BLOCKING_CHECKS]
+
+
+def standing(records: list[dict]) -> dict[str, dict]:
+    """The decision that stands on each ticket: the latest one not undone (the page computes the same)."""
+    undone = {d.get("undoes") for d in records if d.get("action") == "undone"}
+    out: dict[str, dict] = {}
+    for d in records:
+        if d.get("action") == "undone" or d.get("id") in undone:
+            continue
+        out[d.get("ticket_id")] = d
+    return out
 
 
 def append_decision(record: dict) -> None:
     """One line, one write: concurrent decisions never interleave. A new log is readable by its owner
-    only (0600)."""
+    only (0600). Under the same lock, two checks (Conflict, 409):
+    - an approval whose reply still asks for a code, names an investigation or repeats a card number
+      (the page blocks it first; this stops a stale check or a hand-made request);
+    - on a saved run, a second decision on a ticket that already has one standing (another tab decided
+      it), or an undo of a decision that no longer stands. Live tickets are per page ("live-1" again
+      after a reload is another ticket), so they are not compared."""
+    final = record.pop("_final", None)
+    if record["action"] in ("approved", "edited"):
+        found = blocking_in(final)
+        if found:
+            raise Conflict("blocked", BLOCKED_AR[found[0]])
     line = json.dumps(record, ensure_ascii=False) + "\n"
     path = decisions_file()
     with _decisions_lock:
+        if record["run"] != "live":
+            now = standing(_read_decisions_unlocked(record["run"])).get(record["ticket_id"])
+            if record["action"] == "undone" and (now is None or now.get("id") != record["undoes"]):
+                raise Conflict("undo_stale")
+            if record["action"] != "undone" and now is not None:
+                raise Conflict("decided")
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         with open(fd, "a", encoding="utf-8") as f:
@@ -413,10 +679,14 @@ def append_decision(record: dict) -> None:
 def read_decisions(run: str) -> list[dict]:
     """The decisions logged for one run, oldest first. A line that isn't JSON is skipped."""
     with _decisions_lock:
-        try:
-            lines = decisions_file().read_text(encoding="utf-8").splitlines()
-        except FileNotFoundError:
-            return []
+        return _read_decisions_unlocked(run)
+
+
+def _read_decisions_unlocked(run: str) -> list[dict]:
+    try:
+        lines = decisions_file().read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
     out = []
     for line in lines:
         try:
@@ -598,6 +868,9 @@ class Handler(BaseHTTPRequestHandler):
             page = (STATIC / "index.html").read_text(encoding="utf-8")
             page = page.replace("<head>", f'<head>\n<meta name="viewer-token" content="{TOKEN}">', 1)
             return self._send(page.encode("utf-8"), "text/html; charset=utf-8")
+        if url.path.startswith("/static/"):   # no token: a <script src> or a font can't send one
+            found = static_file(url.path[len("/static/"):])
+            return self._error("not_found", 404) if found is None else self._send(found[0].read_bytes(), found[1])
         if url.path == "/api/sets":
             return self._json(ticket_sets())
         if url.path == "/api/tickets":
@@ -623,6 +896,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._post_stream()
         if url.path == "/api/decision":
             return self._post_decision()
+        if url.path == "/api/check":
+            return self._post_check()
         self._error("not_found", 404)
 
     def _read_json(self) -> dict | None:
@@ -737,15 +1012,31 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return True
 
+    def _post_check(self) -> None:
+        """The draft checks on a draft the agent is editing, the same rules and facts as the pipeline.
+        Nothing is logged or kept: the draft can carry the customer's details."""
+        body = self._read_json()
+        if body is None:
+            return
+        try:
+            draft, allowed, sub = check_request(body)
+        except TooLong as e:
+            return self._json({"error": ERR_AR["text_too_long"].format(limit=e.limit), "field": e.field}, 413)
+        except BadField as e:
+            return self._json({"error": ERR_AR["field"].format(field=e), "field": str(e)}, 400)
+        self._json({"findings": draft_check.findings(draft, allowed, drf.facts_text(sub))})
+
     def _post_decision(self) -> None:
         body = self._read_json()
         if body is None:
             return
         try:
             record = decision_record(body)
+            append_decision(record)
         except BadField as e:
             return self._json({"error": ERR_AR["field"].format(field=e), "field": str(e)}, 400)
-        append_decision(record)
+        except Conflict as e:
+            return self._json({"error": ERR_AR[e.key].format(why=e.why), "conflict": e.key}, 409)
         self._json({"ok": True, "id": record["id"]})
 
 
@@ -760,15 +1051,30 @@ def make_server(port: int = 8000, host: str = "127.0.0.1") -> ViewerServer:
 def main() -> None:
     try:
         assert_real_data_safe()
-        mode = pipeline_mode()   # a bad PIPELINE_MODE, budget or limits block stops here, not on the first ticket
-        budget_usd()
+        mode = pipeline_mode()   # a bad PIPELINE_MODE, budget, limits block or PIPELINE_FIXES stops here,
+        budget_usd()             # not on the first ticket or the page's first /api/meta
         limits()
+        fixes.active()
     except (BackendError, ValueError) as e:
         print(f"Not starting the viewer: {e}", file=sys.stderr)
         sys.exit(1)
-    server = make_server(int(os.getenv("PORT", "8000")))
+    want = os.getenv("PORT", "8000")
+    try:
+        server = make_server(int(want))
+    except OSError as e:   # most often another program on the port: say so, without a traceback
+        print(f"Not starting the viewer: port {want} is not free ({e.strerror}). "
+              f"Pick another one, for example: PORT=8001 python app/server.py", file=sys.stderr)
+        sys.exit(1)
     port = server.server_address[1]
-    print(f"Pipeline viewer on http://localhost:{port}  (backend: {backend()}, mode: {mode}, Ctrl+C to stop)")
+    live = live_status()
+    if not live["available"]:
+        live_word = f"live runs off: {LIVE_OFF_EN.get(live.get('cause'), live.get('cause'))}"
+    elif backend() == "cli":   # a pasted ticket would run on this computer's Claude Code login
+        live_word = "live runs on, through the claude CLI and its login"
+    else:
+        live_word = "live runs on"
+    print(f"Pipeline viewer on http://localhost:{port}  (backend: {backend()}, mode: {mode}, Ctrl+C to stop)\n"
+          f"  {live_word}. Saved runs replay with no key.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

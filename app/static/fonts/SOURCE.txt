@@ -1,0 +1,26 @@
+Where the fonts in this folder come from
+
+Packages (npm, SIL Open Font License 1.1, published 19 Jul 2026):
+  @fontsource/ibm-plex-sans-arabic@5.3.0  https://www.npmjs.com/package/@fontsource/ibm-plex-sans-arabic/v/5.3.0
+  @fontsource/ibm-plex-mono@5.3.0        https://www.npmjs.com/package/@fontsource/ibm-plex-mono/v/5.3.0
+
+Each file was downloaded from cdn.jsdelivr.net at the pinned version, and checked twice: against
+the sha256 jsDelivr lists for the package, and byte for byte against the file in the npm tarball
+(whose sha512 matched the registry's integrity value). fonts.css is written from the packages'
+@font-face rules and unicode.json (WOFF2 source only, local paths).
+
+sha256                                                            file  <-  URL
+6010e7fd0dce5d527583951750728cbe3c895efbd16aa0f809ab8c824878c9d8  ibm-plex-sans-arabic-arabic-400-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/files/ibm-plex-sans-arabic-arabic-400-normal.woff2
+9ed8dcb02e6c7246de4c120295fafa39a7bb73085f4951a4524a07dc911069f2  ibm-plex-sans-arabic-latin-400-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/files/ibm-plex-sans-arabic-latin-400-normal.woff2
+90aef64fea9794f232332e907d45810ab268d1a11721340025eba2a2cdb36d5c  ibm-plex-sans-arabic-arabic-500-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/files/ibm-plex-sans-arabic-arabic-500-normal.woff2
+be6a3b2e37f3ad67aa822a55ce356d28c416331c97530a1ec076c2118240ca2d  ibm-plex-sans-arabic-latin-500-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/files/ibm-plex-sans-arabic-latin-500-normal.woff2
+16734a5adb27b0f363e566cbbeacec480da0dc0baa19c8f0053251c2e2bc0eac  ibm-plex-sans-arabic-arabic-600-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/files/ibm-plex-sans-arabic-arabic-600-normal.woff2
+63f4757271e403f7baec0862f284ffaa4560ea6096ba9fe8bc6e585ca656e724  ibm-plex-sans-arabic-latin-600-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/files/ibm-plex-sans-arabic-latin-600-normal.woff2
+04c730b4292731ccedadd5bd80756124364ae4923895145d9cd7b1f28e443de1  ibm-plex-sans-arabic-arabic-700-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/files/ibm-plex-sans-arabic-arabic-700-normal.woff2
+ae2d59f91ecf9f7ed279e4a1fc1a9da8170fb0ce5b9152917a8f759033f5777c  ibm-plex-sans-arabic-latin-700-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/files/ibm-plex-sans-arabic-latin-700-normal.woff2
+08949f728dc52d528e69b1667d15c89a5686a4ee9a296ff90983985f99c380f7  ibm-plex-mono-latin-400-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-mono@5.3.0/files/ibm-plex-mono-latin-400-normal.woff2
+01d285447409c8a588692162439a038b8cbd7871309ee20267b0d2d91c6e8e22  ibm-plex-mono-latin-500-normal.woff2  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-mono@5.3.0/files/ibm-plex-mono-latin-500-normal.woff2
+1c32ddc3fc6efd167cdcbe475195287f2dc26ed1a4c92fbe31c87ceaffe44f98  (LICENSE, in OFL.txt)  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/LICENSE
+23b0a9d0c6d3f140a0b77e483c5cfa6bba574325ef5cb189ed9f2fec4884533f  (LICENSE, in OFL.txt)  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-mono@5.3.0/LICENSE
+dfaf93e8f35773ce1a06fb0e8f5cc8cd25d26a6f873a2e02756a0872274b8b63  (unicode.json, the unicode-range values in fonts.css)  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-sans-arabic@5.3.0/unicode.json
+0fec16233c1ca8d35c9d37b7dc221316d82c625ba9a68310ad6ad17167ae5eaa  (unicode.json, the unicode-range values in fonts.css)  <-  https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-mono@5.3.0/unicode.json

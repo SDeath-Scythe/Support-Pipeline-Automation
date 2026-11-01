@@ -23,8 +23,7 @@ _spec = importlib.util.spec_from_file_location("viewer_server", ROOT / "app" / "
 server = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(server)
 
-CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' "
-       "https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; "
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; "
        "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 
 
@@ -309,7 +308,7 @@ def test_only_one_live_run_at_a_time_429(srv, monkeypatch):
     assert resp.status == 200 and started.wait(5)
 
     status, _, body = call(srv, "POST", "/api/stream", {"text": "الثانية"})
-    assert status == 429 and json.loads(body)["error"] == "فيه تذكرة تنعالج هسه، انتظر تخلص"
+    assert status == 429 and json.loads(body)["error"] == "اكو تذكرة دتنعالج هسه، انتظر لما تخلص"
 
     release.set()
     events, ended = sse(resp.read())
@@ -496,7 +495,7 @@ def test_meta_says_whether_live_runs_are_possible(srv, monkeypatch):
     assert json.loads(call(srv, "GET", "/api/meta")[2])["live"] == {"available": True, "reason_ar": None}
     monkeypatch.setenv("PIPELINE_MODE", "off")
     live = json.loads(call(srv, "GET", "/api/meta")[2])["live"]
-    assert live["available"] is False and "off" in live["reason_ar"]
+    assert live["available"] is False and live["cause"] == "pipeline_off" and "موقف" in live["reason_ar"]
 
     monkeypatch.setenv("PIPELINE_MODE", "full")
     monkeypatch.setenv("LLM_BACKEND", "cli")
@@ -595,6 +594,82 @@ def test_invalid_decisions_are_refused_400(srv, tmp_path, over, field):
     assert status == 400
     assert json.loads(body)["field"] == field
     assert not (tmp_path / "decisions.jsonl").exists()
+
+
+@pytest.mark.parametrize("over, field", [
+    ({"visits": 0}, "visits"),
+    ({"visits": True}, "visits"),
+    ({"visits": "2"}, "visits"),
+    ({"warnings_acknowledged": ["asks_secret"]}, "warnings_acknowledged"),   # a blocking check can't be ticked away
+    ({"warnings_acknowledged": ["made_up"]}, "warnings_acknowledged"),
+    ({"warnings_acknowledged": "promise"}, "warnings_acknowledged"),
+    ({"final_text": None}, "final_text"),                                  # an approval names its reply
+    ({"action": "approved", "final_text": None}, "final_text"),
+])
+def test_new_decision_fields_are_checked(srv, tmp_path, over, field):
+    status, _, body = call(srv, "POST", "/api/decision", _decision(**over))
+    assert status == 400 and json.loads(body)["field"] == field
+    assert not (tmp_path / "decisions.jsonl").exists()
+
+
+def test_visits_and_acknowledged_warnings_are_logged_as_kinds(srv, tmp_path):
+    status, _, _ = call(srv, "POST", "/api/decision",
+                        _decision(visits=3, warnings_acknowledged=["promise", "promise", "draft_for_other_type"]))
+    assert status == 200
+    rec = json.loads((tmp_path / "decisions.jsonl").read_text(encoding="utf-8"))
+    assert rec["visits"] == 3 and rec["warnings_acknowledged"] == ["promise", "draft_for_other_type"]
+    assert "_final" not in rec and FINAL not in json.dumps(rec, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("reply", ["دزلنا الرمز اللي وصلك حتى نتابع", "شنو الرمز اللي وصلك؟"])
+@pytest.mark.parametrize("action", ["approved", "edited"])
+def test_an_approval_that_asks_for_a_code_is_refused_409(srv, tmp_path, reply, action):
+    """SEC-1 (1 Nov review): a stale /api/check answer let the page post a reply that asks for the code.
+    The server runs the blocking checks itself; nothing is logged."""
+    status, _, body = call(srv, "POST", "/api/decision", _decision(action=action, draft_text=reply, final_text=reply))
+    assert status == 409
+    j = json.loads(body)
+    assert j["conflict"] == "blocked" and "رمز" in j["error"] and reply not in j["error"]
+    assert not (tmp_path / "decisions.jsonl").exists()
+    # taking it over or forwarding it is still recorded (no reply goes anywhere)
+    assert call(srv, "POST", "/api/decision", _decision(action="took_over", final_text=None))[0] == 200
+
+
+def test_a_second_decision_on_a_saved_run_ticket_is_refused_409(srv, fake_runs):
+    """F8 (1 Nov review): two tabs could both approve one ticket; an undo in one then showed it open."""
+    first = _decision(run="exp/dev/rec", ticket_id="dev-0001", action="approved", final_text=DRAFT)
+    status, _, body = call(srv, "POST", "/api/decision", first)
+    assert status == 200
+    a = json.loads(body)["id"]
+    status, _, body = call(srv, "POST", "/api/decision", first)
+    assert status == 409 and json.loads(body)["conflict"] == "decided"
+    # undo the standing one: allowed once, then it no longer stands
+    undo = _decision(run="exp/dev/rec", ticket_id="dev-0001", action="undone", undoes=a, draft_text=None, final_text=None)
+    assert call(srv, "POST", "/api/decision", undo)[0] == 200
+    status, _, body = call(srv, "POST", "/api/decision", undo)
+    assert status == 409 and json.loads(body)["conflict"] == "undo_stale"
+    # decided again after the undo
+    assert call(srv, "POST", "/api/decision", first)[0] == 200
+    assert [d["action"] for d in server.read_decisions("exp/dev/rec")] == ["approved", "undone", "approved"]
+
+
+def test_live_tickets_are_not_compared_across_pages(srv):
+    """«live-1» after a reload is another ticket: a second decision on it is allowed."""
+    for _ in range(2):
+        assert call(srv, "POST", "/api/decision", _decision(ticket_id="live-1", action="took_over", final_text=None))[0] == 200
+
+
+def test_standing_matches_the_page(srv):
+    recs = [{"id": "a", "ticket_id": "t", "action": "approved"}, {"id": "u", "ticket_id": "t", "action": "undone", "undoes": "a"},
+            {"id": "b", "ticket_id": "t", "action": "edited"}, {"id": "c", "ticket_id": "s", "action": "forwarded"}]
+    assert {k: v["id"] for k, v in server.standing(recs).items()} == {"t": "b", "s": "c"}
+    assert server.standing(recs[:2]) == {}
+
+
+def test_meta_says_which_types_are_never_drafted(srv):
+    meta = json.loads(call(srv, "GET", "/api/meta")[2])
+    never = {k for k, s in meta["subcategories"].items() if s["always_escalate"]}
+    assert never == {"suspected_scam", "unauthorized_charge"}
 
 
 def test_decision_needs_token_and_json(srv, tmp_path):

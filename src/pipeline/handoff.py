@@ -76,7 +76,7 @@ def _reasons(flags: list[str], confidence: float | None, first: Extraction | Non
     if "invalid_category" in flags:
         out.append("التصنيف ما يطابق قائمة الأقسام")
     if "model_error" in flags:
-        out.append("صار خطأ بالنموذج: اقرأ التذكرة كاملة")
+        out.append("صار خطأ بالنموذج: اقرا التذكرة كاملة")
     out += [why for flag, why in _SYSTEM_REASONS.items() if flag in flags]
     if not out and confidence is not None and confidence < thresholds()["confidence"]["recheck_from"]:
         out.append(f"الثقة واطية ({confidence:.2f}): نوع المشكلة مو واضح")
@@ -91,8 +91,8 @@ def note(ex: Extraction | None, flags: list[str], *, confidence: float | None = 
     if ex is None:
         system = [why for flag, why in _SYSTEM_REASONS.items() if flag in flags]
         if system and "model_error" not in flags:
-            return "سبب التصعيد: " + "؛ ".join(system) + ". اقرأ التذكرة كاملة."
-        return "سبب التصعيد: صار خطأ بالنموذج وما انقرت التذكرة. اقرأها كاملة."
+            return "سبب التصعيد: " + "؛ ".join(system) + ". اقرا التذكرة كاملة."
+        return "سبب التصعيد: صار خطأ بالنموذج وما انقرت التذكرة. اقراها كاملة."
     main = second if second is not None and "fraud" in flags and second.category == "fraud_security" else ex
     # When the type itself is in doubt, say so instead of presenting one answer as the topic.
     unsure = "invalid_category" in flags or ("recheck_disagreed" in flags and second is not None)

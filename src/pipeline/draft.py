@@ -57,18 +57,31 @@ def ask_for(ex: Extraction) -> list[str]:
     return [f for f in wanted if not _have(ex, f)]
 
 
-def known_facts(ex: Extraction) -> list[str]:
-    """The policy facts the drafter is told (support hours, the expected response time). They are the
-    only place a draft may take a time from: draft_check allows a «خلال ...» found here, never one
-    from the ticket."""
+def policy_facts(subcategory: str | None) -> list[str]:
+    """The policy facts the drafter is told for one kind of issue (support hours, the expected
+    response time). They are the only place a draft may take a time from: draft_check allows a
+    «خلال ...» found here, never one from the ticket. None (no known issue type) gives the company
+    facts alone."""
     facts_src = load_yaml("policy.yaml")
     facts = []
     if facts_src["company"].get("support_hours_ar"):
         facts.append(f"Support hours: {facts_src['company']['support_hours_ar']}")
-    rt = (facts_src["subcategories"].get(ex.subcategory) or {}).get("response_time_ar")
+    rt = (facts_src["subcategories"].get(subcategory) or {}).get("response_time_ar")
     if rt:
         facts.append(f"Expected response time for this issue: {rt}")
     return facts
+
+
+def known_facts(ex: Extraction) -> list[str]:
+    """The policy facts for this ticket's issue type, as the drafter's prompt lists them."""
+    return policy_facts(ex.subcategory)
+
+
+def facts_text(subcategory: str | None) -> str:
+    """The policy facts as draft_check reads them (its facts_text argument): one per line. The
+    pipeline checks every draft with this, and so does the viewer when an agent edits one, so both
+    allow exactly the same times."""
+    return "\n".join(policy_facts(subcategory))
 
 
 def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:

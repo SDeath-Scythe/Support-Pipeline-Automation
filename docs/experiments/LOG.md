@@ -4,6 +4,95 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 1 Nov: The agent inbox (UI), no model calls
+
+**Why.** The mentor asked for more care on functionality, security and UI/UX. The viewer's first screen was a debugger: one ticket's stage-by-stage trace, with gold labels, scores and model ids. A support agent needs the opposite: a queue, one ticket, a draft to check, and a quick way to decide. No model was called for this work, and nothing was spent.
+
+**What the agent sees** («وضع الموظف», the default screen):
+- **A queue** with four tabs and counts: تحتاج تأكيد (flagged), متصعّدة (escalated), جاهزة (drafted), خلصت (decided). It is sorted by priority, then arrival. Each row has an icon and a word for its status (never colour alone), the id, the priority («P1 · عاجلة»), the team and the first words. A counter («خلصت 12 من 80») and a strip count what is handled, what is left, and the escalations by reason.
+- **The ticket:** the customer's text with each extracted fact (reference, amount, phone, time) underlined where it was written, and a list of the facts that lights up its place in the text. A one-line summary gives the type, team, priority and what is missing. Confidence is a word with what was done about it («واثق», «غير متأكد: انراجع بنموذج ثاني», «متصعّد»), never a decimal. Anything not ready opens with one line saying why.
+- **The draft** is in an editable box. The draft checks are highlighted on the phrase, with the reason in Arabic. They run again on every edit (`POST /api/check`, about 400 ms after typing stops).
+- **Friction follows risk.** A ready draft is approved with one key (Ctrl/Cmd+Enter). A flagged ticket names the one thing to check, and approve stays off until «تأكدت من …» is ticked. A draft that asks for a code or password cannot be approved until the text no longer asks. An escalated ticket has no draft at all: the team note is the main content, under a red banner for fraud. When the two models disagreed, both answers are shown, with the team and priority each would get.
+- **Decisions** (approve, edit, take over, forward, with optional reason chips and corrections) go to the decision log, which keeps no reply text. Each one can be undone (Ctrl+Z or the toast). They come back after a reload. When the list is done, a session summary counts approved as-is, edited, taken over, forwarded, corrections, drafts kept unchanged, the median seconds, and the reasons. This is the human-feedback evidence the project still lacks (CONTEXT §7, "Open"), ready to collect.
+- **Keyboard:** J/K, E, Esc, T, F, W, 1–4, ? and Ctrl+Z, bound by key position so the Arabic layout works. Single keys can be switched off. The page also works at phone width: the queue and the ticket are two screens, and the action bar sits at the bottom.
+- A pasted ticket («تذكرة جديدة») shows its stage in the queue row while it runs, then opens.
+- The page always says «ما ينرسل شي للزبون تلقائياً».
+
+**«كيف يشتغل» (how it works)** keeps everything the old viewer showed: the run and ticket-set picker, the overview (accuracy against gold, outcomes, calibration, review rate, cost and time), the stage-by-stage trace with the gate scale, prompts and raw replies, the gold table and the run's decision summary. Two old bugs are fixed: replay timers kept running after a switch, and the gold table heading could read "undefined". Clicking a set ticket no longer runs it (that spent money): a separate button does, and "run all" asks first, stating the count.
+
+**Security changes:**
+- **Strict CSP with no inline code:** `script-src 'self'; style-src 'self'`, no `'unsafe-inline'`, `connect-src 'self'`, `frame-ancestors 'none'`. This closes the open item in the entry below. The page is a markup shell. The code is in ES modules under `app/static/js/`, and every node is built with `textContent`, never `innerHTML`.
+- **Fonts are local:** IBM Plex Sans Arabic and IBM Plex Mono, from @fontsource 5.3.0, under the SIL Open Font License. `SOURCE.txt` has the sha256 of each file. The page makes no request to another host.
+- **Static files by allow-list:** `/static/` serves only files under `app/static/` with an allowed extension, each with an exact content type. Traversal, encoded dots, hidden files, folders and symlinks out get 404.
+- **`/api/check`** has the same guards as the other POSTs. It never logs or stores the draft.
+- `localStorage` holds four preferences only, never ticket text or drafts.
+
+**How it was checked:**
+- **pytest:** 625 pass (549 before: 70 new for the server, 6 for the page).
+- **Browser smoke test** (`node tests/ui/smoke.cjs`, new): it starts its own viewer with no key and `PIPELINE_MODE=off`, then drives Chromium at desktop and phone width, light and dark. **178/178 checks pass**, three runs in a row. It checks:
+  - no console errors, CSP violations or requests to another host
+  - tab counts 9/6/65 on `saved/test2/final`
+  - no gold label, model id or check mark in agent mode, over all 80 tickets
+  - approve, undo, the flagged tick and the blocked secret request, each read back from the decision log
+  - forward, reload, J/K, the process overview (type 78/80, priority 79/80) and a trace
+  - a pasted ticket ending escalated with `pipeline_off`
+  - a 4,100-character ticket refused in Arabic by the page, and by the server (413)
+  - no sideways scroll at 360 px
+- **Live run from the cache only** (`LLM_BACKEND=api`, `LLM_CACHE_ONLY=1`, `LLM_BUDGET_USD=0.001`). The real key was not in the viewer's environment: a placeholder value let the page offer live runs, so even a cache bypass could not reach a paid call.
+  - t2-0001 and t2-0009, pasted into the page, ended drafted and flagged (`recheck_used_second`), the same as the saved run. Outcome, flags, team, priority and draft text are identical.
+  - The queue row showed every stage word, including «يراجع…» for the re-check.
+  - Both landed in the inbox with their draft and check list. t2-0009 also showed the two-answer choice and the tick.
+  - 5 model steps, all from the cache: **0 misses**, no error events.
+- **Integration fixes found by these checks:**
+  - Ctrl+Enter did nothing when the focus was on a queue row, which is where J/K leave it. The listbox took the key as "open".
+  - Two tables in «كيف يشتغل» made the page scroll sideways at 360 px.
+  - The outcome bar cut off its labels.
+  - A reference could break across two lines inside its underline.
+  - After the last decision the queue showed an empty tab instead of «خلصت».
+  - A live row showed «…» between its result and the end of the stream.
+- **Screenshots** in `docs/demo/`:
+  - `inbox-desktop.png`, `inbox-flagged.png`, `inbox-escalated.png`, `inbox-phone.png`, `inbox-dark.png`
+  - `process-overview.png`, `process-trace.png`
+  - `inbox-done.png`. A script decided all 80 tickets of the final run through the page for this one (redone after the review below), so its times (median 0.3 s) are not a person's; the page itself now says so («80 قرار انحسمت بأقل من 3 ثواني»).
+
+**Still open:**
+- No agent has used it yet. The decision log and the session summary have no human data.
+- No automated accessibility audit and no screen-reader pass. Landmarks, labels, the listbox, focus and contrast (AA in both themes) were checked by hand and in Playwright.
+- The keys were tested with key codes, not on a real Arabic keyboard or on macOS.
+- A fact written in words («مليونين», «خمسين ورقة») is listed but not found in the text.
+- `hold_reason` and `sensitive_number` would block approval, but both are still off by default (the author's decision, entry below). The page names only the checks that ran.
+- `/api/check` takes up to about 0.5 s on 8,000-character repetitive text. The page waits for typing to stop and drops stale replies.
+- README and CONTEXT still describe the old viewer.
+
+**Review.** Five reviewers checked the inbox through five lenses: the agent's workflow and human-in-the-loop UX, Arabic copy and right-to-left type, accessibility (WCAG 2.2 AA), security and privacy, and functional regression against the old viewer. They filed 53 findings (5 high, 18 medium, 30 low; about 45 distinct problems, since several overlap). Each was reproduced first, in Chromium against a viewer with no key and `PIPELINE_MODE=off`, or with a slowed scratch copy for the live-run timing ones. All 53 reproduced, and each got a fix, in full or in part. No model was called.
+- **Fixed, highest risk first:**
+  - Correcting a ticket to fraud now turns it into an escalation: no draft, forward to the fraud team or take it over. Choosing the first model's answer, or another team, adds «المسودة انكتبت لنوع ثاني» to the checks and clears an earlier tick (H1).
+  - Ticks, edits, reasons, corrections and time are kept per run and ticket. Two runs with the same ids no longer share them, and undo acts only on the run it was made in (H2, F1, F2).
+  - Spaced phones and references («0791 079 0226») read in the written order everywhere: queue rows, the customer text, the draft (no-break spaces between digit groups) and approved replies (RTL-1, L3).
+  - The action bar's real height drives the scroll padding, so focus is never hidden under it. Between 721 and 1000 px «ليش؟» is a drawer, closed by Escape (A11Y-1).
+  - A check still running when approve is pressed can no longer pass newer text: the draft locks, and findings count only for the exact text they were computed on. The server now refuses (409) an approval whose reply asks for a code, and a second decision on a ticket that already has one (SEC-1, F8).
+  - Undo brings back the edit; take-over always needs a second press (M1, F3). A ticked warning is logged as `warnings_acknowledged` (kinds only), and the tick no longer claims the opposite of the finding (M2). Seconds add up over visits and pause while the ticket is hidden, with `visits` logged; a live ticket's clock starts at its result (M3, F5). The inbox opens on, and moves to, the most urgent open ticket (M4). Decisions under 3 s are counted apart in both summaries, and a refused approve focuses what to check, not the tick (M5). The caret stays above the bar while checks answer (M6).
+  - Accessibility: focus never drops to `<body>` (A11Y-2). Focus lands on the new live ticket, and its end and the budget cap are announced (A11Y-3). The other fixes: skipped stages at full contrast (A11Y-4), «?» off with single keys (A11Y-5, L7), an `h1` and the phone skip link (A11Y-6), the outcome legend (A11Y-7), no load on arrow keys (A11Y-8), button names (A11Y-9), forced colours (A11Y-10) and table rows (A11Y-11).
+  - Privacy and robustness: the paste box has no autocomplete or spellcheck and forgets cancelled text (SEC-2). Direction controls are dropped from customer text, with a note (SEC-3). Data-keyed maps have no inherited keys (SEC-4). Run-all stops when a saved ticket is opened (F7). A cut-off replay is redrawn (F4). The type comes from the classify step when the drafter failed (F6). «شغّلها» is free again once the server takes a run (F9).
+  - «كيف يشتغل» opens on an 8-step stage map with counts and an example ticket per step (L5). The gate labels sit at 0.60 and 0.75 (L4, PROC-1). Experiment runs and the recompute note moved there (L6).
+  - Copy: Iraqi forms (اكو، ماكو، مو متأكد، اقرا, also in the pipeline's fixed notes), number agreement, one colon per line, one word per concept, both key letters, the forward arrow pointing left, and Arabic key letters and prompts in Plex Sans Arabic (COPY-1 to 9, RTL-2, TYPE-1, TYPE-2).
+- **Not done, and why:**
+  - «متصعّد» stays masculine: it is the spec's wording. «غير متأكد» and «ما في» did change, because the hard rule asks for Iraqi forms (مو، ماكو).
+  - Stripping direction controls in `clean()` would change what the model reads, so it waits for a flag and a with/without run. The page strips them for display only.
+  - The why panel now says «المفروض تطلب» and stops listing a bill type the customer named. It does not yet check whether the draft really asks (L1).
+  - Fast decisions are flagged in the summaries, not by a new field in the log (the log has `seconds` and `visits`).
+  - axe still reports `landmark-one-main` on the phone's queue screen, where `<main>` is hidden. It is a best-practice rule, not a WCAG failure.
+- **Where reviewers differed:**
+  - On a refused approve, focus now goes to the choice or the box to check, not straight to the tick. The workflow reviewer showed that the tick let 9 flagged tickets pass in 3 keys each without a look.
+  - Experiment runs left the agent's picker, rather than being grouped there.
+- **Checks:**
+  - pytest: 642 pass (17 new for the decision rules).
+  - `node tests/ui/smoke.cjs`: 250/250 (72 new checks, one per fixed behaviour where practical).
+  - A reproduction script showed each finding before the fixes and none after, apart from the parts under «Not done».
+  - The focus-obscured sweep (1280×600, 1093×520, 911×512, 768×1024, 360×780) shows no hidden focus.
+  - axe on 7 states shows no WCAG violation.
+  - The screenshots in `docs/demo/` are redone.
+
 ## 1 Nov: Security and reliability hardening (no model calls)
 
 The mentor asked for more security. A review on 1 Nov found 12 problems, each checked by hand before it was fixed. This entry lists the fixes, how they were checked, and what is still open. No model was called and nothing was spent: tests stub every model, and the replays below read only the response cache (`LLM_CACHE_ONLY=1`, which raises instead of calling a model, with a $0.001 cap as a second lock).

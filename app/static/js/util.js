@@ -1,0 +1,282 @@
+// Small helpers shared by every view. Every node is built here with textContent: no HTML strings, so a
+// ticket or a model reply can never become markup.
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** el("div", {class: "x", text: "..."}, child, "text", [more]) */
+export function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else if (k === "dataset") Object.assign(n.dataset, v);
+    else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v);
+    else if (k === "hidden" || k === "disabled" || k === "checked") n[k] = !!v;
+    else n.setAttribute(k, v === true ? "" : String(v));
+  }
+  append(n, kids);
+  return n;
+}
+
+/** node.append() that skips null, false and nested arrays (append(null) would add the text "null"). */
+export function add(n, ...kids) {
+  append(n, kids);
+  return n;
+}
+
+function append(n, kids) {
+  for (const k of kids.flat(Infinity)) {
+    if (k == null || k === false) continue;
+    n.append(k.nodeType ? k : document.createTextNode(String(k)));
+  }
+}
+
+/** A map read with keys that come from data (flags, teams, types): no inherited keys, so a key like
+ *  "constructor" or "__proto__" reads as missing instead of reaching Object.prototype. */
+export function dict(obj) {
+  return Object.assign(Object.create(null), obj || {});
+}
+
+/** A left-to-right island inside Arabic text: ids, references, phones, amounts, P1, times, model ids. */
+export function ltr(text, cls = "") {
+  return el("bdi", { dir: "ltr", class: cls || null, text: String(text) });
+}
+export const mono = (text) => ltr(text, "mono");
+export const num = (text) => ltr(text, "num");
+
+// Line icons (24 px grid, drawn with currentColor). Built with createElementNS, never from a string.
+const ICONS = {
+  ready: ["M20 6 9 17l-5-5"],
+  check: ["M12 9v4", "M12 17h.01", "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"],
+  escalated: ["M12 3 4 6v6c0 5 3.4 8.5 8 9 4.6-.5 8-4 8-9V6z", "M12 8v4", "M12 16h.01"],
+  done: ["M22 11.1V12a10 10 0 1 1-5.9-9.1", "M22 4 12 14l-3-3"],
+  running: ["M21 12a9 9 0 1 1-6.2-8.6"],
+  lost: ["M2 2l20 20", "M8.5 16.4a5 5 0 0 1 7 0", "M2 8.8a15 15 0 0 1 4.2-2.6", "M10.7 5.1A15 15 0 0 1 22 8.8", "M12 20h.01"],
+  back: ["M9 18l6-6-6-6"],          // drawn pointing right: "back" in a right-to-left page
+  next: ["M15 18l-6-6 6-6"],
+  up: ["M18 15l-6-6-6 6"],
+  down: ["M6 9l6 6 6-6"],
+  plus: ["M12 5v14", "M5 12h14"],
+  keyboard: ["M2 6h20v12H2z", "M6 10h.01", "M10 10h.01", "M14 10h.01", "M18 10h.01", "M7 14h10"],
+  panel: ["M3 4h18v16H3z", "M9 4v16"],
+  lock: ["M5 11h14v10H5z", "M8 11V7a4 4 0 0 1 8 0v4"],
+  send: ["M19 12H5", "M11 6l-6 6 6 6"],   // forward points left in a right-to-left page
+  user: ["M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2", "M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"],
+  undo: ["M9 14 4 9l5-5", "M4 9h11a5 5 0 0 1 0 10h-3"],
+  edit: ["M12 20h9", "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"],
+  close: ["M18 6 6 18", "M6 6l12 12"],
+};
+export function icon(name, cls = "") {
+  const s = document.createElementNS(SVG_NS, "svg");
+  s.setAttribute("viewBox", "0 0 24 24");
+  s.setAttribute("aria-hidden", "true");
+  s.setAttribute("focusable", "false");
+  s.setAttribute("class", `icon icon-${name} ${cls}`.trim());
+  for (const d of ICONS[name] || []) {
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    s.append(p);
+  }
+  return s;
+}
+
+const AR_LETTER = /[\u0600-\u06FF]/;
+/** <kbd> hints: kbd("J", "ت") → "J / ت"; kbd("Ctrl+Enter"). A single key (no modifier) is hidden while
+ *  single-key shortcuts are switched off (body.keys-off); an Arabic letter gets the Arabic face. */
+export function kbd(...keys) {
+  const single = keys.every((k) => !k.includes("+"));
+  const out = el("span", { class: `kbd-hint${single ? " kbd-single" : ""}`, "aria-hidden": "true" });
+  keys.forEach((k, i) => {
+    if (i) out.append(el("span", { class: "kbd-sep", text: "/" }));
+    out.append(el("kbd", { class: AR_LETTER.test(k) ? "kbd-ar" : null, dir: AR_LETTER.test(k) ? null : "ltr", text: k }));
+  });
+  return out;
+}
+export const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+export const MOD = MAC ? "⌘" : "Ctrl";
+
+// --- numbers and digits ---
+
+const AR_DIGITS = /[٠-٩۰-۹]/g;
+/** Arabic-Indic and Persian digits as Western digits, one character for one (offsets stay valid). */
+export function westernDigits(s) {
+  return String(s ?? "").replace(AR_DIGITS, (d) => {
+    const c = d.charCodeAt(0);
+    return String(c >= 0x6f0 ? c - 0x6f0 : c - 0x660);
+  });
+}
+export const fmtInt = (n) => Number(n).toLocaleString("en-US");
+
+/** Seconds as nodes, the numbers in left-to-right islands: «14 ث», «2 د 5 ث». */
+export function fmtSeconds(s) {
+  if (s == null || !isFinite(s)) return "—";
+  if (s < 60) return [num(s < 10 ? s.toFixed(1) : String(Math.round(s))), " ث"];
+  const m = Math.floor(s / 60), r = Math.round(s % 60);
+  return [num(String(m)), " د ", num(String(r)), " ث"];
+}
+
+export function median(xs) {
+  const a = xs.filter((x) => typeof x === "number" && isFinite(x)).sort((p, q) => p - q);
+  if (!a.length) return null;
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
+// Digit groups split by spaces («0791 079 0226», «9776 593217»): in a right-to-left paragraph each group
+// is its own number and the space between them is neutral, so the groups come out in reverse order.
+const DIGIT_GROUPS = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[ \u00A0][0-9\u0660-\u0669\u06F0-\u06F9]+)+/g;
+
+/** Plain text with every run of space-separated digit groups in a left-to-right island, so a phone or a
+ *  reference reads in the order it was written (read-only text: queue rows, replies, the customer). */
+export function digitRuns(s) {
+  const frag = document.createDocumentFragment();
+  const str = String(s ?? "");
+  let last = 0;
+  for (const m of str.matchAll(DIGIT_GROUPS)) {
+    if (m.index > last) frag.append(str.slice(last, m.index));
+    frag.append(ltr(m[0], "num"));
+    last = m.index + m[0].length;
+  }
+  if (last < str.length) frag.append(str.slice(last));
+  return frag;
+}
+
+// The draft box can't hold an island, so a space between two digits is shown as a no-break space
+// (U+00A0): its bidi class (CS) joins the groups into one number. One character for one, so the check
+// offsets stay valid; realDraft() turns it back before the text is compared, checked or saved.
+const DIGIT_SPACE = /(?<=[0-9\u0660-\u0669\u06F0-\u06F9]) (?=[0-9\u0660-\u0669\u06F0-\u06F9])/g;
+const DIGIT_NBSP = /(?<=[0-9\u0660-\u0669\u06F0-\u06F9])\u00A0(?=[0-9\u0660-\u0669\u06F0-\u06F9])/g;
+export const shownDraft = (text) => String(text ?? "").replace(DIGIT_SPACE, "\u00A0");
+export const realDraft = (shown) => String(shown ?? "").replace(DIGIT_NBSP, " ");
+
+// Direction controls (embeddings, overrides, isolates, marks) change the order text is drawn in, not the
+// order the model and the rules read. The page shows the order they read, and says how many it hid.
+const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
+const BIDI_MARKS = /[\u200E\u200F]/g;
+/** Customer text without direction controls: {text, hidden} (hidden counts the controls, not the marks). */
+export function plainText(s) {
+  const str = String(s ?? "");
+  const hidden = (str.match(BIDI_CONTROLS) || []).length;
+  return { text: str.replace(BIDI_CONTROLS, "").replace(BIDI_MARKS, ""), hidden };
+}
+
+/** A count with its noun in the right form: 1 «تذكرة وحدة», 2 «تذكرتين», 3–10 «3 تذاكر», 11+ «11 تذكرة». */
+export function countAr(n, { one, two, few, many }) {
+  if (n === 1) return one;
+  if (n === 2) return two;
+  return [num(String(n)), " ", n >= 3 && n <= 10 ? few : many];
+}
+const TICKET_FORMS = { one: "تذكرة وحدة", two: "تذكرتين", few: "تذاكر", many: "تذكرة" };
+export const ticketsAr = (n) => countAr(n, TICKET_FORMS);
+/** The same as plain text (for an <option>, a title). */
+export const ticketsText = (n) => (n === 1 ? TICKET_FORMS.one : n === 2 ? TICKET_FORMS.two : `${n} ${n >= 3 && n <= 10 ? TICKET_FORMS.few : TICKET_FORMS.many}`);
+
+/** Text with every run of Latin letters or digits wrapped in an LTR island (for notes from the pipeline). */
+export function richText(s) {
+  const frag = document.createDocumentFragment();
+  const re = /[0-9A-Za-z$](?:[0-9A-Za-z$,._:/-]*[0-9A-Za-z$])?(?:\s[0-9](?:[0-9,._-]*[0-9])?)*/g;
+  let last = 0, m;
+  const str = String(s ?? "");
+  while ((m = re.exec(str))) {
+    if (m.index > last) frag.append(str.slice(last, m.index));
+    frag.append(ltr(m[0], /^[0-9$]/.test(m[0]) ? "num" : ""));
+    last = m.index + m[0].length;
+  }
+  if (last < str.length) frag.append(str.slice(last));
+  return frag;
+}
+
+// --- offsets: the server counts code points (Python), the page counts UTF-16 units ---
+
+/** [start, end) in code points → [start, end) in UTF-16 units of the same text; null if out of range. */
+export function cpToUtf16(text, start, end) {
+  let cp = 0, u = 0, s = null, e = null;
+  for (const ch of text) {
+    if (cp === start) s = u;
+    if (cp === end) e = u;
+    cp++;
+    u += ch.length;
+  }
+  if (s === null && cp === start) s = u;
+  if (e === null && cp === end) e = u;
+  return s === null || e === null || e < s ? null : [s, e];
+}
+
+/** A text as fragments with some ranges wrapped: spans = [{start, end, make(text) → node}] in UTF-16.
+ *  plain(text) builds the parts between them (default: the text as it is). */
+export function spanned(text, spans, plain = (t) => t) {
+  const frag = document.createDocumentFragment();
+  const sorted = spans.filter((x) => x && x.end > x.start).sort((a, b) => a.start - b.start);
+  let at = 0;
+  for (const sp of sorted) {
+    if (sp.start < at) continue;   // overlapping ranges: the first wins
+    if (sp.start > at) frag.append(plain(text.slice(at, sp.start)));
+    frag.append(sp.make(text.slice(sp.start, sp.end)));
+    at = sp.end;
+  }
+  if (at < text.length) frag.append(plain(text.slice(at)));
+  return frag;
+}
+
+// --- preferences: never ticket text, drafts or edits ---
+
+const PREF_KEY = "support-viewer-prefs-v1";
+const PREF_DEFAULTS = { mode: "agent", singleKeys: true, whyOpen: true, source: null };
+export function loadPrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PREF_KEY) || "{}");
+    const out = { ...PREF_DEFAULTS };
+    if (raw.mode === "agent" || raw.mode === "process") out.mode = raw.mode;
+    if (typeof raw.singleKeys === "boolean") out.singleKeys = raw.singleKeys;
+    if (typeof raw.whyOpen === "boolean") out.whyOpen = raw.whyOpen;
+    if (typeof raw.source === "string" && raw.source.length < 300) out.source = raw.source;
+    return out;
+  } catch {
+    return { ...PREF_DEFAULTS };
+  }
+}
+export function savePrefs(prefs) {
+  try {
+    const { mode, singleKeys, whyOpen, source } = prefs;
+    localStorage.setItem(PREF_KEY, JSON.stringify({ mode, singleKeys, whyOpen, source }));
+  } catch { /* private window or blocked storage: the page works without it */ }
+}
+
+export function reducedMotion() {
+  return matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+export function isPhone() {
+  return matchMedia("(max-width: 720px)").matches;
+}
+
+/** True when a key press is going into a text field (single-key shortcuts stay quiet). */
+export function typingIn(target) {
+  if (!target || !(target instanceof Element)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  if (tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (tag === "INPUT") return !["checkbox", "radio", "button", "submit", "reset", "range", "color"].includes(target.type);
+  return false;
+}
+
+export function debounce(fn, ms) {
+  let t = null;
+  const d = (...args) => { clearTimeout(t); t = setTimeout(() => { t = null; fn(...args); }, ms); };
+  d.cancel = () => { clearTimeout(t); t = null; };
+  d.pending = () => t !== null;
+  return d;
+}
+
+/** Native modal dialog: the rest of the page is inert, Escape closes it, focus returns where it was,
+ *  unless something else took the focus meanwhile (a ticket the dialog started opened its heading). */
+export function openDialog(dlg, focusEl) {
+  const back = document.activeElement;
+  dlg.addEventListener("close", () => {
+    const now = document.activeElement;
+    const free = !now || now === document.body || dlg.contains(now);
+    if (free && back && back.isConnected) back.focus();
+  }, { once: true });
+  dlg.showModal();
+  (focusEl || dlg.querySelector("[autofocus]") || dlg.querySelector("button, textarea, input, select"))?.focus();
+}
