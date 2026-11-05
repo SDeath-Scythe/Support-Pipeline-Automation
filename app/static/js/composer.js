@@ -7,7 +7,7 @@
 import { checkDraft, ServerError } from "./api.js";
 import { CHECK_SHORT_AR } from "./labels.js";
 import { S, draftDone, extractionOf, uid } from "./state.js";
-import { MOD, cpToUtf16, debounce, el, icon, realDraft, shownDraft, spanned } from "./util.js";
+import { cpToUtf16, debounce, el, icon, realDraft, shownDraft, spanned, withTip } from "./util.js";
 
 /** The draft and its findings as saved by the pipeline (spans from 1 Nov, or recomputed by the server). */
 export function originalDraft(item) {
@@ -41,18 +41,17 @@ export function buildComposer(item, onUpdate) {
   const mirror = el("div", { class: "composer-mirror", "aria-hidden": "true" });
   const ta = el("textarea", {
     id: "draft", class: "composer-input", dir: "rtl", lang: "ar", spellcheck: "false", autocomplete: "off",
-    "aria-describedby": "draftChecks draftHint", rows: "4",
+    "aria-describedby": "draftChecks", rows: "4",
   });
   // Shown with a no-break space between digit groups, so «0791 079 0226» reads as written (util.js).
   ta.value = shownDraft(text);
   const field = el("div", { class: "composer-field" }, mirror, ta);
+  // Ctrl+Enter from inside the draft and Esc out of it are on the approve button and in the «?» sheet.
   const list = el("div", { id: "draftChecks", class: "checks", "aria-live": "off" });
-  const hint = el("p", { id: "draftHint", class: "hint" }, "تكدر تعتمد من داخل المسودة بـ ", el("kbd", { dir: "ltr", text: `${MOD}+Enter` }),
-    "، و", el("kbd", { dir: "ltr", text: "Esc" }), " يطلعك منها.");
 
   const node = el("section", { class: "composer", "aria-labelledby": "draftLabel" },
     el("div", { class: "composer-head" }, el("span", { id: "draftLabel" }, label), restore),
-    field, list, hint);
+    field, list);
 
   function fit() {
     ta.style.height = "auto";
@@ -63,10 +62,15 @@ export function buildComposer(item, onUpdate) {
 
   function spans() {
     if (checkedText !== text) return [];   // offsets of an older text would land on the wrong words
-    return findings.map((f, i) => {
+    const all = findings.map((f, i) => {
       const r = cpToUtf16(text, f.start, f.end);
-      return r && { start: r[0], end: r[1], make: (s) => el("mark", { class: `finding ${isBlocking(f.kind) ? "is-blocking" : "is-warn"}`, dataset: { finding: String(i) }, text: s }) };
-    });
+      const block = isBlocking(f.kind);
+      return r && { start: r[0], end: r[1], block, make: (s) => el("mark", { class: `finding ${block ? "is-blocking" : "is-warn"}`, dataset: { finding: String(i) }, text: s }) };
+    }).filter(Boolean);
+    // Where a warning and a blocking finding overlap (a card number is also an unknown number), the phrase
+    // that stops the approval is the one drawn, whole.
+    const blocks = all.filter((x) => x.block);
+    return all.filter((x) => x.block || !blocks.some((b) => x.start < b.end && b.start < x.end));
   }
 
   function drawMirror() {
@@ -104,8 +108,10 @@ export function buildComposer(item, onUpdate) {
         return el("li", {}, b);
       })));
     } else if (current()) {
+      // All clear: a few muted words; what was checked is in their tip (hover, focus, or a tap that pins it).
       const ran = (S.meta.checks_active || []).map((k) => CHECK_SHORT_AR[k] || k);
-      items.push(el("p", { class: "checks-clean" }, icon("ready"), `فحصنا المسودة وما لكينا: ${ran.join("، ")}`));
+      const ok = el("button", { type: "button", class: "checks-ok" }, icon("ready"), "ما بيها مشكلة");
+      items.push(withTip(ok, `فحصنا المسودة وما لكينا: ${ran.join("، ")}`, { id: "checksTip", tag: "p", cls: "checks-clean" }));
     }
     list.replaceChildren(...items);
   }

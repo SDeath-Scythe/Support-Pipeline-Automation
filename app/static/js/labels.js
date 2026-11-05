@@ -15,7 +15,8 @@ export const TABS = [
   { id: "done", label: "خلصت" },
 ];
 
-// A row's status: an icon and a word, never colour alone.
+// A row's status: a word, never colour alone. Inside a tab the word is the row's accessible name only
+// (the tab already says it); a live row and a broken run show it, with an icon.
 export const STATUS = dict({
   drafted: { icon: "ready", word: "جاهزة" },
   flagged: { icon: "check", word: "تحتاج تأكيد" },   // the tab's own words
@@ -28,6 +29,8 @@ export const STATUS = dict({
 export const ACTION_WORD = dict({
   approved: "انعتمدت", edited: "انعدّلت وانعتمدت", took_over: "استلمتها", forwarded: "تحوّلت",
 });
+// The small icon a decided row shows in «خلصت» (its name is ACTION_WORD).
+export const ACTION_ICON = dict({ approved: "ready", edited: "edit", took_over: "user", forwarded: "send" });
 
 // The live row while a ticket goes through: what is happening now.
 export const STAGE_DOING = dict({
@@ -79,7 +82,7 @@ export const IDENTITY_IF_REPLY_AR = "إذا رديت على الزبون، تأ�
 // One sentence per flag for the line at the top of a ticket: why it is not ready, with no "title:"
 // chained in front of another colon. A flag missing here falls back to the server's wording.
 export const WHY_AR = dict({
-  recheck_used_second: "النموذجين اختلفوا بنوع المشكلة واعتمدنا جواب المراجعة الثانية. تأكد من النوع.",
+  recheck_used_second: "النموذجين اختلفوا بنوع المشكلة، تأكد من النوع.",
   recheck_disagreed: "النموذجين اختلفوا بنوع المشكلة، فيستلمها موظف.",
   invalid_category: "التصنيف ما يطابق قائمة الأقسام. تأكد من النوع.",
   "missing:reference": "رقم العملية ناقص. تأكد إن الرد يطلبه.",

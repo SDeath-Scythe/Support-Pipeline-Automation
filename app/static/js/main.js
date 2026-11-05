@@ -13,15 +13,17 @@ import { dict, el, isPhone, loadPrefs, savePrefs, ticketsText } from "./util.js"
 
 const $ = (id) => document.getElementById(id);
 const save = () => savePrefs({ ...S.prefs, mode: S.mode });
-// The why panel opens by itself only where it is a column beside the ticket (over 1000 px wide).
-const wide = () => matchMedia("(min-width: 1001px)").matches;
+// «ليش؟» starts closed. It opens on load only if the agent opened it and left it open, and only where it
+// is a column of its own beside the ticket (over 1000 px): never as a drawer over the ticket, never on a
+// phone, where it is a section under the ticket.
+const whyOnLoad = () => !!S.prefs.whyOpen && matchMedia("(min-width: 1001px)").matches;
 
 async function init() {
   S.prefs = loadPrefs();
   S.mode = S.prefs.mode;
   initToast();
   onTrouble(trouble);
-  document.body.classList.toggle("why-open", S.prefs.whyOpen && wide());
+  inbox.setWhyOpen(whyOnLoad());
   document.body.classList.toggle("keys-off", !S.prefs.singleKeys);
   document.body.dataset.screen = "queue";
   watchSizes();
@@ -110,6 +112,7 @@ function wire() {
     focusDraft: () => inbox.focusDraft(),
     leave: () => inbox.leaveDraft(),
     takeOver: () => inbox.takeOver(),
+    disarm: () => inbox.disarm({ focus: true }),
     forward: () => inbox.forward(),
     toggleWhy: () => inbox.toggleWhy(),
     closeWhy: () => inbox.toggleWhy(false),
@@ -146,8 +149,11 @@ function wire() {
   // check state and the focus. On a phone the open ticket stays on screen.
   matchMedia("(max-width: 720px)").addEventListener("change", () => {
     document.body.dataset.screen = S.agent.openKey ? "ticket" : "queue";
-    document.body.classList.toggle("why-open", S.prefs.whyOpen && wide());
+    inbox.setWhyOpen(whyOnLoad());
   });
+  // Across 1000 px «ليش؟» turns from a column into a drawer over the ticket (or back): it follows the
+  // agent's choice where it is a column, and closes where it would cover the ticket.
+  matchMedia("(min-width: 1001px)").addEventListener("change", () => inbox.setWhyOpen(whyOnLoad()));
 }
 
 /**
@@ -224,7 +230,7 @@ function updateNewButton() {
 }
 
 function modeBanners() {
-  if (S.meta.mode === "off") setBanner("mode", { kind: "warn", title: "النظام موقف.", text: "أي تذكرة جديدة تروح لموظف بدون ما تنرسل لنموذج. التشغيلات المحفوظة والقرارات تشتغل عادي." });
+  if (S.meta.mode === "off") setBanner("mode", { kind: "warn", title: "النظام موقف:", text: "أي تذكرة جديدة تروح لموظف بدون نموذج." });
   else if (S.meta.mode === "classify_only") setBanner("mode", { kind: "warn", title: "المسودات موقفة.", text: "النظام يصنّف التذاكر ويوجّهها بس، والرد على الموظف." });
   if (S.meta.cache_only && S.meta.live.available) setBanner("cache", { kind: "info", title: "إعادة من الكاش.", text: CACHE_AR });
 }
@@ -250,15 +256,16 @@ function loadOnPick(sel, load) {
 }
 
 // The agent picks among the runs meant to be worked: the committed final run and batch runs. Experiment
-// runs (with their configuration names) are in «كيف يشتغل».
+// runs (with their configuration names) are in «كيف يشتغل». The picker is small and unlabelled on screen
+// (its name is «المصدر»); its text is where the page says, once, that this is a saved run. The queue's
+// heading gives a saved run's count.
 const SET_AR = dict({ test2: "الاختبار النهائي", mvp_test: "اختبار الـ MVP", dev: "مجموعة التطوير" });
 function buildSourcePicker() {
   const sel = $("source");
   const work = S.runs.filter((r) => r.name.startsWith("saved/") || !r.experiment);
   const label = (r) => {
-    const count = typeof r.n === "number" ? ` (${ticketsText(r.n)})` : "";
-    if (r.name.startsWith("saved/")) return `${SET_AR[r.set] || r.set}${count}`;
-    return `دفعة ${(r.started || "").replace("T", " ").slice(0, 16)}${count}`;
+    if (r.name.startsWith("saved/")) return `تشغيل محفوظ: ${SET_AR[r.set] || r.set}`;
+    return `دفعة ${(r.started || "").replace("T", " ").slice(0, 16)}${typeof r.n === "number" ? ` (${ticketsText(r.n)})` : ""}`;
   };
   const g1 = el("optgroup", { label: "تشغيلات محفوظة" });
   const g2 = el("optgroup", { label: "تشغيلات دفعة" });
@@ -288,7 +295,6 @@ async function loadAgentSource(name) {
   inbox.renderQueue();
   inbox.renderTicket();
   inbox.renderWhy();
-  $("savedNote").hidden = !name;
   if (!name) {
     S.agent.loading = false;
     renderAgent();

@@ -23,11 +23,11 @@
     <button type="button" id="modeProcess" class="mode-btn" aria-pressed="false">كيف يشتغل</button>
   </div>
 
-  <label class="field source-field" id="sourceField">
-    <span class="field-label">المصدر</span>
-    <select id="source" class="select"></select>
+  <!-- Small and unlabelled on screen; its name is «المصدر». Its text says when the queue is a saved run. -->
+  <label class="source-field" id="sourceField">
+    <span class="sr-only">المصدر</span>
+    <select id="source" class="select select-quiet"></select>
   </label>
-  <p class="saved-note" id="savedNote" hidden>تشغيل محفوظ: للعرض، ما ينرسل شي</p>
 
   <div class="top-actions">
     <button type="button" id="newTicket" class="btn">
@@ -50,25 +50,16 @@
   </nav>
 
   <main id="main" class="pane pane-main" tabindex="-1">
-    <!-- The first-visit card (main.js shows it until «فهمت»). Drawn once, never re-rendered and not a live
-         region, so it is read once in reading order. On a phone main.js moves it above the queue. The tabs
-         are explained in the queue's order. -->
+    <!-- The first-visit card (main.js shows it until «فهمت»): the sentence and the three tabs, in the queue's
+         order. Its heading is for a screen reader only. Drawn once, never re-rendered and not a live region,
+         so it is read once in reading order. On a phone main.js moves it above the queue. -->
     <section id="intro" class="intro" aria-labelledby="introTitle" hidden>
-      <h2 id="introTitle" class="intro-title">أول مرة هنا؟</h2>
+      <h2 id="introTitle" class="sr-only">أول مرة هنا؟</h2>
       <p class="intro-lede">النظام رتّب التذاكر وكتب مسودات ردود. انت تقرر: ما ينرسل شي للزبون بدونك.</p>
       <dl class="intro-tabs">
-        <div class="st-flagged">
-          <dt><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>تحتاج تأكيد</dt>
-          <dd>تأكد من النقطة المكتوبة فوق المسودة، وبعدين اعتمدها.</dd>
-        </div>
-        <div class="st-escalated">
-          <dt><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 4 6v6c0 5 3.4 8.5 8 9 4.6-.5 8-4 8-9V6z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>متصعّدة</dt>
-          <dd>ماكو مسودة، حوّلها للقسم أو استلمها بنفسك.</dd>
-        </div>
-        <div class="st-drafted">
-          <dt><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"/></svg>جاهزة</dt>
-          <dd>اقرا المسودة واعتمدها بضغطة.</dd>
-        </div>
+        <div class="st-flagged"><dt>تحتاج تأكيد</dt><dd>تأكد من النقطة تحت المسودة، وبعدين اعتمدها.</dd></div>
+        <div class="st-escalated"><dt>متصعّدة</dt><dd>ماكو مسودة: حوّلها للقسم أو استلمها.</dd></div>
+        <div class="st-drafted"><dt>جاهزة</dt><dd>اقرا المسودة واعتمدها بضغطة.</dd></div>
       </dl>
       <button type="button" id="introOk" class="btn btn-primary btn-small">فهمت</button>
     </section>
@@ -134,7 +125,7 @@
         <tr><th scope="row"><kbd dir="ltr">K</kbd> / <kbd class="kbd-ar">ن</kbd> أو <kbd>↑</kbd></th><td>التذكرة اللي قبلها</td></tr>
         <tr><th scope="row"><kbd dir="ltr">Ctrl+Enter</kbd> أو <kbd dir="ltr">⌘+Enter</kbd></th><td>اعتمد وانتقل، حتى من داخل المسودة</td></tr>
         <tr><th scope="row"><kbd dir="ltr">E</kbd> / <kbd class="kbd-ar">ث</kbd></th><td>روح للمسودة</td></tr>
-        <tr><th scope="row"><kbd>Esc</kbd></th><td>اطلع من المسودة، أو سدّ «ليش؟» إذا مغطّي التذكرة</td></tr>
+        <tr><th scope="row"><kbd>Esc</kbd></th><td>اطلع من المسودة، أو سدّ «ليش؟»، أو ارجع من «استلمها بنفسي»</td></tr>
         <tr><th scope="row"><kbd dir="ltr">T</kbd> / <kbd class="kbd-ar">ف</kbd></th><td>استلمها بنفسي</td></tr>
         <tr><th scope="row"><kbd dir="ltr">F</kbd> / <kbd class="kbd-ar">ب</kbd></th><td>حوّلها للقسم (المتصعّدة)</td></tr>
         <tr><th scope="row"><kbd dir="ltr">W</kbd> / <kbd class="kbd-ar">ص</kbd></th><td>افتح أو سدّ «ليش؟»</td></tr>

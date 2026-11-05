@@ -23,6 +23,15 @@
 // server gives the committed run (made on 30 Oct) the account_risk flag as run.py does now, so the six
 // blocked-account and SIM-change tickets are «تحتاج تأكيد» and the tab counts are 15 / 6 / 59.
 //
+// Since 5 Nov the inbox is calmer: «ليش؟» is a drawer, closed until the agent opens it; the queue head is
+// the counter and its bar; a row is its priority, id and text (its status is in its name); the ticket has
+// one summary line, its facts in one line under the message, a short checks line, and reasons only after
+// an edit, a correction or a take-over. The checks marked «5 Nov calm» follow those defaults. The checks
+// marked «5 Nov review» follow the review of that change: «ليش؟» takes its own column over 1000 px (a drawer
+// over the ticket only at 721–1000 px), the tick sits under the draft, a take-over once armed is the one
+// obvious action, the tips are real elements (a tap pins them, Escape hides them), and the phone's ticket
+// screen keeps the header to one row.
+//
 // Servers are stopped in a finally block. Exit code 0 only if every check passed.
 
 "use strict";
@@ -185,6 +194,11 @@ async function runPass(browser, pass) {
     return d;
   };
   const approveKey = () => (pass.phone ? page.click("#approveBtn") : page.keyboard.press("Control+Enter"));
+  /** «كيف يشتغل»: on a phone's ticket screen the mode switch is on the queue screen (5 Nov review). */
+  const toProcess = async () => {
+    if (pass.phone && await page.evaluate(() => document.body.dataset.screen === "ticket")) await page.locator("#agentMain .back-btn").first().click();
+    await page.click("#modeProcess");
+  };
   const noHScroll = async (where) => {
     const [sw, iw] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
     check(`no horizontal scroll at ${pass.viewport.width} px (${where})`, sw <= iw, `scrollWidth ${sw} > ${iw}`);
@@ -225,6 +239,14 @@ async function runPass(browser, pass) {
       && where.name === "أول مرة هنا؟", JSON.stringify(where));
     check("the intro explains the three working tabs in the tabs' own words and order (J8)", where.tabs.join("|") === "تحتاج تأكيد|متصعّدة|جاهزة"
       && (await text("#intro")).includes("ما ينرسل شي للزبون بدونك"), where.tabs.join("|"));
+    // 5 Nov calm: the card is the sentence, the three-line legend and «فهمت»; its heading names it for a
+    // screen reader only.
+    const shape = await page.evaluate(() => {
+      const c = document.getElementById("intro");
+      return { kids: [...c.children].map((n) => n.tagName + (n.offsetWidth > 1 ? "" : "(hidden)")).join(","), rows: c.querySelectorAll("dd").length };
+    });
+    check("5 Nov calm: the intro is the sentence and the three-line legend (its heading for a screen reader only)",
+      shape.kids === "H2(hidden),P,DL,BUTTON" && shape.rows === 3, JSON.stringify(shape));
     if (pass.phone) {
       await noHScroll("queue screen with the intro");
       // Opening a ticket: the card stays with the queue; the ticket screen and its action bar are as always.
@@ -252,7 +274,7 @@ async function runPass(browser, pass) {
     await page.keyboard.press("Enter");
     await sleep(100);
     const after = await page.evaluate(() => ({ hidden: document.getElementById("intro").hidden, active: document.activeElement?.id || "",
-      saved: JSON.parse(localStorage.getItem("support-viewer-prefs-v1") || "{}").introSeen }));
+      saved: JSON.parse(localStorage.getItem("support-viewer-prefs-v2") || "{}").introSeen }));
     check("«فهمت» hides the card, remembers it, and focus goes on to the work", after.hidden && after.saved === true
       && (pass.phone ? after.active.startsWith("opt-") : after.active === "ticketTitle"), JSON.stringify(after));
   }
@@ -317,7 +339,8 @@ async function runPass(browser, pass) {
     // A11Y-9, TYPE-1, A11Y-1
     const names = await p.evaluate(() => [...document.querySelectorAll(".step-btns button")].map((b) => b.getAttribute("aria-label")));
     check("A11Y-9: the previous / next buttons' names carry K and J", /K/.test(names[0]) && /J/.test(names[1]), JSON.stringify(names));
-    const kf = await p.evaluate(() => getComputedStyle(document.querySelector(".why-toggle kbd.kbd-ar")).fontFamily);
+    // (Since 5 Nov the key letters are in the «?» sheet, not on the ticket's buttons.)
+    const kf = await p.evaluate(() => getComputedStyle(document.querySelector("#sheet kbd.kbd-ar")).fontFamily);
     check("TYPE-1: an Arabic key letter uses IBM Plex Sans Arabic", /IBM Plex Sans Arabic/.test(kf.split(",")[0]), kf);
     const bh = await p.evaluate(() => [document.getElementById("actionBar").getBoundingClientRect().height, parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar-h"))]);
     check("A11Y-1: --bar-h follows the action bar's real height", Math.abs(bh[0] - bh[1]) <= 2, JSON.stringify(bh));
@@ -326,12 +349,107 @@ async function runPass(browser, pass) {
     await p.keyboard.press("Control+Enter");
     await waitUntil(async () => (await t(p, "#status")).includes("متصعّدة"), 2000, "the escalation hint").catch(() => {});
     check("L7: Ctrl+Enter on an escalation says to forward or take it", (await t(p, "#status")).includes("حوّلها"), await t(p, "#status"));
-    // A11Y-2: closing the why panel puts focus on its toggle, not on <body>.
+    // 5 Nov calm: «ليش؟» is closed until the agent opens it. W opens it with focus on its title, and the
+    // choice is remembered; Escape closes it (A11Y-1) and focus goes back to its toggle (A11Y-2); its close
+    // button does the same. 5 Nov review: over 1000 px it is a column of its own and covers nothing of the
+    // ticket; between 721 and 1000 px it is a drawer over the ticket, closed by another ticket and on load.
+    const why = () => p.evaluate(() => {
+      const w = document.getElementById("why").getBoundingClientRect();
+      const covers = [".customer-text", ".handoff", "#draft", "#actionBar", ".no-send", ".title-tools"].filter((sel) => {
+        const n = document.querySelector(sel);
+        if (!n) return false;
+        const r = n.getBoundingClientRect();
+        return Math.min(r.right, w.right) > Math.max(r.left, w.left) && Math.min(r.bottom, w.bottom) > Math.max(r.top, w.top);
+      });
+      return { shown: getComputedStyle(document.getElementById("why")).display !== "none",
+        pos: getComputedStyle(document.getElementById("why")).position, active: document.activeElement?.id || document.activeElement?.className,
+        expanded: document.querySelector("#agentMain .why-toggle")?.getAttribute("aria-expanded"), covers,
+        saved: JSON.parse(localStorage.getItem("support-viewer-prefs-v2") || "{}").whyOpen };
+    });
+    const w0 = await why();
+    const linkColour = await p.evaluate(() => getComputedStyle(document.querySelector("#agentMain .why-toggle")).color
+      === getComputedStyle(document.querySelector("#agentMain .link-btn, .link-btn") || document.querySelector("#agentMain .why-toggle")).color);
+    check("5 Nov calm: «ليش؟» is closed by default (5 Nov review: its button in the link colour)", !w0.shown && w0.expanded === "false" && linkColour, JSON.stringify(w0));
+    await p.focus("#ticketTitle");
+    await p.keyboard.press("w");
+    await sleep(150);
+    const w1 = await why();
+    check("5 Nov review: W opens «ليش؟» as a column beside the ticket, covering none of it; focus on its title, the toggle expanded, the choice remembered",
+      w1.shown && w1.pos !== "fixed" && !w1.covers.length && w1.active === "whyTitle" && w1.expanded === "true" && w1.saved === true, JSON.stringify(w1));
+    {
+      const sweep = {};
+      for (const [w, h] of [[1100, 800], [1280, 800], [1366, 768]]) {
+        await p.setViewportSize({ width: w, height: h });
+        await sleep(200);
+        const x = await why();
+        sweep[w] = x.shown && x.pos !== "fixed" ? x.covers : `shown ${x.shown}, ${x.pos}`;
+      }
+      check("5 Nov review: open at 1100, 1280 and 1366 px, «ليش؟» covers none of the message, the team note, the draft, the action bar, the lock line or the ticket's buttons",
+        Object.values(sweep).every((v) => Array.isArray(v) && !v.length), JSON.stringify(sweep));
+      await p.setViewportSize({ width: 900, height: 800 });
+      await sleep(200);
+      const narrow = await why();
+      await p.focus("#ticketTitle");
+      await p.keyboard.press("w");
+      await sleep(150);
+      const drawer = await why();
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press("j");
+      await sleep(200);
+      const afterJ = await why();
+      await p.setViewportSize(pass.viewport);
+      await sleep(200);
+      const wideAgain = await why();
+      check("5 Nov review: at 900 px «ليش؟» is not reopened over the ticket; W opens it as a drawer; another ticket closes it; back over 1000 px the agent's choice reopens it as a column",
+        !narrow.shown && drawer.shown && drawer.pos === "fixed" && !afterJ.shown && afterJ.expanded === "false" && wideAgain.shown && !wideAgain.covers.length,
+        JSON.stringify({ narrow, drawer, afterJ, wideAgain }));
+      await p.focus("#whyTitle");
+    }
+    await p.keyboard.press("Escape");
+    await sleep(150);
+    const w2 = await why();
+    check("A11Y-1 / A11Y-2: Escape closes the drawer and focus goes back to its toggle", !w2.shown && /why-toggle/.test(w2.active)
+      && w2.saved === false, JSON.stringify(w2));
+    await p.click("#agentMain .why-toggle");
+    await sleep(150);
     await p.focus("#whyClose");
     await p.keyboard.press("Enter");
     await sleep(150);
-    check("A11Y-2: closing «ليش؟» moves focus to its toggle", /why-toggle/.test(await active(p)), await active(p));
-    await p.keyboard.press("w");
+    check("A11Y-2: closing «ليش؟» with its button moves focus to its toggle", /why-toggle/.test(await active(p)) && !(await why()).shown, await active(p));
+    // v1 preferences saved «ليش؟» open for everyone (the old default): they are carried over without it.
+    {
+      const c1 = await browser.newContext({ viewport: pass.viewport, colorScheme: pass.scheme });
+      const pv = await c1.newPage();
+      await watch(pv, "v1-prefs");
+      await pv.addInitScript(() => localStorage.setItem("support-viewer-prefs-v1",
+        JSON.stringify({ mode: "agent", singleKeys: true, whyOpen: true, source: null, introSeen: true })));
+      await pv.goto(srv.base);
+      await pv.waitForSelector("#ticketTitle", { state: "attached", timeout: 15000 });
+      await sleep(200);
+      const v = await pv.evaluate(() => ({ why: getComputedStyle(document.getElementById("why")).display, intro: document.getElementById("intro").hidden }));
+      check("5 Nov calm: old (v1) preferences keep the dismissed intro but not the auto-saved «ليش؟» open", v.why === "none" && v.intro, JSON.stringify(v));
+      await cspOf(pv, "v1-prefs");
+      await c1.close();
+      // 5 Nov review: the agent's own «open» comes back on load only where it is a column (over 1000 px).
+      const shownAt = async (vp) => {
+        const c = await browser.newContext({ viewport: vp, colorScheme: pass.scheme });
+        const pw = await c.newPage();
+        await watch(pw, `why-${vp.width}`);
+        await pw.addInitScript(() => localStorage.setItem("support-viewer-prefs-v2",
+          JSON.stringify({ mode: "agent", singleKeys: true, whyOpen: true, source: null, introSeen: true })));
+        await pw.goto(srv.base);
+        await pw.waitForSelector("#ticketTitle", { state: "attached", timeout: 15000 });
+        await sleep(200);
+        const d = await pw.evaluate(() => getComputedStyle(document.getElementById("why")).display);
+        await cspOf(pw, `why-${vp.width}`);
+        await c.close();
+        return d;
+      };
+      const at900 = await shownAt({ width: 900, height: 800 });
+      const atWide = await shownAt(pass.viewport);
+      check("5 Nov review: an «ليش؟» the agent left open comes back on load as a column over 1000 px, never as a drawer at 900 px",
+        at900 === "none" && atWide !== "none", JSON.stringify({ at900, atWide }));
+    }
 
     // H1: a correction to fraud turns the ticket into an escalation: no draft, forward to the fraud team.
     const h1 = await openFreshDraft(p);
@@ -354,7 +472,7 @@ async function runPass(browser, pass) {
       const ticked = await p.evaluate(() => document.getElementById("ackBox").checked);
       check(`H1: choosing the first model's type on ${flagged} clears the tick and names the draft`, !ticked
         && (await t(p, "#confirmBox")).includes("انكتبت لنوع ثاني") && (await p.getAttribute("#approveBtn", "aria-disabled")) === "true"
-        && (await t(p, "#titleChips")).includes((meta.teams[meta.subcategories[run.tickets.find((r) => r.ticket.id === flagged).result.recheck_alternative].team] || {}).label_ar || "?"),
+        && (await t(p, "#sumBox .summary-line")).includes((meta.teams[meta.subcategories[run.tickets.find((r) => r.ticket.id === flagged).result.recheck_alternative].team] || {}).label_ar || "?"),
       `${ticked} | ${await t(p, "#confirmBox")}`);
       // 5 Nov review: the first model's answer here is a SIM change, so choosing it asks for the identity
       // check first, the line at the top says why, and the one tick names it; back to the re-check's
@@ -410,8 +528,38 @@ async function runPass(browser, pass) {
     await p.keyboard.press("t");
     await sleep(400);
     check("M1: one T on an edited draft records nothing yet", decisions().length === n1, decisions().at(-1)?.action);
+    const tk1 = await p.evaluate(() => { const d = document.getElementById("reasonBox"); return { open: d.open, summary: d.querySelector("summary")?.textContent.trim(),
+      focus: document.activeElement?.classList.contains("reason-chip") }; });
+    check("5 Nov calm: the first T opens the reasons as «ليش استلمتها؟ (اختياري)», focus on the first", tk1.open && tk1.summary === "ليش استلمتها؟ (اختياري)" && tk1.focus,
+      JSON.stringify(tk1));
     const tk = await pAct(() => p.keyboard.press("t"), "the take-over");
     check("M1: the second T records the take-over", tk.action === "took_over" && tk.ticket_id === m1, JSON.stringify(tk));
+    // 5 Nov review: once armed, recording the take-over is the one obvious action (and Ctrl+Enter's); approve
+    // is gone from the bar. «رجوع» or Esc goes back, and a reason picked meanwhile goes with it.
+    {
+      const ta = await openFreshDraft(p);
+      const n2 = decisions().length;
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press("t");
+      await sleep(200);
+      const armedBar = await p.evaluate(() => ({ primary: document.querySelector("#actionBar .btn-primary")?.id, approve: !!document.getElementById("approveBtn"),
+        back: !!document.getElementById("takeBack"), kbd: document.querySelector("#takeBtn kbd")?.textContent || "" }));
+      await p.locator(".reason-chip").first().click();
+      await p.keyboard.press("Escape");
+      await sleep(200);
+      const back = await p.evaluate(() => ({ approve: !!document.getElementById("approveBtn"), primary: document.querySelector("#actionBar .btn-primary")?.id,
+        reasons: document.getElementById("reasonBox").tagName, active: document.activeElement?.id }));
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press("t");
+      await sleep(200);
+      await p.locator(".reason-chip").nth(1).click();
+      const tk2 = await pAct(() => p.keyboard.press("Control+Enter"), "the armed take-over by Ctrl+Enter");
+      check(`5 Nov review: after T on ${ta}, «سجّل: استلمتها» is the primary (Ctrl+Enter) and approve is gone; Esc goes back with no reason left; Ctrl+Enter then records the take-over, never an approval`,
+        armedBar.primary === "takeBtn" && !armedBar.approve && armedBar.back && /Enter/.test(armedBar.kbd)
+        && back.approve && back.primary === "approveBtn" && back.reasons === "DIV" && back.active === "takeBtn"
+        && decisions().length === n2 + 1 && tk2.action === "took_over" && tk2.ticket_id === ta
+        && JSON.stringify(tk2.reason_codes) === JSON.stringify([meta.reason_codes[1]]), JSON.stringify({ armedBar, back, tk2 }));
+    }
     // A11Y-2: closing the toast returns focus to the page, not <body>.
     await p.focus("#toastClose");
     await p.keyboard.press("Enter");
@@ -428,6 +576,22 @@ async function runPass(browser, pass) {
     await sleep(200);
     const d3 = await pAct(() => p.keyboard.press("Control+Enter"), "the timed approve");
     check(`M3: seconds add up over visits (${d3.ticket_id}: ${d3.seconds} s, ${d3.visits} visits)`, d3.ticket_id === m3 && d3.seconds >= 1.2 && d3.visits === 2, JSON.stringify(d3));
+
+    // 5 Nov review: where a blocking finding overlaps a warning (a card number is also an unknown number),
+    // the phrase that stops the approval is the one drawn, whole.
+    {
+      const bl = await openFreshDraft(p);
+      await typeAtEnd(p, " رقم بطاقتك 4111 1111 1111 1111");
+      await p.waitForSelector("#draftChecks .check-item.is-blocking", { timeout: 6000 }).catch(() => {});
+      await checksSettled(p);
+      const marks = await p.evaluate(() => [...document.querySelectorAll(".composer-mirror mark.finding")].map((m) => [m.className, m.textContent]));
+      check(`5 Nov review: on ${bl}, a card number typed into the draft is highlighted as blocking, whole, not as a warning`,
+        marks.some(([c, x]) => c.includes("is-blocking") && /4111\s1111\s1111\s1111/.test(x))
+        && !marks.some(([c, x]) => c.includes("is-warn") && x.includes("4111")) && (await p.getAttribute("#approveBtn", "aria-disabled")) === "true",
+        JSON.stringify(marks));
+      await p.click("text=رجّع المسودة الأصلية");
+      await waitUntil(async () => (await p.getAttribute("#approveBtn", "aria-disabled")) === null, 4000, "the draft restored").catch(() => {});
+    }
 
     // RTL-1: a phone written in spaced groups reads in its written order in the draft.
     if (!decidedIds().has("t2-0053")) {
@@ -500,7 +664,7 @@ async function runPass(browser, pass) {
     await sleep(300);
     check("A11Y-3: after «شغّلها» focus is on the new ticket and its end is announced", (await active(p)) === "ticketTitle"
       && (await t(p, "#status")).includes("خلصت المعالجة"), `${await active(p)} | ${await t(p, "#status")}`);
-    check("L2: a ticket with no team: take over is the main action and «ناقص» says nothing read it",
+    check("L2: a ticket with no team: take over is the main action and the summary says nothing read it",
       (await p.getAttribute("#takeBtn", "class")).includes("btn-primary") && (await t(p, "#sumBox")).includes("ما نعرف"), await t(p, "#sumBox"));
     await p.keyboard.press("f");
     await sleep(200);
@@ -588,14 +752,25 @@ async function runPass(browser, pass) {
     const tabWords = await page.evaluate(() => [...document.querySelectorAll("[role=tab] .tab-label")].map((x) => x.textContent));
     check("the four tabs: تحتاج تأكيد، متصعّدة، جاهزة، خلصت", tabWords.join("|") === "تحتاج تأكيد|متصعّدة|جاهزة|خلصت", tabWords.join("|"));
     check("counter «خلصت 0 من 80»", /خلصت\s*0\s*من\s*80/.test(await text("#queueTitle")), await text("#queueTitle"));
-    check("saved-run note and the no-send badge are shown",
-      (await page.isVisible("#savedNote")) && (await text(".no-send")).includes("ما ينرسل شي للزبون تلقائياً"));
-    // Polish 4: each number on the strip means one thing. The note is about the whole run; the decided
-    // count is said once (the heading), with no «انحسمت» or «باقي» repeating it.
-    const head = await text(".queue-head");
-    check("the strip says what the system did with the run: «بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال.»",
-      (await text("#runNote")) === "بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال." && !head.includes("انحسمت") && !head.includes("باقي"),
-      `${await text("#runNote")} | ${head}`);
+    // 5 Nov calm: the saved run is said once, in the source picker's own text (no pill); the picker has no
+    // label on screen and keeps its name; the one lock line by the action bar says nothing is sent.
+    const src = await page.evaluate(() => {
+      const sel = document.getElementById("source");
+      const lab = sel.labels?.[0];
+      return { text: sel.selectedOptions[0]?.textContent || "", labelShown: [...(lab?.querySelectorAll("span") || [])].some((x) => x.offsetWidth > 1),
+        pill: !!document.getElementById("savedNote"),
+        // anywhere else in the header (the picker's options aside)
+        elsewhere: [...document.querySelectorAll("header *")].filter((n) => !n.closest("select") && n.children.length === 0 && /محفوظ/.test(n.textContent)).length };
+    });
+    check("5 Nov calm: «تشغيل محفوظ» is said once, in the picker's text; the picker is named «المصدر» with no label on screen; no saved-run pill; the no-send line is shown",
+      src.text.startsWith("تشغيل محفوظ: ") && (await page.getByRole("combobox", { name: "المصدر", exact: true }).count()) === 1
+      && !src.labelShown && !src.pill && src.elsewhere === 0
+      && (await text(".no-send")).includes("ما ينرسل شي للزبون تلقائياً"), JSON.stringify(src));
+    // Polish 4, then 5 Nov calm: the head is the decided count and its bar; what the system did with the
+    // run is in «كيف يشتغل» (step 10), and an urgent ticket in another tab is a dot on that tab (step 5).
+    const head = await page.evaluate(() => [...document.querySelector(".queue-head").children].map((n) => n.className).join("|"));
+    check("5 Nov calm: the queue head is «خلصت 0 من 80» and its bar only (no run note, no urgent sentence)",
+      head === "queue-title|progress" && !(await page.locator("#agentQueue #runNote, #agentQueue .urgent-hint").count()), head);
     await introChecks();
     await shot(page, "inbox");
     if (pass.phone) await noHScroll("queue screen");
@@ -603,6 +778,20 @@ async function runPass(browser, pass) {
     if (!pass.phone) {
       const [sh, ih] = await pageFits();
       check("agent mode: the page itself does not scroll, only its panes (J6)", sh <= ih, `${sh} > ${ih}`);
+    }
+    // 5 Nov calm: a row is its priority, its id and the customer's words. The tab says the status, so a row
+    // says it in its name only (read first); the team is on the ticket.
+    {
+      const tabWord = await page.evaluate(() => document.querySelector("[role=tab][aria-selected=true] .tab-label").textContent);
+      const rows = await page.locator("#queueList [role=option]").count();
+      const named = await page.getByRole("option", { name: new RegExp(`^${tabWord}\\s*،`) }).count();
+      const shown = await page.evaluate(() => [...document.querySelectorAll("#queueList [role=option]")].map((r) => ({
+        team: r.querySelectorAll(".row-team").length, status: r.querySelectorAll(".row-status").length,
+        word: !!r.querySelector(".sr-only .row-word"), pill: r.querySelectorAll(".prio").length,
+        id: !!r.querySelector(".row-id"), text: !!r.querySelector(".row-text")?.textContent.trim() })));
+      check(`5 Nov calm: each «${tabWord}» row shows its priority, id and words, no team or status word, and its name starts with «${tabWord}» (${rows} rows)`,
+        rows > 0 && named === rows && shown.every((x) => !x.team && !x.status && x.word && x.pill === 1 && x.id && x.text),
+        JSON.stringify({ rows, named, shown: shown.slice(0, 2) }));
     }
 
     // 2. No gold labels, model ids or marks anywhere in agent mode.
@@ -646,6 +835,19 @@ async function runPass(browser, pass) {
     {
       k1 = await openTab("drafted");
       check(`ready ticket ${k1}: approve is enabled`, (await page.getAttribute("#approveBtn", "aria-disabled")) === null);
+      // 5 Nov calm: what the system understood is one line, type · team; no grid of fields, no key chips
+      // under the title; the pencil that corrects it is named.
+      {
+        const sum = await page.evaluate(() => ({ line: document.querySelector("#sumBox .summary-line").textContent.replace(/\s+/g, " ").trim(),
+          dts: document.querySelectorAll("#sumBox dt").length, notes: [...document.querySelectorAll("#sumBox .summary-note")].map((n) => n.textContent),
+          chips: document.querySelectorAll("#titleChips kbd").length, fix: document.getElementById("fixToggle")?.getAttribute("aria-label") }));
+        const r1 = run.tickets.find((r) => r.ticket.id === k1).result;
+        const sub = r1.extraction?.subcategory;
+        const want = sub ? `${meta.subcategories[sub].label} · ${meta.teams[r1.team].label_ar}` : "?";
+        check(`5 Nov calm: ${k1}'s summary is one line «${want}», no fields grid or key chips, the pencil named`,
+          sum.line === want && !sum.dts && !sum.chips && sum.fix === "صحّح النوع أو القسم أو الأولوية" && sum.notes.every((n) => !n.includes("واثق")),
+          JSON.stringify(sum));
+      }
       if (pass.phone) await noHScroll("ticket with a draft");
       await shot(page, "drafted");
       // on a desktop, from the queue row (where J / K leave the focus): the listbox must not swallow it
@@ -678,9 +880,27 @@ async function runPass(browser, pass) {
     let k2;
     {
       k2 = await openTab("flagged");
+      // 5 Nov calm: P1s wait in «متصعّدة» and «جاهزة», only P2s here: a dot on those two tabs, in their names.
+      {
+        const marks = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[role=tab]")].map((b) => [b.dataset.tab, b.querySelector(".tab-urgent")?.textContent || ""])));
+        // (On a phone the queue is hidden behind the ticket screen: the names are read there all the same.)
+        const named = await page.getByRole("tab", { name: /متصعّدة.*فيها تذكرة عاجلة/, includeHidden: true }).count();
+        check("5 Nov calm / review: from «تحتاج تأكيد» (P2s), a tiny «P1» on «متصعّدة» and «جاهزة» (P1s wait there), named «فيها تذكرة عاجلة»; none here",
+          marks.escalated === "P1" && marks.drafted === "P1" && !marks.flagged && !marks.done && named === 1, JSON.stringify({ marks, named }));
+      }
       check(`flagged ${k2}: approve is disabled and reads «تأكدت، اعتمد»`,
         (await page.getAttribute("#approveBtn", "aria-disabled")) === "true" && (await text("#approveBtn")).includes("تأكدت، اعتمد"), await text("#approveBtn"));
       check("flagged: the box names what to check", (await text("#confirmBox")).includes("تأكد من"), await text("#confirmBox"));
+      {
+        const lay = await page.evaluate(() => {
+          const d = document.getElementById("draft").getBoundingClientRect(), c = document.getElementById("confirmBox").getBoundingClientRect();
+          const w = document.getElementById("approveWhy");
+          return { below: c.top >= d.bottom,
+            muted: !!w?.classList.contains("is-muted"), icon: !!w?.querySelector("svg"), words: w?.textContent || "" };
+        });
+        check("5 Nov review: the tick sits under the draft (read, tick, approve), and approve's reason, only the tick, is quiet with no warning icon",
+          lay.below && lay.muted && !lay.icon && lay.words.includes("تحت المسودة"), JSON.stringify(lay));
+      }
       const n0 = decisions().length;
       // a tap on the aria-disabled button (force: Playwright itself won't click an aria-disabled one)
       if (pass.phone) await page.click("#approveBtn", { force: true }); else await page.keyboard.press("Control+Enter");
@@ -691,7 +911,10 @@ async function runPass(browser, pass) {
       await shot(page, "flagged");
       await page.check("#ackBox");
       check("flagged: approve is enabled after the tick", (await page.getAttribute("#approveBtn", "aria-disabled")) === null);
-      check("a flagged row says «تحتاج تأكيد», like its tab (J8)", (await text(`#opt-${k2} .row-word`)) === "تحتاج تأكيد", await text(`#opt-${k2} .row-word`));
+      // J8, then 5 Nov calm: the row's name says «تحتاج تأكيد», like its tab; the word is not on screen.
+      const rowNamed = await page.getByRole("option", { name: /^تحتاج تأكيد\s*،/, includeHidden: true }).and(page.locator(`#opt-${k2}`)).count();
+      const nameOnly = await page.evaluate((k) => !!document.querySelector(`#opt-${k} .sr-only .row-word`) && !document.querySelector(`#opt-${k} .row-status`), k2);
+      check("a flagged row's name starts with «تحتاج تأكيد», like its tab (J8; 5 Nov calm: not on screen)", rowNamed === 1 && nameOnly, `${rowNamed} ${nameOnly}`);
       check("flagged: the refusal goes as soon as the box is ticked (polish 5)", !(await toastOn()) && !(await page.locator("#approveWhy").count()),
         await text("#status"));
       const d = await act(() => page.click("#approveBtn"), "the flagged approve");
@@ -706,7 +929,7 @@ async function runPass(browser, pass) {
         (await text("#status")).includes("انتقلنا لـ«متصعّدة»: فيها تذكرة عاجلة")
         && (await page.getAttribute("#tab-escalated", "aria-selected")) === "true", await text("#status"));
       // J9: the decision's toast (and its undo) stays with the inbox: «كيف يشتغل» opens without it.
-      await page.click("#modeProcess");
+      await toProcess();
       await page.waitForSelector("#ovTitle", { timeout: 10000 });
       check("the decision's toast goes when «كيف يشتغل» opens (J9)", !(await toastOn()), await text("#status"));
       await page.click("#modeAgent");
@@ -717,6 +940,41 @@ async function runPass(browser, pass) {
     let k3;
     {
       k3 = await openTab("drafted");
+      // 5 Nov calm: all checks passed: a few words, the list of checks in their tip (hover or focus; a tap
+      // pins it). No reasons yet. The action bar's one key hint is Ctrl+Enter, and no sentence explains it.
+      {
+        const clean = (await page.locator("#draftChecks").innerText()).trim();
+        const tip = await text("#checksTip");
+        if (pass.phone) await page.click(".checks-ok"); else await page.hover(".checks-ok");
+        const tipShown = await page.isVisible("#checksTip");
+        if (pass.phone) await page.click(".checks-ok"); else await page.mouse.move(1, 1);
+        check("5 Nov calm: all checks passed: «ما بيها مشكلة», and the list of checks only in its tip",
+          clean === "ما بيها مشكلة" && tip.startsWith("فحصنا المسودة وما لكينا:") && tip.includes("طلب رمز أو كلمة سر") && tipShown
+          && (await page.getAttribute(".checks-ok", "aria-describedby")) === "checksTip", `${clean} | ${tip} | ${tipShown}`);
+        if (!pass.phone) {
+          await sleep(350);
+          await page.hover(".checks-ok");
+          await page.keyboard.press("Escape");
+          await sleep(50);
+          const escHidden = !(await page.isVisible("#checksTip"));
+          await page.mouse.move(1, 1);
+          await sleep(350);
+          await page.hover(".checks-ok");
+          const tb = await page.locator("#checksTip").boundingBox();
+          await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2, { steps: 6 });
+          await sleep(100);
+          const stays = await page.isVisible("#checksTip");
+          await page.mouse.move(1, 1);
+          await sleep(350);
+          check("5 Nov review: the checks' tip goes with Escape, and stays while the pointer moves onto it (WCAG 1.4.13)", escHidden && stays,
+            JSON.stringify({ escHidden, stays }));
+        }
+        const rb = await page.evaluate(() => { const d = document.getElementById("reasonBox"); return { tag: d?.tagName, hidden: d?.hidden }; });
+        const bar = await page.evaluate(() => ({ kbds: [...document.querySelectorAll("#actionBar kbd")].map((k) => k.closest("button")?.id || "?"),
+          hint: !!document.getElementById("draftHint") }));
+        check("5 Nov calm: no reasons before an edit; the action bar's only key hint is approve's Ctrl+Enter; no Esc / Ctrl+Enter sentence",
+          rb.tag === "DIV" && rb.hidden && JSON.stringify([...new Set(bar.kbds)]) === '["approveBtn"]' && !bar.hint, JSON.stringify({ rb, bar }));
+      }
       if (pass.phone) await page.click("#draft"); else await page.keyboard.press("e");
       check("the draft takes focus", await page.evaluate(() => document.activeElement?.id === "draft"));
       await page.evaluate(() => { const t = document.getElementById("draft"); t.setSelectionRange(t.value.length, t.value.length); });
@@ -726,6 +984,11 @@ async function runPass(browser, pass) {
         && (await text("#approveWhy")).includes(meta.check_ar.asks_secret.split(/[:،(]/)[0].trim()), await text("#approveWhy"));
       check("the label becomes «معدّلة منك»", (await text(".composer-label")).includes("معدّلة منك"), await text(".composer-label"));
       check("the phrase is highlighted in the draft", (await page.locator(".composer-mirror mark.finding.is-blocking").count()) === 1);
+      // 5 Nov calm: the edit brings the optional reasons, as one closed line.
+      const rb = await page.evaluate(() => { const d = document.getElementById("reasonBox"); return { tag: d.tagName, open: d.open,
+        summary: d.querySelector("summary")?.textContent.trim(), chipsShown: [...d.querySelectorAll(".reason-chip")].some((c) => c.checkVisibility()) }; });
+      check("5 Nov calm: after an edit the reasons are one closed line «ليش غيّرتها؟ (اختياري)»",
+        rb.tag === "DETAILS" && !rb.open && rb.summary === "ليش غيّرتها؟ (اختياري)" && !rb.chipsShown, JSON.stringify(rb));
       const n0 = decisions().length;
       await page.keyboard.press("Control+Enter");   // from inside the draft
       await sleep(500);
@@ -735,7 +998,8 @@ async function runPass(browser, pass) {
         && document.getElementById("status").textContent.includes("رمز"));
       await page.click("text=رجّع المسودة الأصلية");
       await waitUntil(async () => (await page.getAttribute("#approveBtn", "aria-disabled")) === null, 4000, "approve to be enabled again");
-      check("restoring the draft enables approval", true);
+      check("restoring the draft enables approval, and the reasons go with the edit (5 Nov calm)",
+        await page.evaluate(() => document.getElementById("reasonBox").hidden));
       check("the refusal about the code goes once the request is gone (polish 5)", refused
         && !(await page.evaluate(() => document.getElementById("toast").classList.contains("is-shown"))), await text("#status"));
       // a harmless edit: «edited», with a count of changed characters and no text in the log
@@ -756,6 +1020,8 @@ async function runPass(browser, pass) {
       k4 = await openTab("escalated");
       check(`escalated ${k4}: no draft box`, (await page.locator("#agentMain textarea").count()) === 0);
       check("escalated: the team note is shown, with the fraud banner", (await page.isVisible("#handoffTitle")) && (await text("#agentMain .callout-bad")).includes("احتمال احتيال"), await text("#agentMain .callout-bad"));
+      check("5 Nov review: the team note's title is «ملاحظة للقسم» (the team is in the summary line and on forward)",
+        (await text("#handoffTitle")) === "ملاحظة للقسم" && (await text("#forwardBtn")).includes("قسم"), `${await text("#handoffTitle")} | ${await text("#forwardBtn")}`);
       const handoff = run.tickets.find((r) => r.ticket.id === k4).result.handoff_ar || "";
       if (/^الخلاصة:/m.test(handoff)) {
         check("escalated: «الخلاصة» is marked as written by a model, the rest by rules (J2)", (await text(".handoff .dt-tag")) === "كتبها نموذج"
@@ -765,9 +1031,8 @@ async function runPass(browser, pass) {
       await shot(page, "escalated");
       const d = await act(() => (pass.phone ? page.click("#forwardBtn") : page.keyboard.press("f")), "the forward");
       check(`forward logs «forwarded» for ${k4}`, d.action === "forwarded" && d.ticket_id === k4 && d.pipeline_outcome === "escalated", JSON.stringify(d));
-      check("after a forward the tab counts the 5 still open, the note still the run's 6",
-        (await text("#tab-escalated .tab-count")).replace(/\D/g, "") === "5" && (await text("#runNote")).includes("صعّد 6 تذاكر"),
-        `${await text("#tab-escalated .tab-count")} | ${await text("#runNote")}`);
+      check("after a forward the tab counts the 5 still open (the run's note, in «كيف يشتغل», still says 6: step 10)",
+        (await text("#tab-escalated .tab-count")).replace(/\D/g, "") === "5", await text("#tab-escalated .tab-count"));
     }
 
     // 8. Reload: the decided tickets come back from the log.
@@ -786,6 +1051,11 @@ async function runPass(browser, pass) {
       await sleep(150);
       const done = await page.evaluate(() => [...document.querySelectorAll("#queueList [role=option]")].map((o) => o.dataset.key).sort());
       check("the «خلصت» tab lists the four decided tickets", JSON.stringify(done) === JSON.stringify([k1, k2, k3, k4].sort()), done.join(","));
+      const dn = await page.evaluate(() => [...document.querySelectorAll("#queueList [role=option]")].map((o) => ({ icon: !!o.querySelector(".row-decision svg"), title: o.querySelector(".row-decision")?.title })));
+      const namedDone = await page.getByRole("option", { name: /^(انعتمدت|انعدّلت وانعتمدت|استلمتها|تحوّلت)\s*،/ }).count();
+      check("5 Nov calm: in «خلصت» each row shows what was done as a small icon, named (its title, and the start of the row's name)",
+        dn.length === 4 && dn.every((x) => x.icon && ["انعتمدت", "انعدّلت وانعتمدت", "استلمتها", "تحوّلت"].includes(x.title)) && namedDone === 4,
+        JSON.stringify({ dn, namedDone }));
     }
 
     // 9. Keyboard: J and K move the selection.
@@ -801,10 +1071,18 @@ async function runPass(browser, pass) {
 
     // 10. "كيف يشتغل": the overview numbers and a trace with the model's input and output.
     {
-      await page.click("#modeProcess");
+      await toProcess();
       await page.waitForSelector("#ovTitle", { timeout: 10000 });
       const stats = await text(".overview .stats");
       check(`overview: type ${EXPECT.type}, priority ${EXPECT.priority}`, stats.includes(EXPECT.type) && stats.includes(EXPECT.priority), stats.slice(0, 200));
+      // Polish 4 (moved on 5 Nov): what the system did with the whole run, in the overview. 5 Nov calm: the
+      // side list has the controls and the tickets; the live status and the model ids are said once, above.
+      const pnav = await page.evaluate(() => ({ models: document.getElementById("processNav").textContent.includes("claude-"),
+        live: document.querySelectorAll("#processNav .live-line").length, meta: !!document.getElementById("pMeta") }));
+      check("the overview says what the system did with the run: «بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال.»",
+        (await text("#runNote")) === "بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال.", await text("#runNote"));
+      check("5 Nov calm: «كيف يشتغل»'s side list has no model ids or live-status line; the overview header says it once",
+        !pnav.models && !pnav.live && !pnav.meta && (await page.locator(".overview .live-line").count()) === 1, JSON.stringify(pnav));
       if (!pass.phone) {
         const [sh, ih] = await pageFits();
         check("process mode: the page itself does not scroll (no caption escapes its pane) (J6)", sh <= ih, `${sh} > ${ih}`);
@@ -906,9 +1184,14 @@ async function runPass(browser, pass) {
       await openTab("drafted");
       const pos = await page.evaluate(() => getComputedStyle(document.getElementById("actionBar")).position);
       check("phone: the action bar is fixed at the bottom", pos === "fixed", pos);
+      const head = await page.evaluate(() => ({ h: Math.round(document.getElementById("topbar").getBoundingClientRect().height),
+        modes: document.querySelector(".modes").checkVisibility(), picker: document.getElementById("sourceField").checkVisibility() }));
       await noHScroll("after the flows");
       await page.locator("#agentMain .back-btn").first().click();
       check("phone: back returns to the queue", await page.isVisible("#queueList"));
+      const qhead = await page.evaluate(() => ({ modes: document.querySelector(".modes").checkVisibility(), picker: document.getElementById("sourceField").checkVisibility() }));
+      check("5 Nov review: the phone's ticket screen has a one-row header; the mode switch and the picker are on the queue screen",
+        head.h <= 64 && !head.modes && !head.picker && qhead.modes && qhead.picker, JSON.stringify({ head, qhead }));
     } else {
       await noHScroll("desktop");
     }
@@ -1018,13 +1301,86 @@ async function runFresh(browser, pass) {
     // 2. The ticket kinds, for the screenshots.
     await openId(p, DRAFTED);
     check(`${DRAFTED}: a draft, approve on`, (await p.locator("#draft").count()) === 1 && (await p.getAttribute("#approveBtn", "aria-disabled")) === null);
+    // 5 Nov calm: no fact boxes. The facts are one quiet line under the message; a value lights its
+    // underline and the underline its value; the amount written in words («مليونين») has a small marker
+    // whose tip says it was not found as written, and no sentence says so on screen.
+    {
+      const facts = await p.evaluate(() => {
+        const c = document.querySelector(".customer");
+        const line = c.querySelector(".facts");
+        const b = line?.querySelector(".fact-btn");
+        const st = b ? getComputedStyle(b) : null;
+        return { under: !!line && line.previousElementSibling === c.querySelector(".customer-text"),
+          items: line ? [...line.children].map((li) => li.textContent.replace(/\s+/g, " ").trim()) : [],
+          boxed: st ? parseFloat(st.borderTopWidth) > 0 || st.backgroundColor !== "rgba(0, 0, 0, 0)" : null,
+          sentence: c.innerText.includes("ما لكيناه"), tip: c.querySelector(".fact-tip")?.getAttribute("aria-label"),
+          described: document.getElementById(c.querySelector(".fact-tip")?.getAttribute("aria-describedby") || "-")?.textContent || "" };
+      });
+      await p.hover(".customer .fact-btn");
+      const lit = await p.evaluate(() => document.querySelectorAll(".customer-text [data-fact].is-hot").length);
+      await p.hover(".customer-text [data-fact]");
+      const back = await p.evaluate(() => document.querySelectorAll(".customer .fact-btn.is-hot").length);
+      await p.hover(".customer .fact-tip");
+      await sleep(150);
+      // 5 Nov review: the tip is a real element (role=tooltip), under the facts line, never over the message;
+      // it says what to do; Escape hides it with the pointer still on the marker (WCAG 1.4.13).
+      const tipBox = await p.evaluate(() => {
+        const tip = document.querySelector(".customer .facts [role=tooltip]");
+        const r = tip?.getBoundingClientRect(), msg = document.querySelector(".customer-text").getBoundingClientRect();
+        return tip ? { text: tip.textContent, shown: getComputedStyle(tip).visibility === "visible", underMessage: r.top >= msg.bottom } : null;
+      });
+      await p.keyboard.press("Escape");
+      const escHidden = await p.evaluate(() => getComputedStyle(document.querySelector(".customer .facts [role=tooltip]")).visibility === "hidden");
+      await p.mouse.move(640, 2);
+      check(`5 Nov calm: ${DRAFTED}'s facts are one line under the message, no boxes; value and underline light each other; the amount not found has a marker with its tip, no sentence`,
+        facts.under && facts.items.length >= 2 && facts.items[0].startsWith("رقم العملية") && facts.boxed === false && lit === 1 && back === 1
+        && !facts.sentence && facts.tip === "ما لكيناه بالنص بنفس الشكل" && tipBox?.shown && tipBox.text.includes("ما لكيناه بالنص بنفس الشكل"),
+        JSON.stringify({ ...facts, lit, back, tipBox }));
+      check("5 Nov review: the marker's tip is under the facts line, says what to do (its description), and goes with Escape",
+        tipBox?.underMessage && tipBox.text.includes("قارنه بالرسالة") && facts.described.includes("قارنه بالرسالة") && escHidden, JSON.stringify({ tipBox, escHidden, described: facts.described }));
+    }
     await demo(p, "inbox-desktop");
     await openId(p, FLAGGED);
-    await p.evaluate(() => document.getElementById("choiceBox").scrollIntoView({ block: "center" }));
-    await sleep(150);
     check(`${FLAGGED}: the two models' answers are shown to choose from`, (await p.locator("#choiceBox input[type=radio]").count()) === 2
       && await p.isVisible("#choiceBox"));
+    // 5 Nov review: said once each: the banner says they disagreed, the choice asks the type, the tick
+    // (under the draft) confirms it.
+    {
+      const f9 = await p.evaluate(() => ({ banner: document.getElementById("whyLine")?.textContent, legend: document.querySelector("#choiceBox legend")?.textContent,
+        opts: [...document.querySelectorAll("#choiceBox .choice-opt")].map((o) => Math.round(o.getBoundingClientRect().height)) }));
+      check(`5 Nov review: ${FLAGGED}'s banner «…النموذجين اختلفوا بنوع المشكلة.», the choice «ياهو النوع الصح؟», one line per answer`,
+        f9.banner === "تحتاج تأكيد: النموذجين اختلفوا بنوع المشكلة." && f9.legend === "ياهو النوع الصح؟" && f9.opts.length === 2 && f9.opts.every((h) => h <= 44),
+        JSON.stringify(f9));
+    }
     await demo(p, "inbox-flagged");
+    // 5 Nov review: on every flagged ticket at 1280 x 800, the draft's first two lines show above the action bar
+    // (the tick is under the draft), and a field the banner names is not said again above the message.
+    {
+      const served = await p.evaluate(async (name) => {
+        const token = document.querySelector('meta[name="viewer-token"]').content;
+        const j = await fetch(`/api/run?name=${encodeURIComponent(name)}`, { headers: { "X-Viewer-Token": token } }).then((r) => r.json());
+        return j.tickets.filter((r) => r.result.outcome === "flagged").map((r) => r.ticket.id);
+      }, RUN);
+      const under = [];
+      for (const id of served) {
+        await openId(p, id);
+        const m = await p.evaluate(() => {
+          const d = document.getElementById("draft").getBoundingClientRect(), bar = document.getElementById("actionBar").getBoundingClientRect();
+          const lh = parseFloat(getComputedStyle(document.getElementById("draft")).lineHeight);
+          const c = document.getElementById("confirmBox").getBoundingClientRect();
+          return { two: d.top + 14 + 2 * lh <= bar.top + 1, tickBelow: c.top >= d.bottom };
+        });
+        if (!m.two || !m.tickBelow) under.push(`${id} ${JSON.stringify(m)}`);
+      }
+      await openId(p, "t2-0017");
+      const t17 = await p.evaluate(() => ({ banner: document.getElementById("whyLine")?.textContent || "",
+        notes: [...document.querySelectorAll("#sumBox .summary-note")].map((n) => [n.className, n.textContent, getComputedStyle(n).fontWeight]) }));
+      check(`5 Nov review: the ${served.length} flagged tickets at 1280 x 800 show the draft's first two lines above the bar, the tick under the draft`,
+        served.length === 15 && !under.length, under.join(" | "));
+      check("5 Nov review: t2-0017 names «رقم العملية» in its banner only; its agreed re-check is a quiet line, not a warning",
+        t17.banner.includes("رقم العملية ناقص") && t17.notes.every(([, x]) => !x.includes("رقم العملية"))
+        && t17.notes.some(([c, x, w]) => x === "النوع انراجع بنموذج ثاني، واتفقوا" && c.includes("muted") && Number(w) < 500), JSON.stringify(t17));
+    }
     await openId(p, ESCALATED);
     check(`${ESCALATED}: no draft, the team note and forward`, (await p.locator("#draft").count()) === 0 && await p.isVisible("#handoffTitle")
       && await p.isVisible("#forwardBtn"));
@@ -1034,18 +1390,22 @@ async function runFresh(browser, pass) {
     await p.click("#modeProcess");
     await p.waitForSelector("#ovTitle", { timeout: 10000 });
     await sleep(300);
-    check("«كيف يشتغل» says live runs are off: no API key", (await t(p, ".pnav-live")).includes(LIVE_NO_KEY), await t(p, ".pnav-live"));
+    check("«كيف يشتغل» says live runs are off: no API key", (await t(p, ".overview .live-line")).includes(LIVE_NO_KEY), await t(p, ".overview .live-line"));
     check("process mode: the page itself does not scroll (J6)", await fits(p));
     const lede = await t(p, ".overview .lede");
     check("the overview gives the run's elapsed time as such, with the tickets run at once (J5)", lede.includes("التشغيل كله خذ")
       && lede.includes("5 تذاكر سوة") && !lede.includes("بالمجموع"), lede);
-    // J8e: the model pair reads the same way (classifier / drafter) in the lede and in the side panel.
-    const order = await p.evaluate(() => [".overview .lede", "#pMeta", ".pnav-live"].map((sel) => {
+    // J8e: the model pair reads the same way (classifier / drafter) wherever it is. Since 5 Nov it is said
+    // once, in the overview's lede (the live line repeats it only for other models), not in the side list.
+    const order = await p.evaluate(() => [".overview .lede", ".overview .live-line"].map((sel) => {
       const x = (needle) => { const w = document.createTreeWalker(document.querySelector(sel), NodeFilter.SHOW_TEXT); let n;
         while ((n = w.nextNode())) { const i = n.data.indexOf(needle); if (i >= 0) { const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 3); return r.getBoundingClientRect().left; } } return null; };
-      return x("claude-haiku") < x("claude-sonnet");
+      const [a, b] = [x("claude-haiku"), x("claude-sonnet")];
+      return sel.includes("live") && a == null && b == null ? "not repeated" : a != null && b != null && a < b;
     }));
-    check("the model pair reads classifier / drafter in the lede and the side panel (J8)", order.every(Boolean), JSON.stringify(order));
+    const sideModels = await p.evaluate(() => document.getElementById("processNav").textContent.includes("claude-"));
+    check("the model pair reads classifier / drafter, once, in the overview's header; none in the side list (J8)", order[0] === true && order[1] !== false && !sideModels,
+      JSON.stringify({ order, sideModels }));
     await demo(p, "process-overview");
     await p.locator("table.grid tbody tr", { hasText: FLAGGED }).first().locator(".row-open").click();
     await p.waitForSelector(".trace .gold table", { timeout: 10000 });
@@ -1113,11 +1473,12 @@ async function runFresh(browser, pass) {
     await pc.keyboard.press("Escape");
     await pc.click("#modeProcess");
     await pc.waitForSelector("#ovTitle", { timeout: 10000 });
+    const liveLine = await t(pc, ".overview .live-line");   // the overview's header says it (5 Nov: not the side list)
     await pc.locator("table.grid tbody tr", { hasText: DRAFTED }).first().locator(".row-open").click();
     await pc.waitForSelector(".trace .gold table", { timeout: 10000 });
     const cls = await t(pc, "#st-classify .state");
-    check("cache-only: a banner, the dialog and the side panel say it replays stored replies, and each model stage «من الكاش» (J4)",
-      banner.includes("إعادة من الكاش") && cacheNote.includes("إعادة من الكاش") && (await t(pc, ".pnav-live")).includes("إعادة من الكاش")
+    check("cache-only: a banner, the dialog and the overview's header say it replays stored replies, and each model stage «من الكاش» (J4)",
+      banner.includes("إعادة من الكاش") && cacheNote.includes("إعادة من الكاش") && liveLine.includes("إعادة من الكاش")
       && cls.includes("من الكاش") && !(await t(pc, "#st-gate .state")).includes("الكاش"), `${banner} | ${cacheNote} | ${cls}`);
     await done(pc, "cache-only");
     // RR-3: the run note with one escalation, and with a reason only some of them share.
@@ -1126,13 +1487,19 @@ async function runFresh(browser, pass) {
       j.tickets = j.tickets.filter((r) => r.result.outcome !== "escalated" || ++n <= keep);
       if (extra) j.tickets.filter((r) => r.result.outcome === "escalated").slice(0, 2).forEach((r) => r.result.flags.push(extra));
     });
+    // (The note is in «كيف يشتغل»'s overview since 5 Nov.)
+    const noteOf = async (pg) => {
+      await pg.click("#modeProcess");
+      await pg.waitForSelector("#runNote", { timeout: 10000 });
+      return t(pg, "#runNote");
+    };
     const p1 = await open(pass.viewport, "light", "one-escalation", null, keepEsc(1));
-    const one = await t(p1, "#runNote");
+    const one = await noteOf(p1);
     await done(p1, "one-escalation");
     // A second reason a fraud escalation can carry: a gate flag from the first model, before a re-check
     // that said fraud (account_risk was used here until 5 Nov, when it stopped being an escalation).
     const p6 = await open(pass.viewport, "light", "mixed-reasons", null, keepEsc(6, "ref_not_in_text"));
-    const mixed = await t(p6, "#runNote");
+    const mixed = await noteOf(p6);
     await done(p6, "mixed-reasons");
     check("the run note: «صعّد تذكرة وحدة: احتمال احتيال.» and «كلها …، ومنها 2 …» (RR-3)",
       one === "بهالتشغيل النظام صعّد تذكرة وحدة: احتمال احتيال." && mixed.startsWith("بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال، ومنها 2 "),
@@ -1213,6 +1580,25 @@ async function runFresh(browser, pass) {
     await sleep(150);
     check("phone: the draft's heading and text show above the action bar (J10)", seen.every(Boolean), JSON.stringify(seen));
     await demo(pp, "inbox-phone");
+    // 5 Nov review: a tap on the «؟» marker shows its tip (pinned); keyboard focus on it scrolls nothing sideways.
+    {
+      await pp.evaluate(() => scrollTo(0, 0));
+      const tipOn = () => pp.evaluate(() => getComputedStyle(document.querySelector(".customer .facts [role=tooltip]")).visibility === "visible");
+      await pp.locator(".customer .fact-tip").tap();
+      await sleep(150);
+      const tapped = await tipOn();
+      const sw1 = await pp.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+      await pp.locator(".customer .fact-tip").tap();
+      await sleep(350);
+      const untapped = !(await tipOn());
+      await pp.focus(".customer .fact-btn");
+      await pp.keyboard.press("Tab");
+      await sleep(150);
+      const focused = await tipOn();
+      const sw2 = await pp.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+      check("5 Nov review: phone: a tap on «؟» shows its tip and a second tap hides it; keyboard focus shows it with no sideways scroll",
+        tapped && sw1 && untapped && focused && sw2[0] <= sw2[1], JSON.stringify({ tapped, sw1, untapped, focused, sw2 }));
+    }
     await done(pp, "phone");
 
     // 6. Dark.
@@ -1286,6 +1672,11 @@ async function runFresh(browser, pass) {
       check(`the decided ${rid} says «تأكدت من هوية الزبون قبل الاعتماد.», and its log line keeps the tick`,
         (await t(p, ".decided")).includes("تأكدت من هوية الزبون قبل الاعتماد.") && (dRec?.warnings_acknowledged || []).includes("account_risk"),
         `${await t(p, ".decided")} | ${JSON.stringify(dRec)}`);
+      const todo = await p.evaluate(() => ({ line: !!document.getElementById("whyLine"), ask: [...document.querySelectorAll("#sumBox .summary-note")].some((n) => n.textContent.includes("المفروض تسأل")) }));
+      await openId(p, DRAFTED);
+      const todo2 = await p.evaluate(() => [...document.querySelectorAll("#sumBox .summary-note")].some((n) => n.textContent.includes("المفروض تسأل")));
+      check(`5 Nov review: decided tickets keep no to-do line (${rid}: no «تحتاج تأكيد» banner; ${DRAFTED}: no «المسودة المفروض تسأل عن»)`,
+        !todo.line && !todo.ask && !todo2, JSON.stringify({ todo, todo2 }));
     }
     await done(p, "fresh");
     check("no live run was started (no request to /api/stream)", streams === 0, String(streams));

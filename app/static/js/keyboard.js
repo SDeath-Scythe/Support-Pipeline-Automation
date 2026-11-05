@@ -2,11 +2,11 @@
 // Single keys never fire while typing and can be switched off in the shortcut sheet (WCAG 2.1.4).
 
 import { S } from "./state.js";
-import { openDialog, typingIn } from "./util.js";
+import { dismissTips, openDialog, typingIn } from "./util.js";
 
 /**
- * actions: {next, prev, approve, focusDraft, leave, takeOver, forward, toggleWhy, closeWhy, whyIsDrawer, undo,
- *   tab(n), save()}
+ * actions: {next, prev, approve, focusDraft, leave, takeOver, disarm, forward, toggleWhy, closeWhy, whyIsDrawer,
+ *   undo, tab(n), save()}
  */
 export function initKeys(actions) {
   const sheet = document.getElementById("sheet");
@@ -36,10 +36,14 @@ export function initKeys(actions) {
     }
     if (e.key === "Escape") {
       if (agent && e.target?.id === "draft") { e.preventDefault(); actions.leave(); return; }
-      // The why drawer (721–1000 px) covers part of the ticket: Escape closes it.
+      // One thing per press, the nearest first: a tip on screen (WCAG 1.4.13), an armed take-over («رجوع»),
+      // then «ليش؟» beside the ticket (over 720 px), from inside it or from anywhere in the page that is not
+      // a field (a select keeps its own Escape).
+      if (dismissTips()) { e.preventDefault(); return; }
+      if (agent && !typingIn(e.target) && actions.disarm()) { e.preventDefault(); return; }
       const why = document.getElementById("why");
       if (agent && actions.whyIsDrawer() && document.body.classList.contains("why-open")
-        && (why.contains(e.target) || e.target === document.body)) { e.preventDefault(); actions.closeWhy(); }
+        && (why.contains(e.target) || !typingIn(e.target))) { e.preventDefault(); actions.closeWhy(); }
       return;
     }
     if (mod || e.altKey) return;

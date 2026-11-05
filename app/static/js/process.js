@@ -112,21 +112,50 @@ function buildNav(nav) {
   const runAll = el("button", { type: "button", id: "pRunAll", class: "btn btn-small", text: "شغّل كل القائمة", onclick: confirmRunAll });
   const stop = el("button", { type: "button", id: "pStop", class: "btn btn-small", text: "وقّف التشغيل", hidden: true,
     onclick: () => { P.runAll = false; P.ctl?.abort(); } });
+  // The side list is the controls and the tickets. The run's details, its models and what a live run
+  // would use are said once, at the top of the overview (liveLine).
   nav.replaceChildren(
     el("div", { class: "pnav-controls" },
       el("label", { class: "field" }, el("span", { text: "المصدر" }), src),
       el("label", { class: "field" }, el("span", { text: "الترتيب" }), sort),
       el("div", { class: "row-btns" }, overview, runAll, stop)),
-    el("p", { id: "pMeta", class: "hint" }),
-    el("p", { class: "hint pnav-live" }, "التشغيل المباشر هنا: ", backendAr(S.meta.backend),
-      S.meta.mode !== "full" ? ` · الوضع ${S.meta.mode === "off" ? "موقف" : "تصنيف بس"}` : "",
-      S.meta.cache_only && S.meta.live.available ? " · إعادة من الكاش، بدون استدعاء" : "",
-      // The technical cause stays here; the agent sees one plain sentence.
-      // A setting name reads left to right; an Arabic cause («أداة claude مو موجودة») keeps its own order.
-      !S.meta.live.available && S.meta.live.cause ? [" · مو مفعّل: ", bidiAuto(LIVE_CAUSE_AR[S.meta.live.cause] || S.meta.live.cause)] : "",
-      // The models on a line of their own (like #pMeta): wrapped into the Arabic, the pair's halves scatter.
-      el("br"), modelPair(S.meta.models)),
     el("ul", { id: "pList", class: "plist", "aria-label": "التذاكر" }));
+}
+
+/** What a live run here would use: the backend, the mode, a cache-only replay, why it is off. The technical
+ *  cause is said here; the agent sees one plain sentence. Its models only when they are not the run's
+ *  (shown just above in the lede), so each model id is on screen once. */
+function liveLine(runModels = null) {
+  const m = S.meta.models || {};
+  const same = runModels && runModels.classifier === m.classifier && runModels.drafter === m.drafter;
+  return el("p", { class: "note live-line" }, "التشغيل المباشر هنا: ", backendAr(S.meta.backend),
+    S.meta.mode !== "full" ? ` · الوضع ${S.meta.mode === "off" ? "موقف" : "تصنيف بس"}` : "",
+    S.meta.cache_only && S.meta.live.available ? " · إعادة من الكاش، بدون استدعاء" : "",
+    // A setting name reads left to right; an Arabic cause («أداة claude مو موجودة») keeps its own order.
+    !S.meta.live.available && S.meta.live.cause ? [" · مو مفعّل: ", bidiAuto(LIVE_CAUSE_AR[S.meta.live.cause] || S.meta.live.cause)] : "",
+    same ? "" : [" · ", modelPair(m)]);
+}
+
+/** «بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال.»: the run's escalations and why (it was under the
+ *  agent's counter until 5 Nov; it is about the run, so it is here). */
+function runNote(rows) {
+  const flagShort = (f) => String(S.meta.flag_ar[f] || f).split(/[:،]/)[0].trim();
+  const esc = rows.filter((r) => r.result.outcome === "escalated");
+  if (!esc.length) return el("p", { id: "runNote", class: "note", text: "بهالتشغيل النظام ما صعّد ولا تذكرة." });
+  const reasons = new Map();
+  for (const r of esc) for (const w of new Set((r.result.flags || []).map(flagShort))) reasons.set(w, (reasons.get(w) || 0) + 1);
+  const sorted = [...reasons].sort((a, b) => b[1] - a[1]);
+  // One ticket: «صعّد تذكرة وحدة: احتمال احتيال.» More: «كلها …» for a reason they all share, then
+  // «منها 2 …» (after «كلها»: «، ومنها 2 …») for the others.
+  if (esc.length === 1) {
+    return el("p", { id: "runNote", class: "note" }, "بهالتشغيل النظام صعّد تذكرة وحدة",
+      sorted.length ? `: ${sorted.map(([w]) => w).join(" و")}` : "", ".");
+  }
+  const all = sorted.filter(([, n]) => n === esc.length).map(([w]) => w);
+  const some = sorted.filter(([, n]) => n < esc.length);
+  const parts = [all.length ? ["، كلها ", all.join(" و")] : "",
+    some.map(([w, n], i) => [i ? " و" : all.length ? "، ومنها " : "، منها ", num(n), ` ${w}`])];
+  return el("p", { id: "runNote", class: "note" }, "بهالتشغيل النظام صعّد ", ticketsAr(esc.length), parts, ".");
 }
 
 async function loadSource(v) {
@@ -153,10 +182,6 @@ async function loadSource(v) {
   const isSet = kind === "set";
   $("pRunAll").hidden = !isSet;
   $("pOverview").hidden = isSet;
-  const m = P.run?.meta;
-  $("pMeta").replaceChildren(...(m ? [`${m.set} · `, ltr((m.started || "").replace("T", " ").slice(0, 16)), " · ", backendAr(m.backend),
-    el("br"), modelPair(m.models)]
-    : [ticketsAr(P.tickets.length), " بدون نتائج: شغّلها حتى تشوف المراحل."]));
 }
 
 function rowResult(i) {
@@ -204,8 +229,9 @@ export function showDefault() {
   clearTimers();
   if (P.run) return renderOverview();
   $("processMain").replaceChildren(el("div", { class: "empty-state" },
-    el("h2", { class: "empty-title", text: "مجموعة تذاكر بدون نتائج" }),
+    el("h2", { class: "empty-title" }, "مجموعة تذاكر بدون نتائج", el("span", { class: "trace-origin" }, " · ", ticketsAr(P.tickets.length))),
     el("p", { text: "اختار تذكرة حتى تشوفها وتشغّلها مرحلة بمرحلة، أو شغّل القائمة كلها." }),
+    liveLine(),
     el("p", { class: "hint" }, "التشغيل يستدعي النموذج، يعني يكلف من الرصيد. ", liveState().ok ? "" : liveState().reason)));
 }
 
@@ -673,9 +699,10 @@ async function renderOverview() {
     el("p", { class: "lede" }, `${m.set} · `, ltr((m.started || "").replace("T", " ")), ` · ${backendAr(m.backend)} · `,
       modelPair(m.models), " · التشغيل كله خذ ", secs(m.wall_seconds || 0), m.workers > 1 ? [" (", ticketsAr(m.workers), " سوة)"] : "",
       m.usage?.budget_hit ? el("strong", { class: "mark-no", text: " · وصل حد الصرف: الأرقام مو صالحة" }) : ""),
+    liveLine(m.models),
     stageStrip(rows),
     stats, ruleNote,
-    el("h3", { class: "section-title", text: "شنو صار بالتذاكر" }), bar, legend,
+    el("h3", { class: "section-title", text: "شنو صار بالتذاكر" }), bar, legend, runNote(rows),
     el("h3", { class: "section-title", text: "حسب الصعوبة" }), wrap("حسب الصعوبة", diffTable),
     el("h3", { class: "section-title", text: "هل ثقة النموذج بمحلها؟" }),
     el("p", { class: "note", text: "كل صف يجمع التذاكر حسب الثقة اللي عطاها النموذج لنفسه، ويقارنها بكم وحدة طلعت صحيحة فعلاً. هذا أساس المعايرة." }), wrap("ثقة النموذج والصحة", calib),

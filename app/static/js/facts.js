@@ -2,7 +2,7 @@
 // place it was written in the customer's text. Matching reads Arabic-Indic digits as Western digits and
 // skips the separators people type («٤٤٧١-٩٠٣٢», «2,000,000»), so the underline sits on what they wrote.
 
-import { digitRuns, el, fmtInt, mono, num, spanned, westernDigits } from "./util.js";
+import { digitRuns, el, fmtInt, mono, num, spanned, westernDigits, withTip } from "./util.js";
 
 const SEP = "[\\s\\-_/.,٫٬،]*";   // spaces, - _ / . , and the Arabic separators
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -58,7 +58,7 @@ export function factsOf(extraction, text, subcategory) {
     out.push({ label: subcategory === "topup_failed" ? "الرقم اللي انشحن" : "رقم المستلم",
       value: () => mono(ex.recipient_phone), at: findLoose(text, ex.recipient_phone), ltr: true });
   }
-  if (ex.date) out.push({ label: "الوقت", value: () => el("span", { dir: "rtl", text: ex.date }), at: findLiteral(text, ex.date) });
+  if (ex.date) out.push({ label: "الوقت", value: () => el("span", { dir: "rtl", text: ex.date }), at: findLiteral(text, ex.date), words: true });
   return out;
 }
 
@@ -72,25 +72,45 @@ export function textWithFacts(text, facts) {
   }), digitRuns);
 }
 
-/** The fact list: focusing or hovering an item lights its place in the text (inside `scope`). */
-export function factList(facts, scope) {
+export const NOT_FOUND_AR = "ما لكيناه بالنص بنفس الشكل";
+// What to do about it (the tip's second half, and the marker's description for a screen reader).
+export const NOT_FOUND_DO_AR = "يمكن الزبون كاتبه بالحروف أو بشكل ثاني: قارنه بالرسالة.";
+
+/** The facts as one quiet line under the customer's text, written the normal way (Western digits, amounts
+ *  with their unit): «رقم العملية 9776 593217 · المبلغ 2,000,000 دينار · الوقت: من البارحة». Hovering or
+ *  focusing a value lights its underline in the text (inside `scope`), and hovering the underline lights
+ *  the value. A value not found in the text has no underline: a small «؟» marker, named for what it means,
+ *  whose tip (hover, focus or a tap) says it and what to do. */
+export function factLine(facts, scope) {
   const light = (i, on) => {
     scope.querySelectorAll(`[data-fact="${i}"]`).forEach((n) => n.classList.toggle("is-hot", on));
+    line.querySelector(`[data-fact-val="${i}"]`)?.classList.toggle("is-hot", on);
   };
-  return el("ul", { class: "facts", "aria-label": "المعلومات اللي طلعت من التذكرة" },
+  const line = el("ul", { class: "facts", "aria-label": "المعلومات اللي طلعت من التذكرة" },
     facts.map((f, i) => {
-      const parts = [
-        el("span", { class: "fact-label", text: f.label }),
-        el("span", { class: "fact-value" }, f.value()),
-        f.at ? null : el("span", { class: "fact-where", text: "ما لكيناه بالنص بنفس الشكل" }),
-      ];
-      if (!f.at) return el("li", { class: "fact" }, parts);
-      const btn = el("button", { type: "button", class: "fact-btn" }, parts);
-      btn.addEventListener("mouseenter", () => light(i, true));
-      btn.addEventListener("mouseleave", () => light(i, false));
-      btn.addEventListener("focus", () => light(i, true));
-      btn.addEventListener("blur", () => light(i, false));
+      // A time is words: a colon keeps the label apart from it. A number reads apart by itself.
+      const parts = [el("span", { class: "fact-label", text: f.words ? `${f.label}: ` : `${f.label} ` }),
+        el("span", { class: "fact-value" }, f.value())];
+      if (!f.at) {
+        // The marker's «؟» is drawn by the stylesheet. Its name says what it means; its tip says that again
+        // for the eye, and what to do (that half describes the button, so it is not read twice).
+        const mark = el("button", { type: "button", class: "fact-tip", "aria-label": NOT_FOUND_AR });
+        const li = withTip(mark, [`${NOT_FOUND_AR}. `, el("span", { id: `factTip${i}Do`, text: NOT_FOUND_DO_AR })],
+          { id: `factTip${i}`, tag: "li", cls: "fact is-unfound", describe: `factTip${i}Do` });
+        li.prepend(...parts);
+        return li;
+      }
+      const btn = el("button", { type: "button", class: "fact-btn", dataset: { factVal: String(i) } }, parts);
+      for (const [ev, on] of [["mouseenter", true], ["mouseleave", false], ["focus", true], ["blur", false]]) {
+        btn.addEventListener(ev, () => light(i, on));
+      }
       btn.addEventListener("click", () => scope.querySelector(`[data-fact="${i}"]`)?.scrollIntoView({ block: "nearest" }));
       return el("li", { class: "fact" }, btn);
     }));
+  // The other way round: the underline in the text lights its value in the line.
+  scope.querySelectorAll("[data-fact]").forEach((m) => {
+    m.addEventListener("mouseenter", () => light(m.dataset.fact, true));
+    m.addEventListener("mouseleave", () => light(m.dataset.fact, false));
+  });
+  return line;
 }

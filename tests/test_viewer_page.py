@@ -163,3 +163,40 @@ def test_meta_says_where_each_issue_type_goes(srv):
         assert s["default_priority"] == tax.subcategories[key].default_priority
     assert meta["subcategories"]["app_bug"]["team"] == "tech"     # a subcategory's own team wins
     assert meta["priority_rules"] == thresholds()["priority"]
+
+
+def test_why_panel_starts_closed_and_old_preferences_do_not_reopen_it():
+    """5 Nov: «ليش؟» is closed until the agent opens it. v1 preferences saved it open for everyone (it was
+    the default, and every save wrote it), so they are read for the other preferences only."""
+    util = (STATIC / "js" / "util.js").read_text(encoding="utf-8")
+    assert re.search(r"PREF_DEFAULTS = \{[^}]*\bwhyOpen: false\b", util)
+    assert 'const PREF_KEY = "support-viewer-prefs-v2"' in util
+    assert "if (!now) delete raw.whyOpen" in util
+    main = (STATIC / "js" / "main.js").read_text(encoding="utf-8")
+    # Reopened on load only where it is a column of its own (over 1000 px), never as a drawer over the ticket.
+    assert 'const whyOnLoad = () => !!S.prefs.whyOpen && matchMedia("(min-width: 1001px)").matches' in main
+
+
+def test_why_panel_never_covers_the_ticket_where_there_is_room():
+    """5 Nov review: over 1000 px the open «ليش؟» is a third grid column (the ticket narrows); a fixed drawer
+    over the ticket is kept only between 721 and 1000 px, where it closes when another ticket opens."""
+    css = (STATIC / "css" / "app.css").read_text(encoding="utf-8")
+    wide = re.search(r"@media \(min-width: 1001px\) \{(.*?)\n\}", css, re.S).group(1)
+    assert 'body.why-open[data-mode="agent"] .shell { grid-template-columns: var(--nav-w) minmax(0, 1fr) var(--why-w); }' in wide
+    assert "position: fixed" not in wide
+    drawer = re.search(r"@media \(min-width: 721px\) and \(max-width: 1000px\) \{(.*?)\n\}", css, re.S).group(1)
+    assert "position: fixed" in drawer
+    assert css.count("position: fixed; z-index: 25") == 1   # the drawer, nowhere else
+    inbox = (STATIC / "js" / "inbox.js").read_text(encoding="utf-8")
+    assert 'export const whyCovers = () => matchMedia("(min-width: 721px) and (max-width: 1000px)").matches;' in inbox
+    assert "if (changed && whyCovers()) setWhyOpen(false);" in inbox
+
+
+def test_header_says_saved_run_once_and_the_source_picker_keeps_its_name():
+    """5 Nov: no saved-run pill (the lock line by the action bar says nothing is sent); the picker has no
+    label on screen, and its name «المصدر» stays for a screen reader."""
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert 'id="savedNote"' not in page and "saved-note" not in page
+    assert re.search(r'<label class="source-field" id="sourceField">\s*<span class="sr-only">المصدر</span>\s*<select id="source"', page)
+    main = (STATIC / "js" / "main.js").read_text(encoding="utf-8")
+    assert "return `تشغيل محفوظ: ${SET_AR[r.set] || r.set}`;" in main

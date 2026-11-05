@@ -228,14 +228,55 @@ export function spanned(text, spans, plain = (t) => t) {
   return frag;
 }
 
+// --- tips: a few words on hover, keyboard focus or a tap ---
+
+/** A trigger button with its tip (WCAG 1.4.13): the tip is a real element (role=tooltip) that describes the
+ *  button (aria-describedby). It shows on hover, on keyboard focus, or after a tap or click that pins it (a
+ *  second one, or leaving, unpins it). The pointer can move onto it. Escape hides it (dismissTips) until the
+ *  pointer and the focus leave. Returns the wrapper (tag, default span) holding both. */
+export function withTip(trigger, tipKids, { id, tag = "span", cls = "", describe = null } = {}) {
+  const tip = el("span", { id, role: "tooltip", class: "tip" }, tipKids);
+  trigger.setAttribute("aria-describedby", describe || id);
+  const box = el(tag, { class: `has-tip ${cls}`.trim() }, trigger, tip);
+  // A touch screen keeps :hover on what was tapped, so a tap's tip follows the taps alone (the pin).
+  trigger.addEventListener("pointerdown", (e) => box.classList.toggle("by-touch", e.pointerType !== "mouse"));
+  trigger.addEventListener("click", () => { box.classList.toggle("is-pinned"); box.classList.remove("is-dismissed"); });
+  box.addEventListener("mouseleave", () => { if (!box.contains(document.activeElement)) box.classList.remove("is-dismissed"); });
+  box.addEventListener("focusout", (e) => {
+    if (box.contains(e.relatedTarget)) return;
+    box.classList.remove("is-pinned");
+    if (!box.matches(":hover")) box.classList.remove("is-dismissed");
+  });
+  return box;
+}
+/** Escape: hide every tip on screen (hovered, focused or pinned). True if one was shown. */
+export function dismissTips() {
+  let any = false;
+  for (const box of document.querySelectorAll(".has-tip")) {
+    const tip = box.querySelector(":scope > .tip");
+    if (!tip || getComputedStyle(tip).visibility !== "visible") continue;
+    box.classList.add("is-dismissed");
+    box.classList.remove("is-pinned");
+    any = true;
+  }
+  return any;
+}
+
 // --- preferences: never ticket text, drafts or edits ---
 
-const PREF_KEY = "support-viewer-prefs-v1";
+// v2 (5 Nov): «ليش؟» starts closed. v1 saved whyOpen: true for everyone (it was the default and every save
+// wrote it), so until the page first saves v2 it reads v1 for the other four and drops its whyOpen: the
+// panel opens by itself only after the agent opened it.
+const PREF_KEY = "support-viewer-prefs-v2";
+const PREF_KEY_V1 = "support-viewer-prefs-v1";
 // introSeen: the first-visit card («أول مرة هنا؟») was dismissed with «فهمت».
-const PREF_DEFAULTS = { mode: "agent", singleKeys: true, whyOpen: true, source: null, introSeen: false };
+// whyOpen: the agent opened «ليش؟» (the button or W) and left it open.
+const PREF_DEFAULTS = { mode: "agent", singleKeys: true, whyOpen: false, source: null, introSeen: false };
 export function loadPrefs() {
   try {
-    const raw = JSON.parse(localStorage.getItem(PREF_KEY) || "{}");
+    const now = localStorage.getItem(PREF_KEY);
+    const raw = JSON.parse(now || localStorage.getItem(PREF_KEY_V1) || "{}");
+    if (!now) delete raw.whyOpen;
     const out = { ...PREF_DEFAULTS };
     if (raw.mode === "agent" || raw.mode === "process") out.mode = raw.mode;
     if (typeof raw.singleKeys === "boolean") out.singleKeys = raw.singleKeys;
