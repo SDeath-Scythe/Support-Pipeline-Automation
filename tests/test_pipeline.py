@@ -258,14 +258,14 @@ def test_run_confident_ticket_is_drafted(monkeypatch):
 # --- experiment harness: fix flags and the response cache ---
 
 def test_fix_flags_off_by_default_and_reject_unknown(monkeypatch):
-    """The adopted fixes became the normal code (30 Oct). Since 1 Nov three security rules are open
-    as flags, off until measured with and without; the mechanism stays."""
+    """The adopted fixes became the normal code (30 Oct), and so did the three security rules opened
+    on 1 Nov (5 Nov). No flag is open; the mechanism stays."""
     from pipeline import fixes
 
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
     assert fixes.active() == frozenset()
-    assert set(fixes.FIXES) == {"hold_reason", "sensitive_number", "escalate_account_risk"}
-    assert not any(fixes.enabled(name) for name in fixes.FIXES)
+    assert fixes.FIXES == {}
+    assert set(fixes.ADOPTED) == {"hold_reason", "sensitive_number", "escalate_account_risk"}
     monkeypatch.setenv("PIPELINE_FIXES", "draft_check")                    # adopted, so no longer a flag
     try:
         fixes.active()
@@ -655,6 +655,19 @@ def test_generator_plan_is_deterministic_and_meets_minimums():
     for s in a:   # fraud's second issue is never an account-access consequence (F14b)
         if s["edge_case"] == "fraud_hidden_second":
             assert taxonomy().get(s["secondary_subcategory"]).category not in ("account_access", "fraud_security")
+
+
+def test_generator_gold_outcome_follows_the_account_risk_rule():
+    """Gold outcomes come from the pipeline's rules: since 5 Nov a blocked account or a SIM change with a
+    draft is flagged (account_risk). The sets made before keep "drafted"; the viewer scores those by the rule."""
+    g = _gen()
+
+    def rec(sub, cat="account_access"):
+        return {"id": "x", "text": "حسابي انقفل", "category": cat, "subcategory": sub, "secondary_subcategory": None,
+                "reference": None, "recipient_phone": None, "amount_iqd": None, "amount_usd": None}
+
+    assert [g.regold(rec(s))["outcome"] for s in ("sim_change", "blocked_account", "login_otp")] == ["flagged", "flagged", "drafted"]
+    assert g.regold(rec("suspected_scam", "fraud_security"))["outcome"] == "escalated"
 
 
 def test_generator_numbers_and_checks():

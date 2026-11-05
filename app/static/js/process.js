@@ -381,6 +381,16 @@ function render(e) {
   }
 }
 
+// The 5 Nov rule (run.py ACCOUNT_RISK), as this page says it.
+const RULE_5NOV = "قاعدة 5 تشرين الثاني";
+/** The gold outcome as the rules give it now. The gold files predate the 5 Nov rule: a ready blocked
+ *  account or SIM change is «تحتاج تأكيد» now (account_risk), so it is scored against that and the page
+ *  says so; the files are not changed. {outcome, byRule} */
+function expectedOutcome(g) {
+  const byRule = g?.outcome === "drafted" && (S.meta.account_risk_types || []).includes(g.subcategory);
+  return { outcome: byRule ? "flagged" : g?.outcome, byRule };
+}
+
 /** own: the result event's own time. On an escalation it is the team note's «الخلاصة», one call to the
  *  classification model after the stages above (none of them shows it); the rest of the note is rules. */
 function renderResultBox(d, gold, own = null) {
@@ -388,6 +398,7 @@ function renderResultBox(d, gold, own = null) {
   const box = el("div", { class: `result ${d.outcome}` },
     el("p", { class: "outcome", text: OUTCOME_AR[d.outcome] || d.outcome }),
     d.notes_ar?.length ? el("div", { class: "chips" }, d.notes_ar.map((n) => el("span", { class: "chip", text: n }))) : null,
+    d.account_risk_recomputed ? el("p", { class: "note", text: `هذا التشغيل أقدم من ${RULE_5NOV} (حساب مقفول أو تبديل شريحة)، فالعلامة انضافت هسه بنفس القاعدة. المسودة نفسها، والنتيجة صارت «تحتاج تأكيد».` }) : null,
     d.team ? el("p", { class: "note" }, `${S.meta.teams[d.team]?.label_ar || d.team} · `, ltr(d.priority || "—")) : null,
     d.handoff_ar ? el("div", { class: "handoff-box" }, el("p", { class: "note", text: "ملاحظة للقسم المستلم" }), el("p", { class: "handoff-body", dir: "rtl" }, richText(d.handoff_ar))) : null,
     d.usage ? el("p", { class: "note" }, summary ? "«الخلاصة» بالملاحظة كتبها نموذج التصنيف، والباقي قواعد" : "استدعاء نموذج التصنيف للملاحظة",
@@ -408,13 +419,14 @@ function goldTable(g, d) {
     ["amount_iqd", "المبلغ (دينار)", g.amount_iqd, ex.amount_iqd, (x) => (x != null ? fmtInt(x) : "—")],
     ["amount_usd", "المبلغ (دولار)", g.amount_usd, ex.amount_usd, (x) => x ?? "—"],
     ["priority", "الأولوية", g.priority, d.priority, (x) => x ?? "—"],
-    ["outcome", "النتيجة", g.outcome, d.outcome, (x) => OUTCOME_SHORT[x] ?? "—"],
+    ["outcome", "النتيجة", expectedOutcome(g).outcome, d.outcome, (x) => OUTCOME_SHORT[x] ?? "—", false,
+      expectedOutcome(g).byRule ? ` (${RULE_5NOV})` : ""],
   ].filter((r) => r[0] in g).map((r) => r.slice(1));
   const tb = el("tbody");
   const ran = d.outcome != null;
-  for (const [k, want, got, f, isRef] of rows) {
+  for (const [k, want, got, f, isRef, why = ""] of rows) {
     const ok = isRef ? norm(want) === norm(got) : (want ?? null) === (got ?? null);
-    tb.append(el("tr", {}, el("th", { scope: "row", text: k }), el("td", {}, f(want)),
+    tb.append(el("tr", {}, el("th", { scope: "row", text: k }), el("td", {}, f(want), why),
       el("td", {}, !ran ? "—" : ok ? el("span", { class: "mark-ok", text: "✓" }) : el("span", {}, el("span", { class: "mark-no", text: "✗ " }), "طلع: ", f(got)))));
   }
   const tags = [g.difficulty && (DIFF_AR[g.difficulty] || g.difficulty), ...[g.edge_case, g.dialect, g.style].map((x) => x && (TAG_AR[x] || x))].filter(Boolean);
@@ -562,7 +574,7 @@ function scoreRow(row) {
     sub: !!used && used === g.subcategory,
     firstSub: !!ex && ex.subcategory === g.subcategory,
     got: used, conf: ex?.confidence, gateConf: gate?.data.confidence,
-    outcome: r.outcome === g.outcome, priority: r.priority === g.priority,
+    outcome: r.outcome === expectedOutcome(g).outcome, priority: r.priority === g.priority,
     recheck: rc?.status === "done", agree: rc?.data?.agree,
     calls: (cl ? 1 : 0) + (rc?.status === "done" ? 1 : 0) + (dr?.status === "done" ? 1 : 0),
   };
@@ -596,6 +608,12 @@ async function renderOverview() {
     stat((calls / (n || 1)).toFixed(1), "استدعاء نموذج لكل تذكرة"), stat(secs(avg), "معدل وقت التذكرة"),
     stat(usages.length ? fmtInt(Math.round(tokens / n)) : "—", "توكنز لكل تذكرة"),
     stat(cost ? `$${(cost / n).toFixed(4)}` : "—", "الكلفة المحسوبة لكل تذكرة"));
+  // The 5 Nov rule: what the scores count, and which outcomes this page added to an older run.
+  const byRule = rows.filter((r) => expectedOutcome(r.ticket).byRule).length;
+  const added = rows.filter((r) => r.result.account_risk_recomputed).length;
+  const ruleNote = byRule || added ? el("p", { id: "ruleNote", class: "note" },
+    byRule ? ["حسب ", RULE_5NOV, "، النتيجة الصحيحة لـ", ticketsAr(byRule), " حساب مقفول أو تبديل شريحة هي «تحتاج تأكيد»، وعليها تنحسب «النتيجة صحيحة». ملف التذاكر أقدم من القاعدة ويقول «جاهزة». "] : "",
+    added ? ["التشغيل نفسه أقدم من القاعدة، فـ", ticketsAr(added), " انعلّمت هسه بنفس القاعدة، بنفس المسودة."] : "") : null;
 
   // The bar shows the share; the words and counts are in the legend under it, so a narrow segment
   // never cuts them off.
@@ -656,7 +674,7 @@ async function renderOverview() {
       modelPair(m.models), " · التشغيل كله خذ ", secs(m.wall_seconds || 0), m.workers > 1 ? [" (", ticketsAr(m.workers), " سوة)"] : "",
       m.usage?.budget_hit ? el("strong", { class: "mark-no", text: " · وصل حد الصرف: الأرقام مو صالحة" }) : ""),
     stageStrip(rows),
-    stats,
+    stats, ruleNote,
     el("h3", { class: "section-title", text: "شنو صار بالتذاكر" }), bar, legend,
     el("h3", { class: "section-title", text: "حسب الصعوبة" }), wrap("حسب الصعوبة", diffTable),
     el("h3", { class: "section-title", text: "هل ثقة النموذج بمحلها؟" }),

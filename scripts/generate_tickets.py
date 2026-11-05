@@ -50,7 +50,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 # Gold priority and outcome come from the pipeline's own routing rules, and the blind audit gets the
-# classifier's rules ("ورقة" = 100 USD included). These are the normal code path since 30 Oct.
+# classifier's rules ("ورقة" = 100 USD included). These are the normal code path since 30 Oct. Since 5 Nov
+# a blocked account or a SIM change is flagged (account_risk, run.py): new gold says so. The sets made
+# before keep "drafted" for them, and the viewer scores those against the rule (process.js).
 
 from pipeline import classify as cls  # noqa: E402
 from pipeline.clean import clean  # noqa: E402
@@ -59,6 +61,7 @@ from pipeline.gate import _key, reference_in_text  # noqa: E402
 from pipeline.llm import call  # noqa: E402
 from pipeline.requirements import missing_required  # noqa: E402
 from pipeline.route import route  # noqa: E402
+from pipeline.run import ACCOUNT_RISK  # noqa: E402
 from pipeline.schemas import Extraction  # noqa: E402
 
 SPLITS = {"dev": "dev", "mvp_test": "mvp", "heldout": "hold",     # split -> id prefix
@@ -524,7 +527,7 @@ def gold(spec: dict, text: str, ref: str | None, phone: str | None, date, split:
     _, priority = route(ex, clean(text))
     if sub.always_escalate:
         outcome = "escalated"
-    elif missing_required(ex, sub.required_fields):
+    elif missing_required(ex, sub.required_fields) or spec["subcategory"] in ACCOUNT_RISK:
         outcome = "flagged"
     else:
         outcome = "drafted"
@@ -764,8 +767,8 @@ def regold(r: dict) -> dict:
                     recipient_phone=r["recipient_phone"], amount_iqd=r["amount_iqd"], amount_usd=r["amount_usd"],
                     confidence=1.0)
     _, priority = route(ex, clean(r["text"]))
-    outcome = "escalated" if sub.always_escalate else "flagged" if missing_required(ex, sub.required_fields) \
-        else "drafted"
+    outcome = "escalated" if sub.always_escalate else "flagged" if (
+        missing_required(ex, sub.required_fields) or r["subcategory"] in ACCOUNT_RISK) else "drafted"
     return {**r, "priority": priority, "outcome": outcome}
 
 

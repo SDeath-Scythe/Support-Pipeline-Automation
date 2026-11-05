@@ -210,7 +210,7 @@ def test_an_amount_in_thousands_or_millions_is_a_known_number(draft, given):
     assert problems(draft.replace("50 ", "60 ").replace("٥٠", "٦٠").replace("1.5", "2.5"), given) == ["unknown_number"]
 
 
-# --- hold_reason (tipping-off) and sensitive_number: flag-gated ---
+# --- hold_reason (tipping-off) and sensitive_number: always on since 5 Nov ---
 
 HOLD = ["حسابك تحت التحقيق حالياً", "عندنا اشتباه بالعملية", "العملية مشبوهة وراح نراجعها",
         "رفعنا بلاغ للقسم المختص", "بسبب غسيل الأموال", "حسابك عليه مراجعة أمنية", "الموضوع عند الجهات الرقابية",
@@ -222,6 +222,9 @@ HOLD += [  # review of 1 Nov: suspicion, reporting, compliance and monitoring in
     "حسابك محول لقسم الامتثال", "تبييض الأموال", "تم الإبلاغ عن حسابك", "أبلغنا الجهات المختصة بالموضوع",
     "بلّغنا الجهات المختصة", "بلغنا البنك المركزي عن العملية", "تم ابلاغ الجهات المعنية بالعملية",
     "رفعنا تقرير عن حسابك للجهات المختصة", "حسابك مشبوه", "العملية مشتبه بيها"]
+# May only mean "we raised a ticket", but stays flagged (the author's decision, 5 Nov): a false alarm costs
+# the agent an edit, a miss is a legal breach.
+HOLD += ["سجلنا بلاغ بمشكلتك", "رفعنا بلاغ بخصوص مشكلتك"]
 NOT_HOLD = ["وصلنا بلاغك عن تحويل 50 الف",          # the customer's own report (7 saved dev drafts)
             "وراح يتم إبلاغك بأي تحديث",             # «إبلاغك» = we'll let you know
             "قسم الحسابات راح يتحقق من العملية",      # verify, not investigate
@@ -236,15 +239,12 @@ NOT_HOLD = ["وصلنا بلاغك عن تحويل 50 الف",          # the cu
 
 
 @pytest.mark.parametrize("text", HOLD)
-def test_hold_reason_only_when_enabled(text, monkeypatch):
-    assert problems(text, text) == []
-    monkeypatch.setenv("PIPELINE_FIXES", "hold_reason")
+def test_hold_reason_is_caught(text):
     assert problems(text, text) == ["hold_reason"]
 
 
 @pytest.mark.parametrize("text", NOT_HOLD)
-def test_hold_reason_leaves_ordinary_words(text, monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "hold_reason")
+def test_hold_reason_leaves_ordinary_words(text):
     assert problems(text, text) == []
 
 
@@ -259,9 +259,7 @@ SENSITIVE = [
 
 
 @pytest.mark.parametrize("text, number", SENSITIVE)
-def test_sensitive_number_only_when_enabled_even_if_the_ticket_had_it(text, number, monkeypatch):
-    assert problems(text, text) == []
-    monkeypatch.setenv("PIPELINE_FIXES", "sensitive_number")
+def test_sensitive_number_is_caught_even_if_the_ticket_had_it(text, number):
     [f] = findings(text, text)
     assert f["kind"] == "sensitive_number" and text[f["start"]:f["end"]] == number
     assert f["text"] == "".join("*" if c.isdigit() else c for c in number)   # the span is saved: no digits
@@ -288,8 +286,7 @@ SENSITIVE += [  # review of 1 Nov: a password, a code further away, glued or wri
     "كود الاشتراك 556677 مالتك صحيح", "رمز الفاتورة 445566 وصلنا", "الرمز البريدي 10001", "كود المرجع 778899 مسجل",
     "رمز التتبع 88213 مال الشحنة وصلنا",
 ])
-def test_sensitive_number_leaves_references(text, monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "sensitive_number")
+def test_sensitive_number_leaves_references(text):
     assert problems(text, text) == []
 
 
@@ -300,8 +297,7 @@ def test_sensitive_numbers_reports_cards_and_codes():
 
 # --- findings: kinds in a stable order, spans in the draft as written ---
 
-def test_findings_point_at_the_draft_text(monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "hold_reason,sensitive_number")
+def test_findings_point_at_the_draft_text():
     given = "<ticket>\nشحنت رصيد ٥ الاف وما وصل\n</ticket>\nAmount: 5,000 IQD\nKnown facts: none"
     text = ("hلا بيك، القسم يرد خلال يومـين. ممكن تدزلنا الرمز اللي وصلك؟ "
             "الرسوم ٢,٥٠٠ دينار. حسابك تحت التحـقيق. لا تكتب PIN 4321 لأحد.")

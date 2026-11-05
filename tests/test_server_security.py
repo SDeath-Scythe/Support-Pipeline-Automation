@@ -635,6 +635,25 @@ def test_an_approval_that_asks_for_a_code_is_refused_409(srv, tmp_path, reply, a
     assert call(srv, "POST", "/api/decision", _decision(action="took_over", final_text=None))[0] == 200
 
 
+@pytest.mark.parametrize("reply, why", [
+    ("هلا بيك، حسابك تحت التحقيق حالياً", "تحقيق"),
+    ("هلا بيك، رفعنا بلاغ للقسم المختص وراح يتابعون", "بلاغ"),     # stays flagged (5 Nov)
+    ("هلا بيك، شفنا بطاقتك 4111 1111 1111 1111 وراح نتابع", "رقم بطاقة"),
+    ("هلا بيك، الرمز اللي وصلك هو 5521 لا تشاركه", "رمز"),
+])
+@pytest.mark.parametrize("action", ["approved", "edited"])
+def test_an_approval_that_tips_off_or_repeats_a_number_is_refused_409(srv, tmp_path, monkeypatch, reply, why, action):
+    """hold_reason and sensitive_number block an approval with no flag set (adopted on 5 Nov), at the
+    server as on the page; nothing is logged and the reply's text is not echoed."""
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    status, _, body = call(srv, "POST", "/api/decision", _decision(action=action, draft_text=reply, final_text=reply))
+    assert status == 409
+    j = json.loads(body)
+    assert j["conflict"] == "blocked" and why in j["error"] and reply not in j["error"]
+    assert not (tmp_path / "decisions.jsonl").exists()
+    assert call(srv, "POST", "/api/decision", _decision(action="took_over", final_text=None))[0] == 200
+
+
 def test_a_second_decision_on_a_saved_run_ticket_is_refused_409(srv, fake_runs):
     """F8 (1 Nov review): two tabs could both approve one ticket; an undo in one then showed it open."""
     first = _decision(run="exp/dev/rec", ticket_id="dev-0001", action="approved", final_text=DRAFT)
@@ -651,6 +670,47 @@ def test_a_second_decision_on_a_saved_run_ticket_is_refused_409(srv, fake_runs):
     # decided again after the undo
     assert call(srv, "POST", "/api/decision", first)[0] == 200
     assert [d["action"] for d in server.read_decisions("exp/dev/rec")] == ["approved", "undone", "approved"]
+
+
+def test_the_identity_tick_is_logged_as_a_kind(srv, tmp_path):
+    """5 Nov review: «تأكدت من هوية الزبون» was refused as an acknowledged kind, so the log could not show it."""
+    status, _, _ = call(srv, "POST", "/api/decision", _decision(flags=["account_risk"], warnings_acknowledged=["account_risk"]))
+    assert status == 200
+    rec = json.loads((tmp_path / "decisions.jsonl").read_text(encoding="utf-8"))
+    assert rec["flags"] == ["account_risk"] and rec["warnings_acknowledged"] == ["account_risk"]
+
+
+@pytest.mark.parametrize("over", [
+    {"flags": ["account_risk"]},                                                   # the pipeline's flag
+    {"flags": ["account_risk", "draft:promise"], "warnings_acknowledged": ["promise"]},
+    {"flags": [], "corrected": {"subcategory": "sim_change"}},                     # the agent's correction
+    {"flags": ["recheck_used_second"], "corrected": {"subcategory": "blocked_account", "team": "accounts"}},
+])
+@pytest.mark.parametrize("action", ["approved", "edited"])
+def test_an_approval_of_a_blocked_account_or_a_sim_change_without_the_identity_tick_is_refused_409(
+        srv, tmp_path, over, action):
+    """5 Nov review: a hand-made request (or a stale page) could approve without the identity tick. Nothing
+    is logged; with the tick it is; taking the ticket over needs none (no reply is approved)."""
+    status, _, body = call(srv, "POST", "/api/decision", _decision(action=action, **over))
+    assert status == 409
+    j = json.loads(body)
+    assert j["conflict"] == "identity" and "«تأكدت من هوية الزبون»" in j["error"]
+    assert not (tmp_path / "decisions.jsonl").exists()
+    ticked = {**over, "warnings_acknowledged": [*over.get("warnings_acknowledged", []), "account_risk"]}
+    assert call(srv, "POST", "/api/decision", _decision(action=action, **ticked))[0] == 200
+    assert call(srv, "POST", "/api/decision", _decision(action="took_over", final_text=None, **over))[0] == 200
+
+
+def test_a_saved_run_ticket_needs_the_tick_even_when_the_request_leaves_the_flag_out(srv, tmp_path):
+    """On a saved run the server reads the ticket itself: t2-0007 (a SIM change, drafted on 30 Oct, served
+    with account_risk since 5 Nov) is refused without the tick whatever flags the request sends."""
+    body = _decision(run="saved/test2/final", ticket_id="t2-0007", action="approved", pipeline_outcome="drafted",
+                     flags=[], reason_codes=[], corrected={}, draft_text=DRAFT, final_text=DRAFT)
+    status, _, raw = call(srv, "POST", "/api/decision", body)
+    assert status == 409 and json.loads(raw)["conflict"] == "identity"
+    assert server.run_account_risk_ids("saved/test2/final") == {"t2-0007", "t2-0016", "t2-0029", "t2-0048", "t2-0054", "t2-0080"}
+    assert call(srv, "POST", "/api/decision", {**body, "ticket_id": "t2-0002"})[0] == 200    # a ready one needs none
+    assert call(srv, "POST", "/api/decision", {**body, "warnings_acknowledged": ["account_risk"]})[0] == 200
 
 
 def test_live_tickets_are_not_compared_across_pages(srv):

@@ -247,14 +247,15 @@ def test_check_allows_a_time_only_from_the_policy_facts(srv, monkeypatch):
     assert [f["kind"] for f in check(srv, {"draft": draft, "allowed_text": allowed})[1]["findings"]] == ["promise"]
 
 
-def test_check_runs_the_flagged_rules_only_when_their_flag_is_on(srv, monkeypatch):
+def test_check_always_runs_hold_reason_and_sensitive_number(srv):
+    """Adopted on 5 Nov: no flag turns them on or off."""
     draft = "هلا بيك، الموضوع تحت التحقيق بسبب اشتباه. رقم بطاقتك 4111 1111 1111 1111"
     allowed = "<ticket>\nبطاقتي 4111 1111 1111 1111 انقفلت\n</ticket>"
-    assert check(srv, {"draft": draft, "allowed_text": allowed})[1]["findings"] == []
-    monkeypatch.setenv("PIPELINE_FIXES", "hold_reason,sensitive_number")
     found = check(srv, {"draft": draft, "allowed_text": allowed})[1]["findings"]
     assert [f["kind"] for f in found] == ["hold_reason", "sensitive_number"]
     assert not any(ch.isdigit() for ch in found[1]["text"])   # a code or card number comes back as *
+    status, out = check(srv, {"draft": "هلا بيك، رفعنا بلاغ للقسم المختص", "allowed_text": ""})
+    assert status == 200 and [f["kind"] for f in out["findings"]] == ["hold_reason"]
 
 
 def test_check_limits_are_413_and_the_edges_pass(srv):
@@ -402,7 +403,9 @@ def test_recomputed_spans_are_cached_until_the_file_or_the_flags_change(old_runs
     os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
     server.with_current_gold(f)
     assert len(calls) == 2
-    monkeypatch.setenv("PIPELINE_FIXES", "hold_reason")
+    # a flag (none is open since 5 Nov: a stand-in) could change what the checks find
+    monkeypatch.setitem(server.fixes.FIXES, "some_fix", "a stand-in flag for this test")
+    monkeypatch.setenv("PIPELINE_FIXES", "some_fix")
     server.with_current_gold(f)
     assert len(calls) == 3
 
@@ -427,9 +430,78 @@ def test_committed_final_run_gets_spans_that_agree_with_its_saved_checks(srv):
     assert drafts == 74 and len(run["tickets"]) == 80
 
 
+# --- the 5 Nov review: saved runs get the account_risk flag as run.py gives it now ---
+
+def _risk_rows():
+    prompt = "<ticket>\nحسابي انقفل\n</ticket>\nKnown facts: none"
+    blocked = _draft_row("t2-0001", "هلا بيك، راح نحول طلبك لقسم الحسابات.", prompt, spans=[], result_checks=[],
+                         sub="blocked_account")
+    blocked["result"] = {**blocked["result"], "notes_ar": []}
+    sim = _draft_row("t2-0002", "هلا بيك، راح نتابع.", prompt, spans=[], result_checks=[], outcome="flagged", sub="sim_change")
+    sim["result"] = {**sim["result"], "flags": ["recheck_used_second", "draft:promise"], "notes_ar": ["n1", "n2"],
+                     "recheck_alternative": "login_otp"}
+    sim["events"][-1] = {**sim["events"][-1], "data": sim["result"]}
+    escalated = {"ticket": {"id": "t2-0003", "text": "نص"}, "events": [],
+                 "result": {"outcome": "escalated", "flags": ["recheck_disagreed"], "handoff_ar": "ملاحظة",
+                            "extraction": {"subcategory": "sim_change"}}, "seconds": 1.0}
+    other = _draft_row("t2-0004", "هلا بيك، راح نتابع.", prompt, spans=[], result_checks=[], sub="login_otp")
+    already = _draft_row("t2-0005", "هلا بيك، راح نتابع.", prompt, spans=[], result_checks=[], outcome="flagged",
+                         sub="blocked_account")
+    already["result"] = {**already["result"], "flags": ["account_risk"]}
+    already["events"][-1] = {**already["events"][-1], "data": already["result"]}
+    return [blocked, sim, escalated, other, already]
+
+
+def test_saved_runs_get_account_risk_marked_recomputed_and_nothing_else_changes(srv, old_runs):
+    """A run made before 5 Nov showed a blocked account or a SIM change as ready (one key, no identity tick).
+    The server now gives each drafted one the flag the way run.py does, in the result and its event."""
+    f, _ = old_runs
+    original = {"meta": {"set": "tickets", "backend": "api"}, "tickets": _risk_rows()}
+    f.write_text(json.dumps(original, ensure_ascii=False), encoding="utf-8")
+    status, _, raw = call(srv, "GET", "/api/run?name=20261030-000000-tickets-api")
+    assert status == 200
+    blocked, sim, escalated, other, already = json.loads(raw)["tickets"]
+    for row in (blocked, sim):
+        ev = row["events"][-1]["data"]
+        assert row["result"]["outcome"] == ev["outcome"] == "flagged"
+        assert row["result"]["account_risk_recomputed"] is True and ev["account_risk_recomputed"] is True
+        assert row["result"]["draft_ar"] == ev["draft_ar"]
+    assert blocked["result"]["flags"] == ["account_risk"] and blocked["result"]["notes_ar"] == [FLAG_AR["account_risk"]]
+    # after the gate and re-check flags, before the draft checks: the order run.py adds them
+    assert sim["result"]["flags"] == ["recheck_used_second", "account_risk", "draft:promise"]
+    assert sim["result"]["notes_ar"] == ["n1", FLAG_AR["account_risk"], "n2"]
+    original_rows = original["tickets"]
+    assert escalated == original_rows[2] and other == original_rows[3] and already == original_rows[4]
+    for row, orig in ((blocked, original_rows[0]), (sim, original_rows[1])):
+        for d in (row["result"], row["events"][-1]["data"]):
+            assert d.pop("account_risk_recomputed") is True
+        assert {k: v for k, v in row["result"].items() if k not in ("outcome", "flags", "notes_ar")} == \
+            {k: v for k, v in orig["result"].items() if k not in ("outcome", "flags", "notes_ar")}
+    assert json.loads(f.read_text(encoding="utf-8")) == original   # the file itself is never changed
+
+
+def test_committed_final_run_shows_the_six_account_risk_tickets_flagged(srv):
+    status, _, raw = call(srv, "GET", "/api/run?name=saved/test2/final")
+    run = json.loads(raw)
+    by = {r["ticket"]["id"]: r["result"] for r in run["tickets"]}
+    risky = sorted(i for i, r in by.items() if "account_risk" in r["flags"])
+    assert risky == ["t2-0007", "t2-0016", "t2-0029", "t2-0048", "t2-0054", "t2-0080"]
+    assert all(by[i]["outcome"] == "flagged" and by[i]["flags"] == ["account_risk"] and by[i]["draft_ar"]
+               and by[i]["account_risk_recomputed"] for i in risky)
+    assert by["t2-0009"]["flags"] == ["recheck_used_second"] and "account_risk_recomputed" not in by["t2-0009"]
+    outcomes = [r["outcome"] for r in by.values()]
+    assert (outcomes.count("flagged"), outcomes.count("escalated"), outcomes.count("drafted")) == (15, 6, 59)
+
+
+def test_meta_names_the_account_risk_types(srv):
+    meta = json.loads(call(srv, "GET", "/api/meta")[2])
+    assert meta["account_risk_types"] == ["blocked_account", "sim_change"]
+    assert all(t in meta["subcategories"] and not meta["subcategories"][t]["always_escalate"] for t in meta["account_risk_types"])
+
+
 # --- S6: /api/meta ---
 
-def test_meta_names_the_blocking_checks_and_explains_every_kind(srv, monkeypatch):
+def test_meta_names_the_blocking_checks_and_explains_every_kind(srv):
     status, _, raw = call(srv, "GET", "/api/meta")
     meta = json.loads(raw)
     assert status == 200
@@ -437,10 +509,10 @@ def test_meta_names_the_blocking_checks_and_explains_every_kind(srv, monkeypatch
     assert list(meta["check_ar"]) == list(draft_check.KINDS)
     for kind, text in meta["check_ar"].items():
         assert text == FLAG_AR[f"draft:{kind}"] and "\n" not in text and any("؀" <= ch <= "ۿ" for ch in text)
-    assert meta["checks_active"] == ["stray_latin", "promise", "asks_secret", "unknown_number"]
-    monkeypatch.setenv("PIPELINE_FIXES", "sensitive_number")
-    meta = json.loads(call(srv, "GET", "/api/meta")[2])
-    assert meta["checks_active"] == ["stray_latin", "promise", "asks_secret", "unknown_number", "sensitive_number"]
+    # every rule runs (hold_reason and sensitive_number since 5 Nov), so «ما لكينا» may name them all
+    assert meta["checks_active"] == list(draft_check.KINDS) == ["stray_latin", "promise", "asks_secret", "unknown_number",
+                                                                  "hold_reason", "sensitive_number"]
+    assert meta["flag_ar"]["account_risk"].startswith("حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون")
 
 
 # --- the shared facts helper (draft.py) ---
@@ -481,6 +553,18 @@ def test_main_refuses_an_unknown_fix_flag(monkeypatch, capsys):
     with pytest.raises(SystemExit) as stop:
         server.main()
     assert stop.value.code == 1 and "hold_reasn" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name", ["hold_reason", "sensitive_number", "escalate_account_risk"])
+def test_main_refuses_an_adopted_flag_and_says_what_became_of_it(name, monkeypatch, capsys):
+    monkeypatch.setenv("PIPELINE_FIXES", name)
+    monkeypatch.delenv("REAL_DATA", raising=False)
+    monkeypatch.delenv("LLM_BUDGET_USD", raising=False)
+    monkeypatch.setattr(server, "make_server", lambda *a, **k: pytest.fail("the server must not start"))
+    with pytest.raises(SystemExit) as stop:
+        server.main()
+    err = capsys.readouterr().err
+    assert stop.value.code == 1 and name in err and "now the normal code" in err and "Remove it from PIPELINE_FIXES" in err
 
 
 def test_recompute_skips_malformed_rows_and_events():

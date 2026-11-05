@@ -350,42 +350,160 @@ def test_new_flags_have_their_arabic_notes():
         "internal_error": "صار خطأ داخلي، تحتاج مراجعة يدوية",
         "draft:hold_reason": "المسودة تذكر تحقيق أو اشتباه أو بلاغ: لا تعتمدها، ممنوع نخبر الزبون",
         "draft:sensitive_number": "المسودة تكرر رقم بطاقة أو رمز: احذفه قبل الاعتماد",
-        "account_risk": "حساب محظور أو تغيير شريحة: يستلمها موظف بدون مسودة",
+        "account_risk": "حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، "
+                        "ولا تكتب بالرد إنه صار أي تغيير على الحساب",
     }
 
 
-# --- contract H: escalate_account_risk ---
+# --- contract H: the 5 Nov adoption (hold_reason, sensitive_number, account_risk) ---
 
 def _ex(sub, cat="account_access", conf=0.95):
     return Extraction(category=cat, subcategory=sub, confidence=conf)
 
 
-def test_new_fix_flags_are_off_by_default(monkeypatch):
+def _reply(sub, conf, cat="account_access"):
+    return json.dumps({"category": cat, "subcategory": sub, "confidence": conf})
+
+
+@pytest.mark.parametrize("name", ["hold_reason", "sensitive_number", "escalate_account_risk"])
+def test_an_adopted_flag_name_is_refused_with_what_became_of_it(name, monkeypatch):
     from pipeline import fixes
 
-    assert {"hold_reason", "sensitive_number", "escalate_account_risk"} <= fixes.FIXES.keys()
-    assert not any(fixes.enabled(n) for n in ("hold_reason", "sensitive_number", "escalate_account_risk"))
-    monkeypatch.setenv("PIPELINE_FIXES", "escalate_account_risk")
-    assert fixes.enabled("escalate_account_risk") and not fixes.enabled("hold_reason")
+    assert fixes.FIXES == {} and fixes.active() == frozenset()
+    monkeypatch.setenv("PIPELINE_FIXES", f"{name}, ")
+    with pytest.raises(ValueError) as e:
+        fixes.active()
+    msg = str(e.value)
+    assert name in msg and "normal code" in msg and "5 Nov 2026" in msg and "Remove it from PIPELINE_FIXES" in msg
+    with pytest.raises(KeyError):
+        fixes.enabled(name)
 
 
-def test_account_risk_gate_only_when_enabled(monkeypatch):
-    off = gate.check(_ex("sim_change"), "بدلت الشريحة وما يوصلني الرمز")
-    assert not off.escalate and off.needs_recheck and "account_risk" not in off.flags
-    monkeypatch.setenv("PIPELINE_FIXES", "escalate_account_risk")
-    for sub in ("sim_change", "blocked_account"):
-        g = gate.check(_ex(sub), "حسابي انقفل")
-        assert g.escalate and g.flags == ["account_risk"], sub
-    assert not gate.check(_ex("login_otp"), "ما يوصلني الرمز").escalate
+def test_the_new_flag_name_is_not_a_fix_either(monkeypatch):
+    from pipeline import fixes
+
+    monkeypatch.setenv("PIPELINE_FIXES", "account_risk")
+    with pytest.raises(ValueError, match="Unknown fix"):
+        fixes.active()
 
 
-def test_account_risk_ticket_gets_no_draft(fake, monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "escalate_account_risk")
-    fake.replies["classifier"] = SIM
-    result = fake.run.process("بدلت الشريحة وهسه ما يوصلني الرمز")
-    assert result["outcome"] == "escalated" and result["flags"] == ["account_risk"]
-    assert "drafter" not in fake.seen and "rechecker" not in fake.seen and "draft_ar" not in result
-    assert "حساب محظور أو تغيير شريحة" in result["handoff_ar"]
+def test_the_gate_never_escalates_a_blocked_account_or_a_sim_change():
+    sim = gate.check(_ex("sim_change"), "بدلت الشريحة وما يوصلني الرمز")
+    assert not sim.escalate and sim.needs_recheck and sim.flags == []        # high risk: re-checked, as before
+    blocked = gate.check(_ex("blocked_account"), "حسابي انقفل")
+    assert not blocked.escalate and not blocked.needs_recheck and blocked.flags == []
+
+
+@pytest.mark.parametrize("sub", ["blocked_account", "sim_change"])
+def test_account_risk_flags_the_draft_and_never_escalates(fake, sub):
+    fake.replies["classifier"] = fake.replies["rechecker"] = _reply(sub, 0.95)
+    events = []
+    result = fake.run.process("بدلت الشريحة وهسه ما يوصلني الرمز" if sub == "sim_change" else "حسابي انقفل", events.append)
+    assert result["outcome"] == "flagged" and result["flags"] == ["account_risk"]
+    assert result["draft_ar"] and "handoff_ar" not in result
+    assert result["notes_ar"] == [fake.run.FLAG_AR["account_risk"]]
+    assert "summary" not in fake.seen and fake.seen[-1] == "drafter"
+    assert [e["stage"] for e in events if e["status"] == "skipped"] == ([] if sub == "sim_change" else ["recheck"])
+
+
+def test_account_risk_reads_the_type_after_the_recheck_not_the_first_label(fake):
+    """t2-0009: the first model said sim_change (unsure), the re-check said login_otp and the draft was
+    written for login_otp. No account_risk (the old flag escalated it before the re-check could correct it)."""
+    fake.replies["classifier"] = _reply("sim_change", 0.70)
+    fake.replies["rechecker"] = _reply("login_otp", 0.95)
+    result = fake.run.process("رمز التحقق ما يوصلني من البارحة، الخط نفسه والموبايل نفسه")
+    assert result["outcome"] == "flagged" and result["flags"] == ["recheck_used_second"]
+    assert result["recheck_alternative"] == "sim_change" and result["extraction"]["subcategory"] == "login_otp"
+    assert result["draft_ar"] and "account_risk" not in result["flags"]
+
+
+@pytest.mark.parametrize("sub", ["blocked_account", "sim_change"])
+def test_account_risk_applies_when_the_recheck_changed_the_type_to_it(fake, sub):
+    fake.replies["classifier"] = _reply("login_otp", 0.70)
+    fake.replies["rechecker"] = _reply(sub, 0.95)
+    result = fake.run.process("ما اكدر افوت للحساب")
+    assert result["outcome"] == "flagged" and result["flags"] == ["recheck_used_second", "account_risk"]
+    assert result["recheck_alternative"] == "login_otp" and result["extraction"]["subcategory"] == sub
+    assert result["draft_ar"]
+
+
+def test_account_risk_is_not_added_to_an_escalation(fake):
+    """The re-check said sim_change but too unsure to use: the models disagree, so a person takes it, with
+    the reason the team note gives for that (no account_risk flag, which is never a reason to escalate).
+    Whoever takes it writes the reply, so the note ends with the identity reminder (5 Nov review)."""
+    from pipeline.handoff import IDENTITY_AR
+
+    fake.replies["classifier"] = _reply("login_otp", 0.70)
+    fake.replies["rechecker"] = _reply("sim_change", 0.50)
+    result = fake.run.process("ما اكدر افوت للحساب")
+    assert result["outcome"] == "escalated" and result["flags"] == ["recheck_disagreed"]
+    assert "draft_ar" not in result and "من البداية" not in result["handoff_ar"]
+    assert result["handoff_ar"].split("\n")[-1] == IDENTITY_AR
+    assert "سبب التصعيد: النموذجين اختلفوا" in result["handoff_ar"]
+
+
+@pytest.mark.parametrize("case", ["unsure", "draft_error", "drafts_off"])
+def test_an_escalated_blocked_account_or_sim_change_note_reminds_of_identity(fake, monkeypatch, case):
+    """5 Nov review: account_risk only flags a draft, so a blocked account or a SIM change that escalates
+    for another reason (too unsure, a draft model error, drafts switched off) reached the team with no
+    identity reminder. The note now ends with it; nothing else in the note changes."""
+    from pipeline.handoff import IDENTITY_AR
+
+    if case == "unsure":
+        fake.replies["classifier"] = _reply("blocked_account", 0.40)
+    else:
+        fake.replies["classifier"] = fake.replies["rechecker"] = _reply("sim_change", 0.95)
+    if case == "draft_error":
+        monkeypatch.setattr(fake.run.drf, "call", lambda *a: (_ for _ in ()).throw(RuntimeError("model down")))
+    if case == "drafts_off":
+        monkeypatch.setenv("PIPELINE_MODE", "classify_only")
+    result = fake.run.process("حسابي انقفل وما اكدر افوت" if case == "unsure" else "بدلت الشريحة وهسه ما يوصلني الرمز")
+    assert result["outcome"] == "escalated" and "account_risk" not in result["flags"] and "draft_ar" not in result
+    lines = result["handoff_ar"].split("\n")
+    assert lines[-1] == IDENTITY_AR and lines.count(IDENTITY_AR) == 1 and lines[0].startswith("الموضوع:")
+
+
+@pytest.mark.parametrize("sub", ["login_otp", "app_bug"])
+def test_no_identity_reminder_for_other_types_or_fraud(fake, sub):
+    from pipeline.handoff import IDENTITY_AR
+
+    fake.replies["classifier"] = _reply(sub, 0.40, cat="account_access" if sub == "login_otp" else "general")
+    result = fake.run.process("ما اكدر افوت للحساب")
+    assert result["outcome"] == "escalated" and IDENTITY_AR not in result["handoff_ar"]
+    fake.replies["classifier"] = _reply("sim_change", 0.70)
+    fake.replies["rechecker"] = FRAUD          # the first model said SIM change, the re-check said fraud
+    result = fake.run.process("واحد اتصل كال من الشركة وانطيته الرمز وهسه بدلولي الشريحة")
+    assert result["flags"] == ["fraud"] and IDENTITY_AR not in result["handoff_ar"]
+
+
+@pytest.mark.parametrize("first", ["sim_change", "blocked_account"])
+def test_fraud_is_still_escalated_with_no_draft(fake, first):
+    fake.replies["classifier"] = _reply(first, 0.70)
+    fake.replies["rechecker"] = FRAUD
+    result = fake.run.process("واحد اتصل كال من الشركة وانطيته الرمز وهسه حسابي انقفل")
+    assert result["outcome"] == "escalated" and result["flags"] == ["fraud"]
+    assert "draft_ar" not in result and "drafter" not in fake.seen and "احتمال احتيال" in result["handoff_ar"]
+    fake.seen.clear()
+    fake.replies["classifier"] = FRAUD
+    result = fake.run.process("واحد اتصل كال من الشركة وانطيته الرمز")
+    assert result["outcome"] == "escalated" and result["flags"] == ["fraud"] and "drafter" not in fake.seen
+
+
+@pytest.mark.parametrize("kind, draft", [
+    ("hold_reason", "هلا بيك، حسابك تحت التحقيق حالياً"),
+    ("hold_reason", "هلا بيك، رفعنا بلاغ للقسم المختص"),         # stays flagged (the author's decision, 5 Nov)
+    ("hold_reason", "هلا بيك، سجلنا بلاغ بمشكلتك"),
+    ("sensitive_number", "هلا بيك، لا تشارك رمز التحقق 482913 ويا أحد"),
+])
+def test_hold_reason_and_sensitive_number_always_flag_the_draft(fake, kind, draft):
+    fake.replies["drafter"] = draft
+    events = []
+    result = fake.run.process(TICKET + "، ووصلني رمز 482913", events.append)   # the number is the customer's
+    assert result["outcome"] == "flagged" and result["flags"] == [f"draft:{kind}"]
+    assert [f["kind"] for f in result["draft_checks"]] == [kind]
+    done = next(e for e in events if e["stage"] == "draft" and e["status"] == "done")
+    assert done["data"]["checks"] == [kind] and done["data"]["check_spans"] == result["draft_checks"]
+    assert not any(ch.isdigit() for f in result["draft_checks"] for ch in f["text"])
 
 
 # --- contract J: draft checks get the policy facts, not the ticket ---

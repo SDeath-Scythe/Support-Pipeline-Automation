@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import re
 
-from . import fixes
 from .clean import CREDENTIAL, clean, fold, sensitive_numbers
 
 KINDS = ("stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number")
@@ -134,7 +133,9 @@ _CLAUSE = re.compile(r"[^.،,!?؟؛;\n]+")
 # --- tipping-off (Iraq AML/CFT Law 39/2015): never tell a customer about an investigation, a
 # suspicion, a report to an authority, compliance or monitoring. «بلاغك» / «البلاغ مالتك» (the
 # customer's own complaint) and «إبلاغك» (we'll let you know) are not counted; «تجميد/مجمد» is left
-# out because drafts restate a customer's "my account is frozen".
+# out because drafts restate a customer's "my account is frozen". «رفعنا بلاغ» and «سجلنا بلاغ بمشكلتك»
+# may only mean "we raised a ticket", but they stay flagged (the author's decision, 5 Nov): a false
+# alarm costs the agent an edit, a miss is a legal breach.
 _HOLD = re.compile(
     r"(?<!\w)[وف]?(?:بال|لل|عال|ال|ب|ل|ك)?(?:"
     r"تحقيق\w*|[اإ]شتباه\w*|مشتبه\w*|مشبوه\w*|شبه[ةه](?!\w)|شبهات|مشكوك\w*|مريب\w*|شكوك\w*|امتثال"
@@ -356,8 +357,8 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
 
     `allowed_text` is everything the drafter was given (the ticket, extracted fields and known facts):
     words and numbers from it may appear in the draft. `facts_text` is the policy facts alone: a time
-    («خلال يومين») is allowed only from there. hold_reason and sensitive_number run only when their
-    fix flag is on (PIPELINE_FIXES).
+    («خلال يومين») is allowed only from there. Every rule always runs (hold_reason and sensitive_number
+    since 5 Nov, when they stopped being flags).
     """
     norm, pos = _normalise(draft)
     spans = {
@@ -365,8 +366,8 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
         "promise": _promise(draft, norm, pos, facts_text),
         "asks_secret": _asks_secret(norm, pos) or _asks_for_it(norm, pos),
         "unknown_number": _unknown_number(norm, pos, allowed_text),
-        "hold_reason": _hold_reason(norm, pos) if fixes.enabled("hold_reason") else None,
-        "sensitive_number": _sensitive_number(norm, pos) if fixes.enabled("sensitive_number") else None,
+        "hold_reason": _hold_reason(norm, pos),
+        "sensitive_number": _sensitive_number(norm, pos),
     }
     out = [{"kind": k, "start": s[0], "end": s[1], "text": draft[s[0]:s[1]]} for k, s in spans.items() if s]
     for f in out:

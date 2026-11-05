@@ -46,7 +46,7 @@ export const FIELD_AR = dict({
 // What a draft check looks for, in a few words (the "nothing found" line names only the checks that ran).
 export const CHECK_SHORT_AR = dict({
   stray_latin: "حروف إنكليزية", promise: "وعد بنتيجة أو وقت", asks_secret: "طلب رمز أو كلمة سر",
-  unknown_number: "رقم مو بالتذكرة", hold_reason: "ذكر تحقيق أو بلاغ", sensitive_number: "تكرار رقم بطاقة أو رمز",
+  unknown_number: "رقم مو بالتذكرة", hold_reason: "ذكر تحقيق أو اشتباه أو بلاغ", sensitive_number: "تكرار رقم بطاقة أو رمز",
 });
 
 // What the agent checks before approving: what to look at ("ask"), and what the tick says once they
@@ -65,8 +65,16 @@ export const CONFIRM_AR = dict({
   "draft:unknown_number": { ask: "راجع الأرقام اللي بالمسودة", done: "راجعت الأرقام، وهي صحيحة" },
   draft_for_other_type: { ask: "المسودة انكتبت لنوع ثاني، راجع إنها تناسب النوع اللي اخترته",
     done: "راجعت إن المسودة تناسب النوع اللي اخترته" },
+  // A blocked account or a SIM change (run.py ACCOUNT_RISK): the draft stays; identity comes first. No
+  // "before" here: the box is titled «قبل لا تعتمد:» when it lists more than one point.
+  account_risk: { ask: "تأكد من هوية الزبون حسب الإجراءات", done: "تأكدت من هوية الزبون" },
 });
 export const CONFIRM_OTHER = { ask: "اقرا الملاحظة اللي فوق", done: "قريت الملاحظة" };
+// The one tick when the identity check is among several points: it names the attestation first.
+export const TICK_IDENTITY_AND_REST = "تأكدت من هوية الزبون وراجعت باقي النقاط";
+export const TICK_ALL = "راجعت كل النقاط فوق";
+// An escalated ticket where a model said blocked account or SIM change: whoever replies checks identity.
+export const IDENTITY_IF_REPLY_AR = "إذا رديت على الزبون، تأكد من هويته حسب الإجراءات أول، ولا تكتب بالرد إنه صار أي تغيير على الحساب.";
 
 // One sentence per flag for the line at the top of a ticket: why it is not ready, with no "title:"
 // chained in front of another colon. A flag missing here falls back to the server's wording.
@@ -83,19 +91,19 @@ export const WHY_AR = dict({
   cancelled: "انلغت المعالجة قبل ما تكمل.",
   internal_error: "صار خطأ داخلي، فيستلمها موظف.",
   model_error: "صار خطأ بالنموذج، فيستلمها موظف.",
-  account_risk: "حساب محظور أو تبديل شريحة، فيستلمها موظف بدون مسودة.",
+  account_risk: "حساب مقفول أو تبديل شريحة. تأكد من هوية الزبون حسب الإجراءات قبل لا تعتمد، ولا تكتب بالرد إنه صار أي تغيير على الحساب.",
   connection_lost: "انقطع الاتصال قبل ما تخلص المعالجة.",
 });
 // Why a stage did not run, as the end of «ما انرسلت لنموذج لأن …» (no colon inside).
 export const BECAUSE_AR = dict({
   pipeline_off: "النظام موقف", too_long: "التذكرة أطول من الحد المسموح", drafts_off: "المسودات موقفة",
-  cancelled: "المعالجة انلغت", fraud: "احتمال احتيال", account_risk: "حساب محظور أو تبديل شريحة",
+  cancelled: "المعالجة انلغت", fraud: "احتمال احتيال",
   recheck_disagreed: "النموذجين اختلفوا", model_error: "صار خطأ بالنموذج", internal_error: "صار خطأ داخلي",
 });
 // A blocking check, as the reason approve is off: what is wrong, then what to do (one instruction).
 export const BLOCK_AR = dict({
   asks_secret: "المسودة تطلب رمز أو كلمة سر من الزبون. شيل هالطلب حتى تكدر تعتمدها.",
-  hold_reason: "المسودة تذكر تحقيق أو اشتباه أو بلاغ، وممنوع نخبر الزبون. شيلها حتى تكدر تعتمدها.",
+  hold_reason: "المسودة تذكر تحقيق أو اشتباه أو بلاغ، وممنوع نخبر الزبون بهيج شي. شيل هالكلام حتى تكدر تعتمدها، وإذا تقصد شكوى الزبون اكتب «سجلنا طلبك».",
   sensitive_number: "المسودة تكرر رقم بطاقة أو رمز. احذفه حتى تكدر تعتمدها.",
 });
 

@@ -4,7 +4,7 @@
 
 > **New here? Start with [`CONTEXT.md`](CONTEXT.md)**: goals, deadlines, rules, decisions and where the project stands now. This file is the detailed experiment report from 20–23 Oct.
 
-This document hands over everything done in one working session with the Claude Code assistant: what was tested, what was learned, what was built, why each choice was made, and what to do next. It covers the whole session, from the first smoke test to the final hold-out check. The detailed numbers live in [`docs/experiments/LOG.md`](docs/experiments/LOG.md) and the per-config pages; this file is the guided tour.
+This document hands over everything done in the first working session: what was tested, what was learned, what was built, why each choice was made, and what to do next. It covers the whole session, from the first smoke test to the final hold-out check. The detailed numbers live in [`docs/experiments/LOG.md`](docs/experiments/LOG.md) and the per-config pages; this file is the guided tour.
 
 ---
 
@@ -43,7 +43,7 @@ This document hands over everything done in one working session with the Claude 
   | Drafts asking for the right info | 78% | **89%** |
   | Model calls (30 tickets) | 63 | 68 |
 
-- **Most important next step:** measure on the API backend and have a person hand-check about 30 labels and 30 drafts. Every number above comes from the development (`cli`) backend, with tickets and labels written by the assistant and drafts graded by a model. See [Recommendations](#10-recommendations-for-the-future).
+- **Most important next step:** measure on the API backend and have a person hand-check about 30 labels and 30 drafts. Every number above comes from the development (`cli`) backend, with tickets and labels written by a model and drafts graded by a model. See [Recommendations](#10-recommendations-for-the-future).
 
 ---
 
@@ -76,7 +76,7 @@ The session's brief, in the order it was given:
 4. *"Try the re-check follow-up, and any other ideas to get better results."*
 5. *"What do you think still needs improvement?"*
 
-Ground rules followed throughout: work only on the feature branch, commit as the author (no assistant co-author line), and document what was done, where and why.
+Ground rules followed throughout: work only on the feature branch, commit as the author (no other co-author line), and document what was done, where and why.
 
 ## 2. Timeline at a glance
 
@@ -382,7 +382,7 @@ How often agents approve, edit or take over (recommendation #1, deferred) will r
 ## 11. Caveats
 
 - **Backend:** all results are from `cli` (Claude Code headless). Use them to compare configs, not to set thresholds or report MVP numbers.
-- **Who wrote the data:** synthetic tickets and gold labels were written by the assistant. One label (s18) was corrected mid-way, with the reason documented.
+- **Who wrote the data:** synthetic tickets and gold labels were model-written. One label (s18) was corrected mid-way, with the reason documented.
 - **Judge:** a model judge, consistent with itself, but not yet checked against a person.
 - **Iteration on observations:** F2 v2, F8 v2 and F12 v2 were improved after seeing results. F2 v2 was validated on all 161 drafts, and the final set on the sealed hold-out.
 - **Small samples:** 30-ticket sets; differences of 1–2 tickets are within noise unless replicated (see the replicate rows in each summary).

@@ -54,7 +54,7 @@ from pipeline.config import CONFIG_DIR, limits, models, pipeline_mode, taxonomy 
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.llm import (BackendError, api_key, assert_real_data_safe, backend, budget_usd, cache_only,  # noqa: E402
                           model_for, real_data)
-from pipeline.run import FLAG_AR, process  # noqa: E402
+from pipeline.run import ACCOUNT_RISK, FLAG_AR, process  # noqa: E402
 
 STATIC = Path(__file__).parent / "static"
 PROBES = ROOT / "data" / "probes"
@@ -112,6 +112,7 @@ ERR_AR = {
     "decided": "هالتذكرة انحسمت قبل، بصفحة ثانية على الأغلب. حدّث القائمة",
     "undo_stale": "هالقرار مو آخر قرار على التذكرة، فما ينلغى. حدّث القائمة",
     "blocked": "{why}، فما ينعتمد. صلّح الرد أول",
+    "identity": "ما أشّرت على «تأكدت من هوية الزبون»، فما ينعتمد",
 }
 
 # The agent's decision on a ticket (POST /api/decision), and why a draft needed changing.
@@ -141,9 +142,10 @@ CHECK_FIELDS = {"draft", "allowed_text", "subcategory"}
 BLOCKED_AR = {"asks_secret": "الرد يطلب رمز أو كلمة سر من الزبون",
               "hold_reason": "الرد يذكر تحقيق أو اشتباه أو بلاغ",
               "sensitive_number": "الرد يكرر رقم بطاقة أو رمز"}
-# What an agent can tick "I checked it" for and approve anyway: the warnings that do not block, and a
-# draft written for another type than the one the agent chose. Logged as kinds, never text.
-ACK_KINDS = tuple(k for k in draft_check.KINDS if k not in BLOCKING_CHECKS) + ("draft_for_other_type",)
+# What an agent can tick "I checked it" for and approve anyway: the warnings that do not block, a draft
+# written for another type than the one the agent chose, and (account_risk) the customer's identity,
+# confirmed by the institution's own procedure. Logged as kinds, never text.
+ACK_KINDS = tuple(k for k in draft_check.KINDS if k not in BLOCKING_CHECKS) + ("draft_for_other_type", "account_risk")
 
 # Files under /static/: these types only, each with its exact content type. index.html is served at /.
 STATIC_TYPES = {
@@ -240,7 +242,8 @@ def _summary(f: Path) -> dict | None:
     except (OSError, ValueError):
         data = None
     ok = isinstance(data, dict) and isinstance(data.get("meta"), dict) and isinstance(data.get("tickets"), list)
-    summary = {"meta": data["meta"], "sealed_ids": _has_sealed_ids(data["tickets"]), "n": len(data["tickets"])} if ok else None
+    summary = {"meta": data["meta"], "sealed_ids": _has_sealed_ids(data["tickets"]), "n": len(data["tickets"]),
+               "account_risk_ids": _account_risk_ids(data["tickets"])} if ok else None
     with _summaries_lock:
         _summaries[f] = (stamp, summary)
     return summary
@@ -361,11 +364,71 @@ def _with_checks(f: Path, run: dict, stamp: tuple | None) -> None:
                 ev["data"] = {**ev["data"], "check_spans": spans, "check_spans_recomputed": True}
 
 
+def _gets_account_risk(result) -> bool:
+    """A saved result that run.py would flag account_risk today but that has no such flag (runs made
+    before 5 Nov): a draft was written (draft_ar) for a blocked account or a SIM change, the type the
+    draft was written for (after a re-check swap, the re-check's). An escalation never gets it."""
+    if not isinstance(result, dict) or result.get("outcome") not in ("drafted", "flagged"):
+        return False
+    flags = result.get("flags")
+    ex = result.get("extraction")
+    return (isinstance(result.get("draft_ar"), str) and isinstance(flags, list) and "account_risk" not in flags
+            and isinstance(ex, dict) and ex.get("subcategory") in ACCOUNT_RISK)
+
+
+def _with_account_risk(result: dict) -> dict:
+    """The result as run.py ends it now: account_risk after the gate and re-check flags and before the
+    draft checks (the order run.py adds them), its note at the same place, outcome flagged, and
+    account_risk_recomputed so the page can say the run is older than the rule."""
+    flags = list(result["flags"])
+    at = next((i for i, f in enumerate(flags) if isinstance(f, str) and f.startswith("draft:")), len(flags))
+    flags.insert(at, "account_risk")
+    out = {**result, "outcome": "flagged", "flags": flags, "account_risk_recomputed": True}
+    notes = result.get("notes_ar")
+    if isinstance(notes, list) and len(notes) == len(result["flags"]):
+        out["notes_ar"] = notes[:at] + [FLAG_AR["account_risk"]] + notes[at:]
+    return out
+
+
+def _account_risk_ids(tickets: list) -> frozenset[str]:
+    """The ticket ids of a run that carry account_risk, as saved or as the page is served them."""
+    out = set()
+    for row in tickets:
+        if not isinstance(row, dict) or not isinstance(row.get("ticket"), dict) or not isinstance(row.get("result"), dict):
+            continue
+        res = row["result"]
+        if (isinstance(res.get("flags"), list) and "account_risk" in res["flags"]) or _gets_account_risk(res):
+            out.add(str(row["ticket"].get("id")))
+    return frozenset(out)
+
+
+def apply_account_risk(tickets: list) -> int:
+    """Runs made before 5 Nov: each drafted ticket that run.py would flag account_risk today gets the flag
+    (outcome flagged, marked account_risk_recomputed), in its result and in its "result" event, the way
+    recompute_checks adds the draft checks. Without it the viewer would show a blocked account or a SIM
+    change as ready, approved with one key and no identity tick. The draft, team, priority and checks are
+    unchanged. Returns how many tickets it changed."""
+    n = 0
+    for row in tickets:
+        if not isinstance(row, dict) or not _gets_account_risk(row.get("result")):
+            continue
+        row["result"] = _with_account_risk(row["result"])
+        n += 1
+        events = row.get("events") if isinstance(row.get("events"), list) else []
+        for j in range(len(events) - 1, -1, -1):
+            ev = events[j]
+            if isinstance(ev, dict) and ev.get("stage") == "result" and ev.get("status") == "done" \
+                    and _gets_account_risk(ev.get("data")):
+                events[j] = {**ev, "data": _with_account_risk(ev["data"])}
+                break
+    return n
+
+
 def with_current_gold(f: Path) -> dict:
     """A saved run with each ticket's gold label taken from its set file as it is now, so a label
     corrected after the run (e.g. the author's t2-0033) is scored the same way as in the reports.
     A sealed set's file is never read. Drafts from runs made before 1 Nov get their check spans
-    (recompute_checks)."""
+    (recompute_checks), and runs made before 5 Nov the account_risk flag (apply_account_risk)."""
     before = f.stat()
     raw = f.read_text(encoding="utf-8")
     after = f.stat()
@@ -373,6 +436,8 @@ def with_current_gold(f: Path) -> dict:
     stamp = (after.st_mtime_ns, after.st_size)
     if isinstance(run, dict):   # a file rewritten while it was read is checked but not kept
         _with_checks(f, run, stamp if stamp == (before.st_mtime_ns, before.st_size) else None)
+        if isinstance(run.get("tickets"), list):
+            apply_account_risk(run["tickets"])
     if f.parent.parent in (RUNS / "exp", SAVED):
         name = f.parent.name
         run["meta"] = {**run.get("meta", {}), "set": name}
@@ -455,16 +520,19 @@ def meta() -> dict:
         "reason_codes": list(REASON_CODES),
         "reason_codes_ar": REASON_CODES_AR,
         "blocking_checks": list(BLOCKING_CHECKS),
+        # A blocked account or a SIM change (run.py ACCOUNT_RISK): the page asks for the identity tick
+        # when the agent's own correction makes a ticket one of these, as the pipeline's flag does.
+        "account_risk_types": list(ACCOUNT_RISK),
         "check_ar": CHECK_AR,
         "checks_active": checks_active(),
     }
 
 
 def checks_active() -> list[str]:
-    """The draft_check kinds that run now: hold_reason and sensitive_number only when their flag is on
-    (PIPELINE_FIXES), so the page can tell a clean draft from one that was never checked for them."""
-    on = fixes.active()
-    return [k for k in draft_check.KINDS if k not in ("hold_reason", "sensitive_number") or k in on]
+    """The draft_check kinds that run now, for the page's "nothing found" line: all of them (hold_reason
+    and sensitive_number since 5 Nov, when they stopped being flags). Kept as a list so a future draft
+    rule behind a flag can be left out while it is off."""
+    return list(draft_check.KINDS)
 
 
 # One line per draft_check kind, for the page to show beside a highlighted span (the flag wording).
@@ -669,11 +737,31 @@ def standing(records: list[dict]) -> dict[str, dict]:
     return out
 
 
+def run_account_risk_ids(run: str) -> frozenset[str]:
+    """The tickets of a saved run that need the identity tick (account_risk, saved or as served)."""
+    f = run_file(run) if run != "live" else None
+    s = _summary(f) if f is not None else None
+    return s.get("account_risk_ids", frozenset()) if s else frozenset()
+
+
+def needs_identity(record: dict) -> bool:
+    """An approval needs «تأكدت من هوية الزبون» (warnings_acknowledged "account_risk") when the ticket is
+    a blocked account or a SIM change: the flags the page sent, the type the agent corrected it to, or,
+    on a saved run, what the server itself serves for that ticket (a request that leaves the flag out
+    is not believed)."""
+    if "account_risk" in record.get("flags", []):
+        return True
+    if (record.get("corrected") or {}).get("subcategory") in ACCOUNT_RISK:
+        return True
+    return record.get("run") != "live" and record.get("ticket_id") in run_account_risk_ids(record.get("run", ""))
+
+
 def append_decision(record: dict) -> None:
     """One line, one write: concurrent decisions never interleave. A new log is readable by its owner
-    only (0600). Under the same lock, two checks (Conflict, 409):
+    only (0600). Under the same lock, three checks (Conflict, 409):
     - an approval whose reply still asks for a code, names an investigation or repeats a card number
       (the page blocks it first; this stops a stale check or a hand-made request);
+    - an approval of a blocked account or a SIM change without the identity tick (needs_identity);
     - on a saved run, a second decision on a ticket that already has one standing (another tab decided
       it), or an undo of a decision that no longer stands. Live tickets are per page ("live-1" again
       after a reload is another ticket), so they are not compared."""
@@ -682,6 +770,8 @@ def append_decision(record: dict) -> None:
         found = blocking_in(final)
         if found:
             raise Conflict("blocked", BLOCKED_AR[found[0]])
+        if "account_risk" not in record["warnings_acknowledged"] and needs_identity(record):
+            raise Conflict("identity")
     line = json.dumps(record, ensure_ascii=False) + "\n"
     path = decisions_file()
     with _decisions_lock:

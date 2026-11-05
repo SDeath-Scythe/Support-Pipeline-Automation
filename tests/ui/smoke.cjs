@@ -19,7 +19,9 @@
 // the first visit, decides all 80 tickets through the page (edits, a take-over, a correction, the rest
 // approved or forwarded) for the session summary, and with --demo saves the screenshots of docs/demo/.
 // A few of its checks feed the page a changed /api/meta or run file through a browser route (a cache-only
-// viewer, a run with one escalation); the server itself is never changed.
+// viewer, a run with one escalation); the server itself is never changed. Since the 5 Nov review the
+// server gives the committed run (made on 30 Oct) the account_risk flag as run.py does now, so the six
+// blocked-account and SIM-change tickets are «تحتاج تأكيد» and the tab counts are 15 / 6 / 59.
 //
 // Servers are stopped in a finally block. Exit code 0 only if every check passed.
 
@@ -35,7 +37,7 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..", "..");
 const PYTHON = process.env.PYTHON || "python";
 const RUN = "saved/test2/final";
-const EXPECT = { flagged: 9, escalated: 6, drafted: 65, total: 80, type: "78/80", priority: "79/80" };
+const EXPECT = { flagged: 15, escalated: 6, drafted: 59, total: 80, type: "78/80", priority: "79/80" };
 const SECRET_ASK = " دزلنا الرمز اللي وصلك";
 const LIVE_NO_KEY = "ماكو مفتاح API";   // «كيف يشتغل»'s cause when there is no key (labels.js LIVE_CAUSE_AR)
 
@@ -354,7 +356,21 @@ async function runPass(browser, pass) {
         && (await t(p, "#confirmBox")).includes("انكتبت لنوع ثاني") && (await p.getAttribute("#approveBtn", "aria-disabled")) === "true"
         && (await t(p, "#titleChips")).includes((meta.teams[meta.subcategories[run.tickets.find((r) => r.ticket.id === flagged).result.recheck_alternative].team] || {}).label_ar || "?"),
       `${ticked} | ${await t(p, "#confirmBox")}`);
+      // 5 Nov review: the first model's answer here is a SIM change, so choosing it asks for the identity
+      // check first, the line at the top says why, and the one tick names it; back to the re-check's
+      // type (login_otp) it goes again.
+      const alt = run.tickets.find((r) => r.ticket.id === flagged).result.recheck_alternative;
+      const items = await p.evaluate(() => [...document.querySelectorAll("#confirmBox li")].map((x) => x.textContent));
+      const tickNow = await t(p, ".confirm-check");
+      const lineNow = await t(p, "#whyLine");
       await p.check('#choiceBox input[value="second"]');
+      await sleep(200);
+      const afterBox = await t(p, "#confirmBox");
+      check(`choosing «${alt}» on ${flagged}: the identity check first, its line on top and in the tick; gone again with the re-check's type`,
+        meta.account_risk_types.includes(alt) && items[0] === "تأكد من هوية الزبون حسب الإجراءات" && items.some((x) => x.includes("انكتبت لنوع ثاني"))
+        && tickNow === "تأكدت من هوية الزبون وراجعت باقي النقاط" && lineNow.startsWith("تحتاج تأكيد: حساب مقفول أو تبديل شريحة.")
+        && !afterBox.includes("هوية") && !(await t(p, "#whyLine")).includes("هوية"),
+        `${alt} | ${JSON.stringify(items)} | ${tickNow} | ${lineNow} | ${afterBox}`);
       // Polish 5: the refusal («أشّر على …») goes with its ticket.
       await p.evaluate(() => document.activeElement?.blur());
       await p.keyboard.press("Control+Enter");
@@ -566,7 +582,7 @@ async function runPass(browser, pass) {
       (t) => [t, Number(document.querySelector(`#tab-${t} .tab-count`)?.textContent.replace(/\D/g, ""))])));
     const fromRun = { flagged: 0, escalated: 0, drafted: 0 };
     for (const r of run.tickets) fromRun[r.result.outcome]++;
-    check(`tab counts 9 / 6 / 65 / 0 match the run (${JSON.stringify(counts)})`,
+    check(`tab counts 15 / 6 / 59 / 0 match the run (${JSON.stringify(counts)})`,
       counts.flagged === EXPECT.flagged && counts.escalated === EXPECT.escalated && counts.drafted === EXPECT.drafted && counts.done === 0
       && counts.flagged === fromRun.flagged && counts.escalated === fromRun.escalated && counts.drafted === fromRun.drafted, JSON.stringify({ counts, fromRun }));
     const tabWords = await page.evaluate(() => [...document.querySelectorAll("[role=tab] .tab-label")].map((x) => x.textContent));
@@ -653,7 +669,7 @@ async function runPass(browser, pass) {
       const d = await act(() => (pass.phone ? page.click("#toastUndo") : page.keyboard.press("Control+z")), "the undo");
       check("undo logs «undone» with undoes = the approve's id", d.action === "undone" && d.undoes === approvedId && d.ticket_id === k1, JSON.stringify(d));
       await waitUntil(async () => (await selected()) === k1, 3000, "the undone ticket to reopen");
-      check("the undone ticket is back in «جاهزة» (65)", (await text("#tab-drafted .tab-count")).replace(/\D/g, "") === "65", await text("#tab-drafted .tab-count"));
+      check(`the undone ticket is back in «جاهزة» (${EXPECT.drafted})`, (await text("#tab-drafted .tab-count")).replace(/\D/g, "") === String(EXPECT.drafted), await text("#tab-drafted .tab-count"));
       // approve it again: it is one of the tickets the reload must bring back
       await act(approveKey, "the second approve");
     }
@@ -680,6 +696,11 @@ async function runPass(browser, pass) {
         await text("#status"));
       const d = await act(() => page.click("#approveBtn"), "the flagged approve");
       check(`flagged approve logs «approved» for ${k2}`, d.action === "approved" && d.ticket_id === k2 && d.pipeline_outcome === "flagged", JSON.stringify(d));
+      // 5 Nov review: the first flagged ticket is a SIM change (account_risk); the log keeps the identity tick.
+      const k2Flags = run.tickets.find((r) => r.ticket.id === k2)?.result.flags || [];
+      check(`flagged ${k2} [${k2Flags.join(", ")}]: the log line keeps the identity tick (warnings_acknowledged «account_risk»)`,
+        k2Flags.includes("account_risk") && JSON.stringify(d.flags) === '["account_risk"]'
+        && JSON.stringify(d.warnings_acknowledged) === '["account_risk"]', JSON.stringify(d));
       // A P1 escalation waits, more urgent than every flagged P2: the inbox moves there and says why.
       check("after the flagged approve the toast says the inbox moved to «متصعّدة» for an urgent ticket (polish 3)",
         (await text("#status")).includes("انتقلنا لـ«متصعّدة»: فيها تذكرة عاجلة")
@@ -1108,12 +1129,65 @@ async function runFresh(browser, pass) {
     const p1 = await open(pass.viewport, "light", "one-escalation", null, keepEsc(1));
     const one = await t(p1, "#runNote");
     await done(p1, "one-escalation");
-    const p6 = await open(pass.viewport, "light", "mixed-reasons", null, keepEsc(6, "account_risk"));
+    // A second reason a fraud escalation can carry: a gate flag from the first model, before a re-check
+    // that said fraud (account_risk was used here until 5 Nov, when it stopped being an escalation).
+    const p6 = await open(pass.viewport, "light", "mixed-reasons", null, keepEsc(6, "ref_not_in_text"));
     const mixed = await t(p6, "#runNote");
     await done(p6, "mixed-reasons");
     check("the run note: «صعّد تذكرة وحدة: احتمال احتيال.» and «كلها …، ومنها 2 …» (RR-3)",
       one === "بهالتشغيل النظام صعّد تذكرة وحدة: احتمال احتيال." && mixed.startsWith("بهالتشغيل النظام صعّد 6 تذاكر، كلها احتمال احتيال، ومنها 2 "),
       `${one} | ${mixed}`);
+    // 5 Nov: a blocked account or a SIM change keeps its draft, flagged account_risk, and approve waits
+    // for «تأكدت من هوية الزبون». The committed run predates the rule; the server gives it the flag as
+    // run.py does now (5 Nov review: before, a browser route had to), marked account_risk_recomputed.
+    // Nothing is approved here: the decision log is the one the 80 decisions below are counted in.
+    const pr = await open(pass.viewport, "light", "account-risk");
+    const served = await pr.evaluate(async (name) => {
+      const token = document.querySelector('meta[name="viewer-token"]').content;
+      const j = await fetch(`/api/run?name=${encodeURIComponent(name)}`, { headers: { "X-Viewer-Token": token } }).then((r) => r.json());
+      const rows = j.tickets.filter((r) => (r.result.flags || []).includes("account_risk"));
+      return { ids: rows.map((r) => r.ticket.id), marked: rows.filter((r) => r.result.account_risk_recomputed && r.result.draft_ar).length };
+    }, RUN);
+    const risky = new Set(served.ids);
+    await pr.click("#introOk");
+    const rk = served.ids[0];
+    await openId(pr, rk);
+    const callout = await t(pr, "#agentMain .callout-warn");
+    const ask = await t(pr, "#confirmTitle");
+    const tickWords = await t(pr, ".confirm-check");
+    const offBefore = await pr.getAttribute("#approveBtn", "aria-disabled");
+    const whyStep = await t(pr, "#whyBody");
+    check(`account_risk (${risky.size} tickets, ${rk} opened): «تحتاج تأكيد» with its draft, no forward, the identity line and «ليش؟» says why`,
+      risky.size === 6 && served.marked === 6 && !risky.has("t2-0009") && (await t(pr, `#opt-${rk} .row-word`)) === "تحتاج تأكيد"
+      && (await pr.getAttribute("#tab-flagged", "aria-selected")) === "true"
+      && (await pr.locator("#draft").count()) === 1 && (await pr.locator("#forwardBtn").count()) === 0
+      && callout === "تحتاج تأكيد: حساب مقفول أو تبديل شريحة. تأكد من هوية الزبون حسب الإجراءات قبل لا تعتمد، ولا تكتب بالرد إنه صار أي تغيير على الحساب."
+      && whyStep.includes("علّمناها للتأكيد لأن نوعها «") && whyStep.includes("حسب الإجراءات قبل لا تعتمد"),
+      `${[...risky].join(",")} | ${served.marked} | ${callout} | ${whyStep.slice(-200)}`);
+    await pr.evaluate(() => document.activeElement?.blur());
+    await pr.keyboard.press("Control+Enter");
+    await waitUntil(async () => (await t(pr, "#status")).includes("أشّر على"), 3000, "the refusal").catch(() => {});
+    const refusedWith = await t(pr, "#status");
+    await pr.check("#ackBox");
+    await sleep(100);
+    check("account_risk: approve stays off until «تأكدت من هوية الزبون» is ticked, then it is on",
+      ask === "تأكد من هوية الزبون حسب الإجراءات" && tickWords === "تأكدت من هوية الزبون" && offBefore === "true"
+      && refusedWith.includes("«تأكدت من هوية الزبون»") && (await pr.getAttribute("#approveBtn", "aria-disabled")) === null
+      && decisions().length === 0, `${ask} | ${tickWords} | ${offBefore} | ${refusedWith} | ${decisions().length}`);
+    // «كيف يشتغل» scores the six against the rule (the gold files predate it) and says so.
+    await pr.click("#modeProcess");
+    await pr.waitForSelector("#ovTitle", { timeout: 10000 });
+    const outcomeStat = await pr.evaluate(() => [...document.querySelectorAll(".overview .stat")].find((x) => x.querySelector("span")?.textContent === "النتيجة صحيحة")?.querySelector("b")?.textContent);
+    const ruleNote = await t(pr, "#ruleNote");
+    await pr.locator("table.grid tbody tr", { hasText: rk }).first().locator(".row-open").click();
+    await pr.waitForSelector(".trace .gold table", { timeout: 10000 });
+    const goldRow = await pr.evaluate(() => [...document.querySelectorAll(".trace .gold tbody tr")].find((r) => r.querySelector("th")?.textContent === "النتيجة")?.textContent || "");
+    const resBox = await t(pr, "#pResult .result");
+    check(`«كيف يشتغل»: outcome 74/80 by the 5 Nov rule, said in the overview, and ${rk}'s expected «تحتاج تأكيد» with ✓ and the note`,
+      outcomeStat === "74/80" && ruleNote.includes("6 تذاكر حساب مقفول أو تبديل شريحة") && ruleNote.includes("انعلّمت هسه بنفس القاعدة")
+      && goldRow.includes("تحتاج تأكيد (قاعدة 5 تشرين الثاني)") && goldRow.includes("✓") && !goldRow.includes("✗")
+      && resBox.includes("أقدم من قاعدة 5 تشرين الثاني"), `${outcomeStat} | ${ruleNote} | ${goldRow} | ${resBox.slice(0, 300)}`);
+    await done(pr, "account-risk");
 
     // 5. The phone (390 px): the card is above the queue; a ticket opens with its action bar in place.
     const pp = await open(pass.phoneViewport, "light", "phone");
@@ -1204,6 +1278,15 @@ async function runFresh(browser, pass) {
     check(`a tab that ran out was said with «ماكو بعد», «خلصت» kept for decisions (${ranOut} times) (J8)`, ranOut >= 1
       && !(await t(p, "#status")).includes("خلصت تذاكر"), String(ranOut));
     await demo(p, "inbox-done");
+    // 5 Nov review: a decided blocked account or SIM change says the identity was confirmed, as its log line does.
+    {
+      const rid = "t2-0007";
+      await openId(p, rid);
+      const dRec = decisions().find((d) => d.ticket_id === rid && d.action !== "undone");
+      check(`the decided ${rid} says «تأكدت من هوية الزبون قبل الاعتماد.», and its log line keeps the tick`,
+        (await t(p, ".decided")).includes("تأكدت من هوية الزبون قبل الاعتماد.") && (dRec?.warnings_acknowledged || []).includes("account_risk"),
+        `${await t(p, ".decided")} | ${JSON.stringify(dRec)}`);
+    }
     await done(p, "fresh");
     check("no live run was started (no request to /api/stream)", streams === 0, String(streams));
   } catch (e) {

@@ -18,9 +18,9 @@ from .schemas import Extraction
 # Fields the pipeline can check in a ticket (others, like a shop name, it can't see).
 _CHECKABLE = {"reference", "amount", "date", "recipient_number", "phone_number"}
 
-# Escalations the system decides rather than the ticket (run.py): why the team got it.
+# Escalations the system decides rather than the ticket (run.py): why the team got it. (account_risk
+# is not one: since 5 Nov it flags a draft and never escalates; see IDENTITY_AR below.)
 _SYSTEM_REASONS = {
-    "account_risk": "حساب محظور أو تغيير شريحة: يستلمها موظف من البداية",
     "too_long": "التذكرة أطول من الحد المسموح، فما انرسلت للنموذج",
     "pipeline_off": "النظام موقف، فما انرسلت للنموذج",
     "drafts_off": "المسودات موقفة: الرد على الزبون عليك",
@@ -83,11 +83,18 @@ def _reasons(flags: list[str], confidence: float | None, first: Extraction | Non
     return out
 
 
+# A blocked account or a SIM change that escalated anyway: the person who takes it writes the reply, so the
+# note reminds them of what the account_risk flag asks of a drafted one (run.py, 5 Nov review).
+IDENTITY_AR = "هوية الزبون: إذا رديت عليه، تأكد من هويته حسب الإجراءات أول، ولا تكتب بالرد إنه صار أي تغيير على الحساب"
+
+
 def note(ex: Extraction | None, flags: list[str], *, confidence: float | None = None,
          second: Extraction | None = None, cleared_secondary: str | None = None,
-         summary: str | None = None) -> str:
+         summary: str | None = None, identity: bool = False) -> str:
     """The handoff note, one short line per part. `ex` is the answer the ticket was routed on
-    (None if classification failed); `second` is the re-check's answer when the models disagreed."""
+    (None if classification failed); `second` is the re-check's answer when the models disagreed.
+    `identity`: either answer is a blocked account or a SIM change (run.py decides), so the note
+    ends with the identity reminder."""
     if ex is None:
         system = [why for flag, why in _SYSTEM_REASONS.items() if flag in flags]
         if system and "model_error" not in flags:
@@ -117,4 +124,6 @@ def note(ex: Extraction | None, flags: list[str], *, confidence: float | None = 
     reasons = _reasons(flags, confidence, ex, second)
     if reasons:
         lines.append("سبب التصعيد: " + "؛ ".join(reasons))
+    if identity:
+        lines.append(IDENTITY_AR)
     return "\n".join(lines)

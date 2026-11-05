@@ -2,7 +2,89 @@
 
 Method: [README.md](README.md). Per-config pages and the summary table: [fixes_30/summary.md](fixes_30/summary.md) (round 1 kept as [summary-round1.md](fixes_30/summary-round1.md)). Every step below is its own commit on `claude/eager-tesla-x1dcxj`.
 
-All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were written by the assistant, and the draft judge is a model, so treat single-ticket differences with care.
+All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were model-written, and the draft judge is a model, so treat single-ticket differences with care.
+
+## 5 Nov: Three safety rules adopted (no model calls)
+
+**The decision.** The three flags opened by the 1 Nov security review (entry below, "Behind a flag, not adopted") were waiting for a decision. On 5 Nov they were decided as follows, for a regulated financial institution:
+1. **`hold_reason` is adopted.** A draft must not hint at an investigation, a suspicion, a report or money laundering. Telling a customer about one is tipping off, which Iraq's AML/CFT Law 39/2015 forbids (Art. 12 Fourth) and punishes (Art. 39 Second(b)). The rule now always runs and blocks an approval, in the inbox and at the server. «رفعنا بلاغ» and «سجلنا بلاغ بمشكلتك» stay flagged, although they may only mean "we raised a ticket": a false alarm costs the agent an edit, and a miss is a legal breach. This settles the open wording question below.
+2. **`sensitive_number` is adopted.** A draft must not repeat a card number or a code. The rule always runs and blocks an approval.
+3. **`escalate_account_risk` is changed, then adopted, as the `account_risk` flag.** A blocked account or a SIM change is a common step in taking over someone else's account. Such a ticket now keeps its draft and is flagged: the agent must confirm the customer's identity by the institution's own procedure before approving. Fraud is still always escalated, with no draft.
+
+As on 30 Oct, the adopted rules are now the normal code. No flag is open, the flag mechanism stays, and no prompt changed.
+
+**Why a flag and not an escalation, for account risk.** The 1 Nov flag escalated these tickets with no draft, before the re-check. The new flag:
+- **keeps a safe draft.** On 1 Nov these drafts were all safe: they acknowledge the problem and pass the ticket to the accounts team (entry below). Escalating threw them away.
+- **forces an identity check.** The agent reads «حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، ولا تكتب بالرد إنه صار أي تغيير على الحساب» ("Blocked account or SIM change: confirm the customer's identity by the procedures before approving, and don't write in the reply that anything on the account changed"; wording as revised in the review below). Approve stays off until they tick «تأكدت من هوية الزبون» ("I confirmed the customer's identity").
+- **reads the type after the re-check,** the type the draft was written for, not the first model's label. This removes the old flag's one false positive, t2-0009: the first model said `sim_change` at 0.60, and the re-check said `login_otp`, which is right.
+- **The wording differs from the decision's text.** «حساب محظور» became «حساب مقفول»: the type label the agent sees on the same screen is «حساب مقفول» (`config/taxonomy.yaml`, `blocked_account`), so this keeps one word per concept, and «مقفول» is the everyday Iraqi word. The review below changed three more things: «بإجراءاتكم» → «حسب الإجراءات», «قبل ما ترد» → «قبل الاعتماد» (the inbox's verb), and «الرد ما يأكد أي تغيير على الحساب», which read as a fact nothing checks, → the instruction «ولا تكتب بالرد إنه صار أي تغيير على الحساب». The wording is in `FLAG_AR` (`src/pipeline/run.py`) and `WHY_AR` and `CONFIRM_AR` (`app/static/js/labels.js`), if the author prefers the original.
+
+**What changed in the code.** These changes are in the commit after bfe8893, so they are named by file and function, not by line.
+- `src/pipeline/fixes.py`: `FIXES` is empty. `ADOPTED` lists the three old names, and `active()` refuses any of them with what became of it ("PIPELINE_FIXES names a fix that is now the normal code: … Remove it from PIPELINE_FIXES."), so an old command line cannot look as if it switched a rule on or off. The viewer and `run_batch` refuse to start with one. `account_risk` is not a flag name either.
+- `src/pipeline/draft_check.py` (`findings`): `hold_reason` and `sensitive_number` always run. Why «رفعنا بلاغ» stays flagged is written beside the rule (`_HOLD`).
+- `src/pipeline/gate.py` (`check`): the account-risk escalation is gone.
+- `src/pipeline/run.py` (`ACCOUNT_RISK`, `process`): once the draft is written, the flag is added when the type it was written for is `blocked_account` or `sim_change`. A re-check that changes the type to one of them adds it, and one that changes the type away does not. An escalation never gets it.
+- `src/pipeline/handoff.py` (`_SYSTEM_REASONS`): the account-risk reason is removed from the team note's escalation reasons.
+- `app/server.py`: `checks_active` lists all six draft checks. `BLOCKING_CHECKS` (`asks_secret`, `hold_reason`, `sensitive_number`) is unchanged, and now applies with no flag set.
+- `app/static/js/labels.js`: the banner (`WHY_AR`) and the tick (`CONFIRM_AR`) for `account_risk`. Its old "not sent to a model because" line (`BECAUSE_AR`) is removed: it no longer skips a step.
+- **No prompt changed.** The classifier prompt hash test passes. On test2, all 80 tickets have byte-identical classify, re-check and draft prompts, replies and models before and after.
+
+**How it was measured.** No model was called and nothing was spent.
+- **Before:** a copy of bfe8893 made with `git archive`, leaving out `data/heldout` and `data/heldout2`. **After:** the working tree with the change. No heldout file was copied, opened or run.
+- Each set was replayed with `scripts/run_batch.py --no-mask --workers 5` from the response cache only (`LLM_CACHE_ONLY=1 LLM_BACKEND=api LLM_BUDGET_USD=0.001`), with the API keys removed from the environment and every send function replaced by one that fails.
+- Cache hits and misses were counted per role, including the team-summary call. A miss there would otherwise go unseen: the note just has no summary line.
+- A comparison script printed ids, labels and counts only.
+
+**test2 (80): fully replayed.** 181 of 181 calls came from the cache, before and after, with **0 misses** (classifier 81, one of them a parse retry on t2-0076; drafter 74, re-check 15, fee 5, summary 6). The run file's usage says 180 model calls: it counts the retry inside its call. (Corrected in the review below: this said 180 of 180.)
+
+| test2 (80) | Before | After |
+|---|---|---|
+| Drafted / flagged / escalated | 65 / 9 / 6 | 59 / 15 / 6 |
+| Review rate (flagged + escalated) | 15/80 = 18.75% | **21/80 = 26.25%** |
+| Type used correct | 78/80 | 78/80 |
+| Priority correct | 79/80 | 79/80 |
+| Fraud escalated, with no draft | 6/6 | 6/6 |
+| Wrong type that still got a draft | 2 (t2-0041, t2-0052) | 2 |
+| Outcome equal to the gold outcome | 74/80 | 68/80 |
+
+- **6 tickets changed,** each from drafted to flagged with `account_risk` as its only flag: t2-0007, t2-0029 and t2-0080 (SIM change), and t2-0016, t2-0048 and t2-0054 (blocked account). For each, the first model, the type used and the gold label agree. Each keeps its draft text, team, priority and checks.
+- **t2-0009 is unchanged:** flagged `recheck_used_second`, type used `login_otp`, no `account_risk`.
+- `hold_reason` and `sensitive_number` fired on no test2 draft.
+- The gold outcomes predate the rule and mark all six as drafted, so agreement with them falls from 74 to 68.
+- For comparison, the 1 Nov flag escalated 7 tickets and also gave 26% (entry below). The new rule costs the same review rate and keeps all six drafts.
+
+**mvp_test and dev: not fully replayable from the cache.**
+- **Misses, the same before and after:** mvp_test 3 drafter and 3 summary calls (mvp-0007, mvp-0019, mvp-0080); dev 7 and 7 (dev-0005, dev-0081, dev-0088, dev-0141, dev-0144, dev-0174, dev-0201). All are app-bug tickets. Their drafter prompt changed on 30 Oct, when app bugs moved to the tech team (entry below), so the cache holds no draft for the new prompt. Each miss escalates the ticket as a model error, and that escalation's summary call misses too. No model was called to fill them, so these replays give no rate or accuracy.
+- Prompts are identical before and after on every ticket (78/78 and 233/233), so the misses come from the 30 Oct change, not this one.
+- **What the rule moved:** 4 mvp_test tickets (mvp-0018, mvp-0039 and mvp-0044, blocked account; mvp-0064, SIM change) and 12 dev tickets, each from drafted to flagged, each with the right type. None is among the misses.
+- **The review rate, from the saved API runs.** The rule is code that runs after the draft, so it can be applied to a saved run file with no model call (counts and ids only):
+  - mvp_test, the run of 29 Oct: 21/78 (27%) → 25/78 (**32%, over the 30% target**). The same 4 tickets move. The 1 Nov flag gave 33% here.
+  - dev: the same 12 tickets move in each of four saved dev runs (local files: rec+F16+F20 and the final candidate, two replicates each), 12 of 233, or 5 points. Every one has the right type.
+- **One miss: mvp-0046.** The first model said `sim_change` at 0.92, which is right. The re-check said `rejected_or_pending`, and the ticket was drafted from that answer and flagged `recheck_used_second` (FAILURE_MODES.md, mode 1). The 1 Nov flag escalated it from the first label. The new rule reads the type used, so it gets no identity reminder. The agent still sees the two answers. Choosing `sim_change` there adds "the draft was written for another type" to what to check, but not the identity tick. So the change trades t2-0009's false positive (a safe draft lost) for mvp-0046's missing reminder (a flagged ticket, with a draft for the wrong type).
+
+**The two draft rules on every saved draft.** Every run file under `runs/exp/` outside the heldout folders, plus the committed final run: 2,531 drafts, 1,220 distinct. **`hold_reason` flagged 0 and `sensitive_number` 0.** The other checks are unchanged: stray Latin 24 (12 distinct), unknown number 7 (6 distinct).
+
+**Tests.**
+- **pytest: 675 pass** (648 before), with the API keys removed and no model call. The new tests fail on bfe8893 (68 failures, checked by running them against a copy of it; this said 67 until the review below).
+  - New: an old flag name is refused with what became of it, in the pipeline and at viewer start-up (3 each), and `account_risk` is not a flag name either. The gate never escalates a blocked account or a SIM change. `account_risk` flags the draft and never escalates. It reads the type after the re-check (the t2-0009 shape), applies when the re-check changed the type to one of the two, and is never added to an escalation. Fraud is still escalated with no draft. `hold_reason` and `sensitive_number` flag the draft end to end (4 phrasings, including «رفعنا بلاغ» and «سجلنا بلاغ بمشكلتك»). The server refuses (409) an approval or edit that tips off or repeats a number, with no flag set (8 cases; nothing logged; a take-over is still recorded).
+  - Changed because the behaviour changed: `test_pipeline.py::test_fix_flags_off_by_default_and_reject_unknown` (`FIXES` is empty, `ADOPTED` lists the three) and `test_pipeline_safety.py::test_new_flags_have_their_arabic_notes` (the new wording). Contract H in `test_pipeline_safety.py` is rewritten: `test_new_fix_flags_are_off_by_default`, `test_account_risk_gate_only_when_enabled` and `test_account_risk_ticket_gets_no_draft` are gone. Renamed: `test_text_rules.py::test_hold_reason_only_when_enabled` → `::test_hold_reason_is_caught` (now with «سجلنا بلاغ بمشكلتك» and «رفعنا بلاغ بخصوص مشكلتك»), `::test_sensitive_number_only_when_enabled_even_if_the_ticket_had_it` → `::test_sensitive_number_is_caught_even_if_the_ticket_had_it`, and `test_server_ui.py::test_check_runs_the_flagged_rules_only_when_their_flag_is_on` → `::test_check_always_runs_hold_reason_and_sensitive_number`. The `/api/meta` test now expects all six checks in `checks_active`.
+- **`node tests/ui/smoke.cjs`: 361/361** (359 before): desk-light 94, desk-dark 94, phone-light 70, phone-dark 70, fresh-clone 33.
+  - Two new checks in `fresh-clone`: "account_risk (6 tickets, t2-0007 opened): «تحتاج تأكيد» with its draft, no forward, and the identity line" and "account_risk: approve stays off until «تأكدت من هوية الزبون» is ticked, then it is on". The committed run predates the rule, so these feed the page that run with the rule applied, through a browser route. They approve nothing.
+  - One fixture changed because the behaviour changed: the run note's "mixed reasons" case used `account_risk` as a second escalation reason, which it can no longer be. It now uses `ref_not_in_text`; the assertion is the same.
+
+**What it costs.** The review rate counts every ticket that needs more than a quick approve, and each `account_risk` ticket needs a tick. On test2 it rises from 19% to 26%, under the 30% target. On mvp_test, from its saved run, it rises from 27% to 32%, over the target. The six test2 drafts and four mvp_test drafts are kept, so the agent's cost is a tick after an identity check, not a reply written from nothing.
+
+**What remains:**
+- **heldout2** (80, sealed) is now the next run, once, on this final version. It will show the review rate on fresh tickets.
+- **No identity reminder in two cases.** `account_risk` is added only to tickets that get a draft, so a blocked account or a SIM change that escalates anyway (low confidence, models disagreeing, a draft model error, or `PIPELINE_MODE=classify_only`) carries none. And a ticket whose re-check moved the type away gets none either (mvp-0046). *Review: the escalations now have the reminder in their team note, and choosing the first model's answer adds the tick; mvp-0046 by itself still gets none.*
+- **The tick is the agent's word.** The server refuses only the blocking draft checks, as for the other ticks, so a hand-made `/api/decision` request could approve an `account_risk` ticket without it. The decision log keeps the ticket's flags, but not the tick itself. *Review: the tick is logged now, and the server refuses an approval without it.*
+- **Saved runs predate the rule.** The server recomputes the draft checks of a saved run, not its outcome, so in the viewer the six test2 tickets still show as ready until test2 is run again. The smoke checks feed the flag through a browser route instead. *Review: the server now gives saved runs the flag.*
+- **Gold outcomes predate the rule.** The six test2 tickets are labelled drafted. The labels were not changed. *Review: «كيف يشتغل» now scores them against the rule and says so.*
+- Runs saved between 1 and 4 Nov with check spans (none in this repo; `runs/` is git-ignored) lack the two rules. The page's "nothing found" line would then name checks that never ran on them. The server still checks the approval itself.
+- `hold_reason` and `sensitive_number` have never fired on a saved draft, so how often they catch a real draft, or raise a false alarm, is unknown.
+- The mvp_test and dev replays need the 10 app-bug drafts (and their summaries) that the cache lacks. Filling them needs model calls.
+
+**Review.** Two review passes (safety regression; Arabic and UX in the browser) reported 14 findings. Each was reproduced first, all 14 held, and all were fixed, with no prompt change and no model call. The viewer gave the six test2 tickets one-key approval with no identity tick: the server now gives a saved run the flag as `run.py` does today (`app/server.py`, `apply_account_risk`, marked `account_risk_recomputed`), so the final run opens at 15 / 6 / 59. The tick is now logged (`ACK_KINDS`) and required by the server (409, `needs_identity`: the flags, the agent's correction, and on a saved run the ticket as served), an agent's correction to either type asks for it (`/api/meta` `account_risk_types`; t2-0009 and mvp-0046 when the first answer is chosen), it is listed first with the tick «تأكدت من هوية الزبون وراجعت باقي النقاط» when there are other points, and «ليش؟» and the decided view mention it. An escalated blocked account or SIM change (not fraud) ends its team note with an identity reminder (`handoff.py`, `IDENTITY_AR`); no replayed note has one. The wording is revised (above), and the tipping-off block says what to remove and offers «سجلنا طلبك». «كيف يشتغل» expects «تحتاج تأكيد» for these tickets and says why (test2 outcome 74/80, gold files unchanged; new gold from `generate_tickets.py` follows the rule). Two counts above were wrong (180 calls, 67 failures). The line references in CONTEXT.md, SECURITY.md and FAILURE_MODES.md now point at the current code, and the `docs/demo/` screenshots were retaken. test2 replayed again from the cache: 181 hits, 0 misses, same prompts and outcomes, only the six notes' wording changed. pytest 694 pass (19 new; `test_new_flags_have_their_arabic_notes` and `test_account_risk_is_not_added_to_an_escalation` changed with the behaviour); smoke 369/369 (8 new; the tab counts and the two fresh-clone account_risk checks changed with the behaviour). Still open: mvp-0046 gets no reminder unless the agent picks the first answer, and the tick is the agent's word.
 
 ## 1 Nov: The agent inbox (UI), no model calls
 

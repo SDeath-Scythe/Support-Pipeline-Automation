@@ -7,8 +7,8 @@ import { NetworkError, ServerError } from "./api.js";
 import { buildComposer, isBlocking, originalDraft } from "./composer.js";
 import { factList, factsOf, textWithFacts } from "./facts.js";
 import {
-  ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, FIELD_AR, PRIORITY_AR, STAGE_DOING,
-  STAGE_ORDER, STATUS, TABS, WHY_AR,
+  ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, FIELD_AR, IDENTITY_IF_REPLY_AR, PRIORITY_AR,
+  STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL, TICK_IDENTITY_AND_REST, WHY_AR,
 } from "./labels.js";
 import {
   QUICK_S, S, allItems, decide, draftDone, effective, errorEvent, escalatesNow, ev, extractionOf, findItem, flagsOf,
@@ -68,29 +68,50 @@ function retargeted(it) {
   return !!draftDone(it) && (e.subcategory !== subOf(it) || (e.team || null) !== (it.result?.team || null));
 }
 
+const riskTypes = () => S.meta.account_risk_types || [];
+/** A blocked account or a SIM change: the pipeline flagged it (account_risk), or the agent's own correction
+ *  made it one of the two. Approve then waits for «تأكدت من هوية الزبون». A correction away from them
+ *  keeps the pipeline's flag: the conservative way. */
+function needsIdentity(it) {
+  return (it.result?.flags || []).includes("account_risk") || riskTypes().includes(effective(it).subcategory);
+}
+/** An escalation (no draft) where a model, or the agent, said blocked account or SIM change: whoever
+ *  replies checks identity too. Not fraud: there is no reply to the customer there. */
+function identityOnEscalation(it) {
+  if (flagsOf(it).includes("fraud")) return false;
+  const said = [ev(it, "classify")?.data?.extraction?.subcategory, ev(it, "recheck")?.data?.second, subOf(it), effective(it).subcategory];
+  return said.some((s) => s && riskTypes().includes(s));
+}
+
 /** What the agent should do first, in one line: the why of anything not ready. */
 function whyLine(it) {
   const r = it.result || {};
   const err = errorEvent(it);
-  const box = (kind, title, text) => el("p", { class: `callout callout-${kind}`, dir: "rtl" },
+  const box = (kind, title, text) => el("p", { id: "whyLine", class: `callout callout-${kind}`, dir: "rtl" },
     icon(kind === "bad" ? "escalated" : "check"), el("span", {}, title ? el("strong", { text: title }) : null, title && text ? " " : null, text));
+  const identity = identityOnEscalation(it) ? ` ${IDENTITY_IF_REPLY_AR}` : "";
   if (it.status === "lost") return box("bad", "انقطع الاتصال قبل ما تخلص المعالجة.", "التذكرة عندك، اقراها وقرر أو شغّلها مرة ثانية.");
-  if (it.status === "cancelled") return box("bad", "انلغت المعالجة قبل ما تكمل.", "التذكرة عندك، اقراها وقرر.");
-  if (err) return box("bad", `صار خطأ: ${err.data?.error || ""}`, "التذكرة راحت لموظف بدون مسودة.");
+  if (it.status === "cancelled") return box("bad", "انلغت المعالجة قبل ما تكمل.", `التذكرة عندك، اقراها وقرر.${identity}`);
+  if (err) return box("bad", `صار خطأ: ${err.data?.error || ""}`, `التذكرة راحت لموظف بدون مسودة.${identity}`);
   // The agent's correction made it a type that is never drafted: no reply, whatever the pipeline wrote.
   if (r.outcome !== "escalated" && escalatesNow(it)) {
     return box("bad", "احتمال احتيال: ماكو رد للزبون.", "صحّحت النوع لنوع ما ينكتبله رد، فالمسودة ما تنعتمد. حوّلها للقسم أو استلمها بنفسك.");
   }
-  if (r.outcome === "flagged") {
-    const said = (r.flags || []).filter((f) => !f.startsWith("draft:")).map(flagSentence);
+  // A flagged ticket, or a ready one the agent corrected to a blocked account or a SIM change. The
+  // identity check comes first, as in the list above the draft.
+  if (r.outcome === "flagged" || (r.outcome === "drafted" && needsIdentity(it))) {
+    const said = [...(needsIdentity(it) ? [WHY_AR.account_risk] : []),
+      ...(r.flags || []).filter((f) => !f.startsWith("draft:") && f !== "account_risk").map(flagSentence)];
     return box("warn", "تحتاج تأكيد:", said.join(" ") || "بالمسودة شي لازم تراجعه، شوف الفحص تحت المسودة.");
   }
   if (r.outcome === "escalated") {
     if ((r.flags || []).includes("fraud")) return box("bad", "احتمال احتيال: ماكو رد للزبون.", "اقرا الملاحظة وحوّلها، أو استلمها بنفسك.");
-    return box("bad", "متصعّدة:", (r.flags || []).map(flagSentence).join(" ") || "يستلمها موظف بدون مسودة.");
+    return box("bad", "متصعّدة:", ((r.flags || []).map(flagSentence).join(" ") || "يستلمها موظف بدون مسودة.") + identity);
   }
   return null;
 }
+/** whyLine, or an empty slot with its id, so a correction can put the line in or take it out. */
+const whySlot = (it) => whyLine(it) || el("p", { id: "whyLine", hidden: true });
 
 /** The gate's confidence as a category with what was done about it (never a decimal here). */
 function confidence(it) {
@@ -386,9 +407,7 @@ function ticketView(it) {
       liveSteps(it), customerSection(it), el("div", { class: "skeleton-block", "aria-hidden": "true" }), actionBar(it));
     return art;
   }
-  const line = whyLine(it);
-  if (line) add(art, line);
-  add(art, summaryBox(it));
+  add(art, whySlot(it), summaryBox(it));
   if (decided) {
     add(art, customerSection(it), decidedSection(it, decided), actionBar(it));
     return art;
@@ -508,6 +527,8 @@ function refreshAfterCorrection(it) {
   }
   refreshSummary(it);
   $("titleChips")?.replaceWith(titleChips(it));
+  // A correction to (or away from) a blocked account or a SIM change changes the line at the top.
+  keepPlace(composer?.node, () => $("whyLine")?.replaceWith(whySlot(it)));
   $("choiceBox")?.replaceWith(choiceBox(it));
   refreshGate(it);
   renderQueue();
@@ -560,20 +581,28 @@ function choiceBox(it) {
   return fs;
 }
 
-/** What the agent must check before approving: the flag's one thing, any warning in the draft, and a
- *  draft written for another type than the one the agent chose. {list: [{id, ask, done}], key} */
+/** What the agent must check before approving: the customer's identity first (a blocked account or a SIM
+ *  change, flagged or chosen by the agent), the flag's one thing, any warning in the draft, and a draft
+ *  written for another type than the one the agent chose. {list: [{id, ask, done}], key} */
 function confirmTargets(it, st) {
   const list = [];
   const push = (id, words) => { if (!list.some((x) => x.ask === words.ask)) list.push({ id, ...words }); };
-  for (const f of it.result?.flags || []) if (!f.startsWith("draft:")) push(f, CONFIRM_AR[f] || CONFIRM_OTHER);
+  if (needsIdentity(it)) push("account_risk", CONFIRM_AR.account_risk);
+  for (const f of it.result?.flags || []) if (!f.startsWith("draft:") && f !== "account_risk") push(f, CONFIRM_AR[f] || CONFIRM_OTHER);
   for (const f of st.findings) if (!isBlocking(f.kind)) push(`draft:${f.kind}`, CONFIRM_AR[`draft:${f.kind}`] || { ask: S.meta.check_ar?.[f.kind] ?? f.kind, done: "قريت التنبيه" });
   if (retargeted(it)) push("draft_for_other_type", CONFIRM_AR.draft_for_other_type);
   return { list, key: list.map((x) => x.id).join("|") };
 }
 
-/** The warning kinds the agent ticked and approves anyway (the decision log keeps them, never text). */
+/** The one tick's words: the point's own, or for several «تأكدت من هوية الزبون وراجعت باقي النقاط» when the
+ *  identity check is among them (it is listed first), else «راجعت كل النقاط فوق». The box and the refusal
+ *  both use it, so they never name different ticks. */
+const tickText = (t) => (t.list.length === 1 ? t.list[0].done : t.list[0]?.id === "account_risk" ? TICK_IDENTITY_AND_REST : TICK_ALL);
+
+/** What the agent ticked and approves anyway: warning kinds, a draft for another type, and the identity
+ *  check (the decision log keeps them as kinds, never text; the server wants account_risk). */
 function acknowledged(t) {
-  return t.list.map((x) => x.id).filter((id) => id.startsWith("draft:") || id === "draft_for_other_type")
+  return t.list.map((x) => x.id).filter((id) => id.startsWith("draft:") || id === "draft_for_other_type" || id === "account_risk")
     .map((id) => id.replace(/^draft:/, ""));
 }
 
@@ -589,10 +618,7 @@ function approval(it) {
       reason: [...new Set(blocking.map((f) => BLOCK_AR[f.kind] || S.meta.check_ar?.[f.kind] || f.kind))].join(" ") };
   }
   if (st.check === "error") return { ok: false, reason: "التعديل ما انفحص، جرب الفحص مرة ثانية.", targets: t };
-  if (!acked) {
-    const tick = t.list.length > 1 ? "راجعت كل النقاط فوق" : t.list[0].done;
-    return { ok: false, needsAck: true, reason: `أشّر على «${tick}» فوق المسودة أول.`, targets: t };
-  }
+  if (!acked) return { ok: false, needsAck: true, reason: `أشّر على «${tickText(t)}» فوق المسودة أول.`, targets: t };
   return { ok: true, targets: t, pending: !st.current };
 }
 
@@ -613,7 +639,7 @@ function refreshGate(it, { first = false } = {}) {
       el("label", { class: "confirm-check" },
         el("input", { type: "checkbox", id: "ackBox", checked: S.acks.get(u) === t.key,
           onchange: (e) => { if (e.target.checked) S.acks.set(u, t.key); else S.acks.delete(u); refreshActions(it); } }),
-        el("span", { text: many ? "راجعت كل النقاط فوق" : t.list[0].done }))) : el("div", { id: "confirmBox", tabindex: "-1" });
+        el("span", { text: tickText(t) }))) : el("div", { id: "confirmBox", tabindex: "-1" });
     // The box sits above the draft: keep the draft (and the caret in it) where it was on screen.
     // Not when the ticket is first drawn: that would scroll its heading away on every open.
     if (first) box.replaceWith(next);
@@ -691,6 +717,7 @@ function decidedSection(it, d) {
   return el("section", { class: "decided", "aria-labelledby": "decidedTitle" },
     el("h3", { id: "decidedTitle", class: "decided-title" }, icon("done"), ACTION_WORD[d.action] || "خلصت", " · ", fmtSeconds(d.seconds)),
     body,
+    (d.warnings_acknowledged || []).includes("account_risk") ? el("p", { class: "hint", text: "تأكدت من هوية الزبون قبل الاعتماد." }) : null,
     reasons.length ? el("p", { class: "hint" }, "الأسباب: ", reasons.join("، ")) : null,
     corrText.length ? el("p", { class: "hint" }, "صحّحت: ", corrText.join("، ")) : null);
 }
@@ -993,7 +1020,10 @@ export function renderWhy() {
     // What the drafter was told to ask for (it may have left one out: read the draft).
     const ask = (dr.data.ask_for || []).filter((x) => !(x === "bill_type" && BILL_NAMED.test(text))).map((x) => FIELD_AR[x] || x);
     step("المسودة", ask.length ? `المفروض تطلب من الزبون: ${ask.join("، ")}. ` : "ما تحتاج تطلب شي من الزبون. ",
-      f.length ? `الفحص لكى: ${f.map((x) => CHECK_SHORT_AR[x.kind] || x.kind).join("، ")}.` : `الفحص ما لكى: ${(S.meta.checks_active || []).map((k) => CHECK_SHORT_AR[k] || k).join("، ")}.`);
+      f.length ? `الفحص لكى: ${f.map((x) => CHECK_SHORT_AR[x.kind] || x.kind).join("، ")}.` : `الفحص ما لكى: ${(S.meta.checks_active || []).map((k) => CHECK_SHORT_AR[k] || k).join("، ")}.`,
+      // Why it is in «تحتاج تأكيد» although the draft is clean: the type (run.py ACCOUNT_RISK).
+      (it.result?.flags || []).includes("account_risk")
+        ? ` علّمناها للتأكيد لأن نوعها «${subAr(subOf(it))}»، وهاي من الطرق اللي يستعملها المحتال حتى ياخذ حساب غيره، فلازم تتأكد من هوية الزبون حسب الإجراءات قبل لا تعتمد.` : "");
   } else if (dr?.status === "skipped") {
     step("المسودة", `ما انكتبت لأن ${because(it)}.`);
   } else if (dr?.status === "error") step("المسودة", "صار خطأ، فراحت لموظف.");

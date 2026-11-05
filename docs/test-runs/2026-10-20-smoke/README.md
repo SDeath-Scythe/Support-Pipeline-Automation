@@ -11,7 +11,7 @@ Branch: `claude/eager-tesla-x1dcxj` (nothing was changed on `main`).
 
 No pipeline code, prompts, config or thresholds were changed. The run files themselves (`runs/*.json`) were **not** committed, because `.gitignore` excludes `runs/`.
 
-Tickets were written by hand with the Claude Code assistant, not with the `generator` role, so this set is outside the planned 400-ticket dev / mvp_test / heldout split. Gold labels follow the rules in `config/` (default priority, raised one level for ≥ 1,000,000 IQD or an urgent word from `route.URGENT_WORDS`; outcome from the gate rules) and were checked against `config/taxonomy.yaml`.
+These tickets were written separately, not with the `generator` role, so this set is outside the planned 400-ticket dev / mvp_test / heldout split. Gold labels follow the rules in `config/` (default priority, raised one level for ≥ 1,000,000 IQD or an urgent word from `route.URGENT_WORDS`; outcome from the gate rules) and were checked against `config/taxonomy.yaml`.
 
 ## How it was run
 

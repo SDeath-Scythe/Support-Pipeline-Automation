@@ -39,6 +39,12 @@ log = logging.getLogger(__name__)
 
 FEE_SUBCATEGORIES = ("overcharged_fee", "fees_limits_question")
 
+# A blocked account or a new SIM is a common step in taking over someone else's account. The draft is
+# kept, flagged account_risk: the agent confirms the customer's identity by the institution's own
+# procedure before approving (the author's decision, 5 Nov; it replaced the escalate_account_risk flag,
+# which escalated them with no draft). It reads the type the draft was written for, after the re-check.
+ACCOUNT_RISK = ("blocked_account", "sim_change")
+
 STAGES = ["received", "clean", "classify", "gate", "recheck", "route", "draft", "result"]
 
 FLAG_AR = {
@@ -56,7 +62,8 @@ FLAG_AR = {
     "draft:unknown_number": "المسودة بيها رقم مو موجود بالتذكرة أو المعلومات",
     "draft:hold_reason": "المسودة تذكر تحقيق أو اشتباه أو بلاغ: لا تعتمدها، ممنوع نخبر الزبون",
     "draft:sensitive_number": "المسودة تكرر رقم بطاقة أو رمز: احذفه قبل الاعتماد",
-    "account_risk": "حساب محظور أو تغيير شريحة: يستلمها موظف بدون مسودة",
+    "account_risk": "حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، "
+                    "ولا تكتب بالرد إنه صار أي تغيير على الحساب",
     # Escalations the system decides on its own; their team note is built with no model call.
     "too_long": "التذكرة أطول من الحد المسموح: يستلمها موظف بدون نموذج",
     "pipeline_off": "النظام موقف: يستلمها موظف يدوياً",
@@ -229,9 +236,13 @@ def process(raw_text: str, emit: Emit = lambda e: None,
                     flags.append("cancelled")
                 else:
                     summary, result["usage"] = _team_summary(ctx["text"])
+            # A blocked account or a SIM change that a person takes over anyway (unsure, models disagreeing,
+            # an error, drafts off): whoever replies is reminded of identity too. Not fraud: no reply there.
+            identity = "fraud" not in flags and any(e is not None and e.subcategory in ACCOUNT_RISK
+                                                    for e in (ctx["ex"], ctx["second"]))
             result["handoff_ar"] = handoff.note(ctx["ex"], flags, confidence=ctx["confidence"],
                                                 second=ctx["second"], cleared_secondary=ctx["cleared"],
-                                                summary=summary)
+                                                summary=summary, identity=identity)
         result["notes_ar"] = [FLAG_AR.get(f, f) for f in flags]
         send("result", "done", result)
         sent.append(result)
@@ -331,8 +342,6 @@ def process(raw_text: str, emit: Emit = lambda e: None,
                 ctx.update(ex=ex, confidence=gate2.confidence, cleared=info2.get("cleared_secondary"))
             elif not agree or ex2.category == "fraud_security":
                 flags.append("fraud" if ex2.category == "fraud_security" else "recheck_disagreed")
-                if gate2 is not None and "account_risk" in gate2.flags:
-                    flags.append("account_risk")
                 ctx["second"] = ex2
                 team, priority = route(ex2 if ex2.category == "fraud_security" else ex, text)
                 ctx.update(team=team, priority=priority)
@@ -381,6 +390,8 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         facts_text = drf.facts_text(ex.subcategory)
         checks = draft_check.problems(reply, user, facts_text=facts_text)
         spans = draft_check.findings(reply, user, facts_text=facts_text)
+        if ex.subcategory in ACCOUNT_RISK:   # the type the draft was written for: the re-check's, if it was used
+            flags.append("account_risk")
         flags += [f"draft:{p}" for p in checks]
         send("draft", "done", {"model": model_for("drafter"), "backend": backend(),
                                "seconds": round(time.time() - t0, 1), "user_prompt": user, "reply": reply,
