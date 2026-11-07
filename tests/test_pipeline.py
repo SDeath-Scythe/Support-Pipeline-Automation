@@ -259,12 +259,12 @@ def test_run_confident_ticket_is_drafted(monkeypatch):
 
 def test_fix_flags_off_by_default_and_reject_unknown(monkeypatch):
     """The adopted fixes became the normal code (30 Oct), and so did the three security rules opened
-    on 1 Nov (5 Nov). No flag is open; the mechanism stays."""
+    on 1 Nov (5 Nov). The draft warnings opened on 7 Nov are flags, all off unless named."""
     from pipeline import fixes
 
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
     assert fixes.active() == frozenset()
-    assert fixes.FIXES == {}
+    assert not set(fixes.FIXES) & set(fixes.ADOPTED)
     assert set(fixes.ADOPTED) == {"hold_reason", "sensitive_number", "escalate_account_risk"}
     monkeypatch.setenv("PIPELINE_FIXES", "draft_check")                    # adopted, so no longer a flag
     try:

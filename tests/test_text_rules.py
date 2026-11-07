@@ -1146,3 +1146,89 @@ def test_known_facts_are_the_lines_the_drafter_gets(monkeypatch):
     facts = draft.known_facts(_ex())
     assert facts == ["Support hours: من السبت للخميس", "Expected response time for this issue: خلال ٢٤ ساعة"]
     assert "Known facts: " + "; ".join(facts) in draft.user_prompt("…", _ex(), "transfers")
+
+
+# --- warnings behind flags (fixes.py), opened after the 7 Nov user tests ---
+
+def _flagged(monkeypatch, flag: str, text: str, allowed: str = "") -> list[str]:
+    monkeypatch.setenv("PIPELINE_FIXES", flag)
+    return [k for k in problems(text, allowed or "… " + text) if k == flag]
+
+
+@pytest.mark.parametrize("text", [
+    "هلا بيك، تم إرجاع مبلغ 500,000 دينار إلى حسابك، وتكدر توريها لابوك.", "رجعنالك المبلغ", "سجلنا شكواك",
+    "أما شكواك على الموظف فسجلناها، وراح يتابعها الفريق المختص.", "تم تغيير الرقم", "فتحنا الحساب",
+    "حولنا المبلغ لحسابك", "تم فك الحظر عن حسابك",
+])
+def test_claims_done_flags_a_claim_the_tool_cannot_have_done(monkeypatch, text):
+    assert _flagged(monkeypatch, "claims_done", text) == ["claims_done"]
+    monkeypatch.delenv("PIPELINE_FIXES")
+    assert "claims_done" not in problems(text, "… " + text)
+
+
+@pytest.mark.parametrize("text", [
+    "وصلتنا رسالتك", "حولنا طلبك للقسم المختص", "سجلنا ملاحظتك", "حولنا شكواك لقسم الشكاوى", "تم رفع شكواك للقسم المختص",
+    "ما رجعنا المبلغ لحد الآن", "إذا تم إرجاع المبلغ راح يوصلك إشعار", "ذكرت إنه تم إرجاع المبلغ بس ما شفته",
+    "رجعنالك بخصوص طلبك", "فهمت إنه تم تحويل 200 الف لرقم غلط", "سجلنا رقم العملية وراح يتابع القسم",
+    "وصلنا طلبك وسجلناه", "طلبت نكتبلك «تم إرجاع المبلغ»، بس هذا الشي ما نگدر نأكده.",
+])
+def test_claims_done_leaves_hand_offs_negations_and_quotes(monkeypatch, text):
+    assert _flagged(monkeypatch, "claims_done", text) == []
+
+
+@pytest.mark.parametrize("text, flagged", [
+    ("هلا بيك عزيزي، راح يراجع قسم البطاقات. هلا بيك عيني، راح يراجع قسم البطاقات.", True),
+    ("راح يراجع قسم التحويلات الحوالة ويتأكد منها. وراح يراجع قسم التحويلات الحوالة ويتأكد منها هم.", True),
+    ("هلا بيك، أهلاً وياك. راح يراجع قسم البطاقات الموضوع.", False),
+    ("راح يراجع قسم التحويلات الحوالة. تكدر تكتبلنا رقم العملية والمبلغ؟", False),
+])
+def test_repeated_text_flags_a_second_greeting_or_a_repeated_sentence(monkeypatch, text, flagged):
+    assert _flagged(monkeypatch, "repeated_text", text) == (["repeated_text"] if flagged else [])
+
+
+@pytest.mark.parametrize("text, flagged", [
+    ("يرجى ترسل لنا رقم العملية", True), ("رح يراجعها قسم التحويلات", True), ("ورح نخبرك بالنتيجة", True),
+    ("عشان نتابع", True), ("أتفهم قلقچ وايد", True), ("ونأمل أن تنحل المشكلة", True), ("الحوالة التي أرسلتها", True),
+    ("انخصم مرتين بينما وصله مبلغ واحد", True), ("قديش المبلغ؟", True),
+    ("راح يراجع قسم التحويلات الموضوع", False), ("فرح كبير", False), ("نساعدك بقدر الإمكان", False),
+    ("حتى نكدر نتابع، تكدر تكتبلنا رقم العملية؟", False), ("ما نگدر نوعدك بنتيجة هسه", False),
+])
+def test_dialect_words_flags_whole_words_from_other_dialects(monkeypatch, text, flagged):
+    assert _flagged(monkeypatch, "dialect_words", text) == (["dialect_words"] if flagged else [])
+
+
+def _prompt(ticket: str, ask: str, maybe: str = "") -> str:
+    lines = [f"<ticket>\n{ticket}\n</ticket>", "", f"Ask the customer for: {ask or 'nothing'}"]
+    if maybe:
+        lines.append(f"Also ask for these, but only if the ticket does not already give them: {maybe}")
+    return "\n".join(lines)
+
+
+@pytest.mark.parametrize("draft, allowed, fields", [
+    ("راح يراجع قسم الوكلاء. تكدر تكتبلنا تاريخ ووقت العملية بالضبط؟",
+     _prompt("رحت للوكيل اللي يم السوگ اودع اربع مية الف", "تاريخ ووقت العملية", "اسم الوكيل ومكانه"),
+     ["agent_location"]),
+    ("راح يراجع قسم الوكلاء. تكدر تكتبلنا اسم الوكيل ومكانه وتاريخ ووقت العملية؟",
+     _prompt("رحت للوكيل اللي يم السوگ", "تاريخ ووقت العملية", "اسم الوكيل ومكانه"), []),
+    ("راح يراجع قسم الفواتير الدفعة ويتحقق منها.", _prompt("دفعت فاتورة الكهرباء ٢٥ الف", "", "نوع الفاتورة"), []),
+    ("راح يراجع قسم الفواتير الدفعة ويتحقق منها.", _prompt("دفعت فاتورة ٢٥ الف وما انحسبت", "", "نوع الفاتورة"),
+     ["bill_type"]),
+    ("حتى نكدر نتابع وياك، يرجى ترسل لنا رقم العملية وتاريخ ووقت إجراء التحويل.",
+     _prompt("انخصمت مية الف من حسابي والجماعة يحلفون ما وصلتهم، والوصل ضاع مني", "رقم العملية, تاريخ ووقت العملية"),
+     ["reference_lost"]),
+    ("تكدر تلگى رقم العملية بسجل العمليات بالتطبيق، دزلنا ياه مع تاريخ ووقت التحويل.",
+     _prompt("انخصمت مية الف والوصل ضاع مني", "رقم العملية, تاريخ ووقت العملية"), []),
+    ("راح يراجع قسم التحويلات الموضوع.", "… no prompt", []),
+])
+def test_ask_missing_names_the_fields_the_draft_does_not_ask_for(monkeypatch, draft, allowed, fields):
+    monkeypatch.setenv("PIPELINE_FIXES", "ask_missing")
+    assert draft_check.ask_missing_fields(draft, allowed) == fields
+    found = [f for f in findings(draft, allowed) if f["kind"] == "ask_missing"]
+    assert ([f["fields"] for f in found] == [fields]) if fields else not found
+    monkeypatch.delenv("PIPELINE_FIXES")
+    assert not [f for f in findings(draft, allowed) if f["kind"] == "ask_missing"]
+
+
+def test_no_flag_no_new_warning_kind():
+    text = "هلا بيك، تم إرجاع المبلغ عشان. هلا بيك، تم إرجاع المبلغ عشان."
+    assert not set(problems(text, _prompt("دفعت فاتورة", "", "نوع الفاتورة"))) & set(draft_check.FLAG_KINDS)

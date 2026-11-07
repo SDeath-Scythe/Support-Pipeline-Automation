@@ -369,7 +369,7 @@ def _reply(sub, conf, cat="account_access"):
 def test_an_adopted_flag_name_is_refused_with_what_became_of_it(name, monkeypatch):
     from pipeline import fixes
 
-    assert fixes.FIXES == {} and fixes.active() == frozenset()
+    assert name not in fixes.FIXES and fixes.active() == frozenset()
     monkeypatch.setenv("PIPELINE_FIXES", f"{name}, ")
     with pytest.raises(ValueError) as e:
         fixes.active()

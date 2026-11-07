@@ -62,6 +62,11 @@ FLAG_AR = {
     "draft:unknown_number": "المسودة بيها رقم مو موجود بالتذكرة أو المعلومات",
     "draft:hold_reason": "المسودة تذكر تحقيق أو اشتباه أو بلاغ: لا تعتمدها، ممنوع نخبر الزبون",
     "draft:sensitive_number": "المسودة تكرر رقم بطاقة أو رمز: احذفه قبل الاعتماد",
+    # The four warnings behind flags (fixes.py), shown only while their flag is on.
+    "draft:claims_done": "المسودة تگول شي انسوى وإحنا ما سويناه: تأكد قبل الاعتماد",
+    "draft:repeated_text": "المسودة بيها ترحيب أو جملة مكررة",
+    "draft:ask_missing": "المسودة ما تسأل عن كل اللي ناقص",
+    "draft:dialect_words": "المسودة بيها كلمة مو عراقية",
     "account_risk": "حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، "
                     "ولا تكتب بالرد إنه صار أي تغيير على الحساب",
     # Escalations the system decides on its own; their team note is built with no model call.

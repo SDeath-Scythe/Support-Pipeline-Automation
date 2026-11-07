@@ -10,14 +10,25 @@ deleted; their history is in docs/experiments/LOG.md and git.
 On 5 Nov the three flags opened by the 1 Nov security review became the normal code (the author's
 decision, for a regulated financial institution): hold_reason and sensitive_number are draft rules
 that always run and block an approval (draft_check.py), and escalate_account_risk was changed into
-the account_risk flag (run.py), which keeps the draft. No flag is open now; the mechanism stays.
+the account_risk flag (run.py), which keeps the draft.
+
+On 7 Nov four draft warnings found by the user tests were opened as flags (FIXES below), off by default.
 """
 
 from __future__ import annotations
 
 import os
 
-FIXES: dict[str, str] = {}
+# Draft warnings opened after the 7 Nov user tests (draft_check.py, FLAG_KINDS); each warns, none blocks.
+FIXES: dict[str, str] = {
+    "claims_done": "draft check: warn when the draft says a refund, an account or number change or a complaint "
+                   "is already done (forwarding to a team stays allowed)",
+    "repeated_text": "draft check: warn on a second greeting or a sentence repeated almost word for word",
+    "ask_missing": "draft check: warn, naming them, about the fields the drafter was told to ask for that the "
+                   "draft never mentions; a lost receipt is not asked for its reference",
+    "dialect_words": "draft check: warn on a word from another dialect or stiff standard Arabic (عشان، وايد، رح، "
+                     "يرجى، التي ...)",
+}
 
 # Flags that became the normal code. Naming one in PIPELINE_FIXES is refused with what happened to it,
 # so an old command line can't look as if it switched something on or off.

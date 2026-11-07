@@ -14,9 +14,12 @@ from __future__ import annotations
 import re
 from bisect import bisect_left, bisect_right
 
+from . import fixes
 from .clean import CREDENTIAL, clean, fold, sensitive_numbers
 
 KINDS = ("stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number")
+# Warnings under test, each behind the flag of the same name in fixes.py: off, they never appear.
+FLAG_KINDS = ("claims_done", "repeated_text", "ask_missing", "dialect_words")
 
 # Arabic letters only: not punctuation ("،" "؟" "؛"), digits or tatweel ("بالـcard"), which can
 # sit next to an English word the customer used (the API pilot flagged "declined،").
@@ -1367,6 +1370,159 @@ def _sensitive_number(norm: str, pos: list[int]) -> tuple[int, int] | None:
     return _raw(pos, spans[0][0], spans[0][1]) if spans else None
 
 
+# --- warnings under test (fixes.py flags of the same name) ---
+
+# claims_done: the draft says something is already done that the tool cannot have done: «تم إرجاع المبلغ»,
+# «رجعنالك المبلغ», «سجلنا شكواك», «شكواك فسجلناها», «تم تغيير الرقم», «فتحنا الحساب». Forwarding is what the tool does,
+# so «حولنا طلبك للقسم» and «رفعنا شكواك للقسم المختص» stay allowed, and so do «وصلتنا رسالتك» and «سجلنا ملاحظتك».
+# Each completion verb (a passive noun after «تم», or a past "we" verb) with the kinds of object it claims for.
+_DONE_KINDS = {
+    "money": "[اإ]رجاع|استرجاع|استرداد|[اإ]عاد[ةه]|تعويض|[اإ]ضاف[ةه]|[اأ]?رجع|[اأ]?ضف|عوض|استرجع|استرد|[اأ]عد|حول",
+    "account": "فتح|فك|[اإ]لغاء|تفعيل|رفع|[اإ]يقاف|تحديث|تعديل|[اإ]عاد[ةه]|[اأ]لغ|فعل|[اأ]?وقف|عدل|حدث|غير",
+    "number": "تغيير|تبديل|تعديل|تحديث|تفعيل|[اإ]عاد[ةه]|غير|بدل|عدل|حدث|فعل",
+    "complaint": "تسجيل|سجل",
+}
+_DONE_PASSIVE = re.compile(r"(?<!\w)[وف]?(?:تم|تمت|انتهى|خلص)\s+(?:\S+\s+)?(?P<v>[اإ]رجاع|استرجاع|استرداد|[اإ]عاد[ةه]"
+                           r"|تعويض|[اإ]ضاف[ةه]|تسجيل|تغيير|تبديل|تعديل|تحديث|فتح|فك|[اإ]لغاء|تفعيل|رفع|[اإ]يقاف)(?!\w)")
+_DONE_WE = re.compile(r"(?<!\w)[وف]?(?P<v>[اأ]?رجع|حول|[اأ]?ضف|عوض|سجل|فتح|فك|غير|بدل|[اأ]لغ|فعل|رفع|عدل|حدث|[اأ]?وقف"
+                      r"|استرجع|استرد|[اأ]عد)نا(?:ه|ها|هم|ل(?:ك|ج|كم)|ال(?:ك|ج|كم)|ك|ج|كم)?(?!\w)")
+_DONE_OBJECT = re.compile(r"(?:ال|بال|لل|ل|ب)?(?:"
+                          r"(?P<money>مبلغ\w*|فلوس\w*|رصيد\w*|عمول\w*|رسوم\w*|مصاري\w*|حوال(?:[ةه]|ت)\w*|دينار)"
+                          r"|(?P<account>حساب\w*|قفل|حظر|تجميد|بطاق(?:[ةه]|ت)\w*)"
+                          r"|(?P<number>رقم(?:ك|ج|كم)?|شريح(?:[ةه]|ت)\w*|خط(?:ك|ج)?)"
+                          r"|(?P<complaint>شكو(?:ى|ا|ت)\w*|اعتراض\w*|تظلم\w*))$")
+_TEAM = re.compile(r"(?<!\w)(?:لل|ل|[إا]لى\s+(?:ال)?)(?:قسم|فريق|جه[ةه]|[إا]دار[ةه]|موظف|مختص)\w*")
+_NOT_YET = {"ما", "لم", "لا", "مو", "ماكو", "محد", "لسه", "لسا", "بعده", "مازال"}
+_IF_WHEN = {"إذا", "اذا", "لو", "لمن", "لما", "عندما", "متى", "شوكت", "هل", "أول", "اول", "حتى", "بعد"}
+_TOLD = re.compile(r"ذكرت\w*|كتبت\w*|[نت]كتب\w*|[گقك]لت|[تي][گقك]ول\w*|مكتوب\w*|حسب|[إا]شعار\w*|رسال[ةه]\w*|طلبت|نفهم|فهمت")
+
+
+def _claims_done(norm: str, pos: list[int]) -> tuple[int, int] | None:
+    stops = [m.start() for m in _STOP.finditer(norm)]
+    for rx in (_DONE_PASSIVE, _DONE_WE):
+        for m in rx.finditer(norm):
+            s0, s1 = _sentence(norm, stops, m.start())
+            clause_start = max([s0] + [x + 1 for x in (norm.rfind(c, s0, m.start()) for c in "،,") if x >= 0])
+            before = [_bare(w) for w in norm[clause_start:m.start()].split()]
+            if (_NOT_YET & set(before[-2:]) or _IF_WHEN & set(before[-3:]) or any(_TOLD.fullmatch(w) for w in before)
+                    or any(q in norm[s0:m.start()] for q in "«\"“")):
+                continue                                    # «ما رجعنا المبلغ», «إذا تم إرجاع», «ذكرت إنه تم ...», quoted
+            near = norm[max(clause_start, m.start() - 40):m.start()].split()[-3:] + norm[m.end():s1].split()[:3]
+            kinds = {k for o in (_DONE_OBJECT.match(_bare(w)) for w in near) if o for k, v in o.groupdict().items() if v}
+            verb = m.group("v")
+            claimed = [k for k in kinds if re.fullmatch(_DONE_KINDS[k], verb)]
+            if not claimed or (verb in {"حول", "رفع"} and claimed != ["money"] and _TEAM.search(norm, m.end(), s1)):
+                continue                                    # «حولنا شكواك للقسم»: forwarding is what the tool does
+            return _raw(pos, m.start(), m.end())
+    return None
+
+
+# repeated_text: a second greeting, or a sentence that repeats another almost word for word (an edit pasted into the
+# middle of the draft: «هلا بيك عزيزي، راح يراجع قسم البطاقات. هلا بيك عيني، راح يراجع قسم البطاقات.»).
+_GREETING = re.compile(r"(?:هلا|هلو|[أا]هلا|مرحبا|السلام\s+عليكم|حياك|صباح\s+الخير|مساء\s+الخير|يا\s+هلا)(?!\w)")
+_SENTENCE = re.compile(r"[^.!?؟\n]+")
+
+
+def _repeated_text(norm: str, pos: list[int]) -> tuple[int, int] | None:
+    sentences = [m for m in _SENTENCE.finditer(norm) if m.group().strip()]
+    greeted = [m for m in sentences if _GREETING.match(m.group().lstrip(" -•*،,"))]
+    if len(greeted) > 1:
+        g = greeted[1]
+        lead = len(g.group()) - len(g.group().lstrip(" -•*،,"))
+        return _raw(pos, g.start() + lead, g.end())
+    seen: list[set[str]] = []
+    for m in sentences:
+        words = {_bare(w) for w in m.group().split()} - {"و", ""}
+        if len(words) >= 5 and any(len(words & w) / len(words | w) >= 0.75 for w in seen):
+            lead = len(m.group()) - len(m.group().lstrip())
+            return _raw(pos, m.start() + lead, m.end())
+        seen.append(words)
+    return None
+
+
+# ask_missing: the drafter is told what to ask the customer for («Ask the customer for: ...» in its prompt, the
+# fields of draft.ask_for); each field the draft names none of the words for is missing. A customer who lost the
+# receipt («الوصل ضاع مني») isn't asked for the reference: the draft should send them to the app's history instead.
+_FIELD_WORDS = {
+    "reference": r"رقم\s+(?:ال)?(?:عملي|حوال|تحويل|معامل|مرجع|وصل|[إا]يصال)|رقم\s+(?:ال)?مرجعي|مرجع",
+    "amount": r"مبلغ|شكد|بكم|كم\s+(?:دينار|دولار|الف|ألف)|قيم[ةه]",
+    "date": r"تاريخ|وقت|[أا]ي\s+يوم|يوم|ساع[ةه]|شوكت|متى",
+    "recipient_number": r"رقم\s+(?:ال)?(?:مستلم|مستفيد|شخص|هاتف|تلفون|موبايل)|رقم\s+(?:\S+\s+){0,2}?\S*(?:حول|رح|راح|رسل|دز)",
+    "phone_number": r"رقم\s+(?:\S+\s+){0,3}?\S*(?:شحن|تعبئ|رصيد)|رقم\s+(?:ال)?(?:هاتف|تلفون|موبايل|خط)",
+    "agent_location": r"وكيل|مكان|منطق[ةه]|عنوان|محل|منفذ|اسم\s",
+    "merchant": r"متجر|محل|تاجر|موقع|شرك[ةه]|مطعم|سوق|اسم\s",
+    "bill_type": r"فاتور|كهرباء|ماء|مي|[إا]نترني?ت|نوع",
+    "screenshot": r"صور[ةه]|سكرين|لقط[ةه]",
+}
+_FIELD_RE = {k: re.compile(rf"(?<!\w)[وفبل]?(?:ال|لل)?(?:{v})") for k, v in _FIELD_WORDS.items()}
+_ASK_LINES = re.compile(r"^(?:Ask the customer for|Also ask for these, but only if the ticket does not already give "
+                        r"them): (.+)$", re.MULTILINE)
+# A sentence asks when it ends in a question mark or has a request word: «تكدر تكتبلنا ...», «دزلنا ...», «نحتاج ...».
+_ASKING_SENTENCE = re.compile(r"(?<!\w)[وف]?(?:ت[گكق]در\w*|ممكن|ياريت|يرجى|الرجاء|رجاء\w*|نرجو\w*|نحتاج\w*|محتاجين"
+                              r"|نطلب|(?:[تا]|[أإ])?(?:دز|رسل|بعث|كتب|ذكر|خبر)\w*|[گقك]و?ل(?:لنا|لي|نا|ي)\w*)(?!\w)")
+_LOST_RECEIPT = re.compile(r"(?:وصل|[إا]يصال|فاتور[ةه])\w*\s+(?:\S+\s+)?(?:ضاع|ضايع|انفقد|مفقود|راح\s+مني|ما\s+لكيته)"
+                           r"|(?:ضيعت|فقدت|ضاع\s+مني|ما\s+عندي|ماعندي|رميت|ما\s+احتفظت\s+ب)\s*(?:ال)?(?:وصل|[إا]يصال)")
+_HISTORY = re.compile(r"سجل|التطبيق|تاريخ\s+(?:ال)?عمليات|حركات")
+# The drafter asks for a bill type only if the ticket doesn't give it; a ticket that names one has given it.
+_BILL_GIVEN = re.compile(r"كهرب|(?<!\w)(?:ال)?ماء(?!\w)|[إا]نترني?ت|(?<!\w)(?:ال)?نت(?!\w)|موبايل|غاز|قسط|جامع|مدرس|اشتراك")
+
+
+def ask_missing_fields(draft: str, allowed_text: str) -> list[str]:
+    """The fields the drafter was told to ask for that no asking sentence of the draft names, in the prompt's order;
+    "reference_lost" when the customer lost the receipt and the draft asks for the reference without pointing to the
+    app's history."""
+    from .draft import FIELD_AR                             # draft imports llm; only this warning needs the labels
+    label_to_field = {v: k for k, v in FIELD_AR.items()}
+    asked = [label_to_field[x.strip()] for line in _ASK_LINES.findall(allowed_text) for x in line.split(", ")
+             if x.strip() in label_to_field]
+    norm = fold(draft)[0]
+    asking = " . ".join(m.group() for m in re.finditer(r"[^.!?؟\n]+[.!?؟]?", norm)
+                        if m.group().rstrip()[-1:] in "؟?" or _ASKING_SENTENCE.search(m.group()))
+    ticket = re.search(r"<ticket>\n(.*?)\n</ticket>", allowed_text, re.DOTALL)
+    lost = bool(ticket and _LOST_RECEIPT.search(fold(ticket.group(1))[0]))
+    given = {"bill_type"} if ticket and _BILL_GIVEN.search(fold(ticket.group(1))[0]) else set()
+    out = [f for f in asked if not (f == "reference" and lost) and f not in given and not _FIELD_RE[f].search(asking)]
+    if lost:
+        for m in _FIELD_RE["reference"].finditer(norm):
+            s0 = max(norm.rfind(c, 0, m.start()) for c in ".!?؟\n") + 1
+            s1 = min([x for x in (norm.find(c, m.end()) for c in ".!?؟\n") if x >= 0] or [len(norm)])
+            if _ASKING_SENTENCE.search(norm, s0, s1) and not _HISTORY.search(norm, s0, s1):
+                out.append("reference_lost")
+                break
+    return out
+
+
+def _ask_missing(draft: str, allowed_text: str) -> tuple[int, int] | None:
+    """Nothing in the draft to point at: the span is empty, at its end (the finding's "fields" names what)."""
+    return (len(draft), len(draft)) if ask_missing_fields(draft, allowed_text) else None
+
+
+# dialect_words: a word from another dialect or from stiff standard Arabic (the dataset generator's drift list in
+# scripts/generate_tickets.py, and the words the user tests found in drafts). Whole words only, after one و/ف/ب/ل.
+_DRIFT_WORDS = {
+    "بدي", "بدك", "بدو", "هيك", "كتير", "منيح", "هلق", "بقدر", "مابقدر", "شو", "قديش",       # Levantine
+    "وايد", "ابغي", "ابغا", "عشان", "علشان", "توصلنا",                                       # Gulf
+    "عايز", "عاوز", "ازاي", "دلوقتي", "كده", "مش", "بتاع",                                   # Egyptian
+    "لقد", "سوف", "الذي", "التي", "لماذا", "ليس", "لدي", "اود", "حيث", "يرجى", "بينما", "نأمل",  # standard Arabic
+    "ابي", "ابيه", "ابيها", "متضايج", "متضايق", "بعثلي", "بعثتلي",                            # not Iraqi (the author)
+}
+_DRIFT_ONLY_WA = {"رح"}                                     # «رح يراجعها»; «فرح», «برح» are other words
+
+
+def _dialect_words(norm: str, pos: list[int]) -> tuple[int, int] | None:
+    tokens = list(_WORD.finditer(norm))
+    for n, t in enumerate(tokens):
+        w = t.group().strip("\"'«»()[]:،,.!?؟؛")
+        lead = t.group().find(w) if w else 0
+        bare = w[1:] if w[:1] in "وفبل" and len(w) > 2 else ""
+        if w == "بقدر" and n + 1 < len(tokens) and tokens[n + 1].group().startswith("ال"):
+            continue                                        # «بقدر الإمكان»: "as far as", not Levantine "I can"
+        if (w in _DRIFT_WORDS or bare in _DRIFT_WORDS or w in _DRIFT_ONLY_WA
+                or (w[:1] == "و" and w[1:] in _DRIFT_ONLY_WA)):
+            return _raw(pos, t.start() + lead, t.start() + lead + len(w))
+    return None
+
+
 def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
     """Each problem kind found in `draft`, in KINDS order, with the span of its first occurrence:
     {"kind", "start", "end", "text"} where text == draft[start:end] (for highlighting), except that a
@@ -1392,11 +1548,22 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
         "hold_reason": _hold_reason(norm, pos),
         "sensitive_number": _sensitive_number(norm, pos),
     }
+    on = fixes.active()
+    if "claims_done" in on:
+        spans["claims_done"] = _claims_done(norm, pos)
+    if "repeated_text" in on:
+        spans["repeated_text"] = _repeated_text(norm, pos)
+    if "ask_missing" in on:
+        spans["ask_missing"] = _ask_missing(draft, allowed_text)
+    if "dialect_words" in on:
+        spans["dialect_words"] = _dialect_words(norm, pos)
     out = [{"kind": k, "start": s[0], "end": s[1], "text": draft[s[0]:s[1]]} for k, s in spans.items() if s]
     for f in out:
         if f["kind"] == "sensitive_number":
             f["text"] = re.sub(r"\d", "*", f["text"])
-    return sorted(out, key=lambda f: KINDS.index(f["kind"]))
+        if f["kind"] == "ask_missing":
+            f["fields"] = ask_missing_fields(draft, allowed_text)
+    return sorted(out, key=lambda f: (KINDS + FLAG_KINDS).index(f["kind"]))
 
 
 def problems(draft: str, allowed_text: str, facts_text: str = "") -> list[str]:
