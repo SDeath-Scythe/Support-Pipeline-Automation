@@ -64,12 +64,15 @@ _ALEF = str.maketrans("أإآ", "ااا")
 # اللي وصلك منه», the sender), or code/OTP/CVV in Latin or Arabic letters («الـcode», «الـ او تي بي»). «الرمز
 # الطلب» with no comma is the code, then the request («إذا ما دزيتلنا الرمز الطلب راح ينلغي»), not «رمز الطلب».
 _HOW_MANY = r"(?:(?:ال)?(?:ست|خمس|[أا]ربع|ثلاث)[ةه]?\s+)"
+# Where the digits arrived, kept with them: «الأرقام الستة اللي وصلتك على تلفونك» is the code, not "we sent a code to
+# your phone" (_TO_YOUR).
+_ON_PHONE = r"(?:\s+(?:على\s+|عل|ع|ل|ب|في\s+)(?:ال)?(?:تلفون|موبايل|رقم|هاتف|جوال|جهاز)(?:ك|ج|كم)?(?!\w))?"
 _SECRET_EXTRA = re.compile(
     r"(?<!\w)(?P<pfx>[وف]?(?:ال)?)(?:"
     r"رقم\s+(?:ال)?بطاق(?:[ةه]|ت(?:ك|ج|كم))(?!\w)"
     rf"|{_HOW_MANY}?[أا]رقام\s+{_HOW_MANY}?(?:"
     r"(?:اللي\s+|الي\s+|(?:ال)?(?:موجود|مطبوع|مكتوب)[ةه]\s+)?(?:ورا|خلف|ب?ظهر|على\s+ظهر)\s+(?:ال)?بطاق\w*"
-    r"|(?:اللي|الي)\s+(?:ي?وصل|ج[اي]?ت|اج[اي]?ت)\w*|(?:ال)?سري[ةه](?!\w))"
+    rf"|(?:اللي|الي)\s+(?:[يت]?وصل|ج[اي]?ت|اج[اي]?ت)\w*{_ON_PHONE}|(?:ال)?سري[ةه](?!\w))"
     r"|[أا]رقام\s+(?:ال)?ست[ةه](?!\w)|ست[ةه]?\s+[أا]رقام(?!\w)"
     rf"|{_HOW_MANY}[أا]رقام\s+(?:(?:اللي|الي)\s+)?(?:بال|ب|ال)?(?:خلف|ورا|ظهر)(?!\w)"
     # «الأرقام اللي بالظهر», «الأرقام الأربعة اللي اخترتها» (the PIN), «الكلمة اللي تدخل بيها» (the password)
@@ -77,7 +80,12 @@ _SECRET_EXTRA = re.compile(
     rf"|(?:[أا]رقام\s+{_HOW_MANY}|{_HOW_MANY}[أا]رقام\s+)(?:اللي|الي)\s+(?:اختر|حطي)ت\w*"
     r"|(?<=ال)كلم[ةه]\s+(?:اللي|الي)\s+ت(?:دخل|سجل)\s+بيها(?!\w)"
     r"|رقم\s+(?:ال)?(?:تحقق|تفعيل)(?!\w)|(?<=ال)(?:رمز|كود)(?=\s+ال(?:طلب|تحويل|عملي[ةه]|حوال[ةه])(?!\w))"
-    r"|رقم\s+(?:اللي|الي)\s+(?:ي?وصل|ج[اي]|اج[اي])ت?(?:ك|ج|كم)(?!\w)(?!(?:\s+\S+){0,2}?\s+من[هها](?!\w))"
+    r"|رقم\s+(?:اللي|الي)\s+(?:[يت]?وصل|ج[اي]|اج[اي])ت?(?:ك|ج|كم)(?!\w)(?!(?:\s+\S+){0,2}?\s+من[هها](?!\w))"
+    + _ON_PHONE +
+    # The text message that brought the code: «المسج اللي وصلك», «رسالة التحقق» (not after "a picture of", see
+    # _secrets, and not «الرسالة اللي وصلتك من رقم غريب»: a message from someone).
+    r"|(?P<msg>(?:رسال[ةه]|مسج)\s+(?:(?:اللي|الي)\s+(?:[يت]?وصل|ج[اي]?|اج[اي]?)ت?(?:ك|ج|كم)(?!\w)"
+    r"(?!\s+من\s+(?!(?:ال)?(?:تطبيق|نظام|برنامج|بنك)))" + _ON_PHONE + r"|(?:ال)?(?:تحقق|تفعيل)(?!\w)))"
     # «الرقم المكون من ستة أرقام» (or «ثلاث مراتب»), «الرقم السداسي», «الرقم اللي ورا الكارت», «الأرقام اللي بالمسج»
     r"|رقم\s+(?:ال)?مكون\s+من\s+(?:\d|ست[ةه]?|[أا]ربع[ةه]?|خمس[ةه]?|ثلاث[ةه]?)\s+(?:[أا]رقام|مراتب|خانات)(?!\w)"
     r"|رقم\s+(?:ال)?سداسي(?!\w)"
@@ -978,7 +986,10 @@ def _secrets(text: str) -> list[tuple[int, int, str]]:
     found = [(m.start(), m.end(), m.group("pfx") or "") for m in CREDENTIAL.finditer(text)
              if not _ON_RECEIPT.match(text, m.end())]
     for m in _SECRET_EXTRA.finditer(text):
-        if not _LAST & {_bare(w) for w in text[max(0, m.start() - 80):m.start()].split()[-4:]}:
+        before = [_bare(w) for w in text[max(0, m.start() - 80):m.start()].split()[-4:]]
+        if m.group("msg") and before[-1:] and (before[-1] in _SHOT or before[-1].startswith(("صور", "لقط"))):
+            continue                                        # «صورة الرسالة اللي وصلتك»: see _HOLDS for one with the code
+        if not _LAST & set(before):
             found.append((m.start(), m.end(), m.group("pfx") or ""))
     return sorted(found)
 
@@ -1225,19 +1236,32 @@ def _asks_in_list(norm: str, pos: list[int]) -> tuple[int, int] | None:
 # "we/it send the code" («we'll send the OTP to ur number»).
 _LAT_SECRET = (r"(?:(?:(?:verification|otp|sms|security|activation|login|online|banking|account|card|app|new|old"
                r"|current|one[\s-]?time|\d[\s-]?digits?)\s+){0,3}(?:code|otp|pin|password|passcode|cvv|cvc)(?![A-Za-z])"
-               r"|(?:\d|three)\s+digits\s+on\s+the\s+back|(?:ال)?(?:كود|رمز)(?!\w))")
+               r"|(?:\d|three)\s+digits\s+on\s+the\s+back|(?:ال)?(?:كود|رمز)(?!\w)"
+               # «the 6 digits you received», «the number we sent you», «the digits in the SMS»
+               r"|(?:(?:\d|six|four|five)[\s-]?)?(?:digits?|numbers?|digit\s+number)(?:\s+(?:that|which))?\s+(?:"
+               r"(?:you|u)(?:'ve|\s+have)?\s+(?:just\s+)?(?:received|got|get|recieved)"
+               r"|(?:we|the\s+(?:app|system|bank))\s+(?:just\s+)?sent\s+(?:to\s+)?(?:you|u)"
+               r"|(?:in|from)\s+(?:the|that|this|your|ur)\s+(?:sms|text|message|msg))(?![A-Za-z])"
+               r"|(?:\d|six|four)[\s-]digits?(?![A-Za-z])(?!\s+(?:on|of|from)\s))")
 _LAT_THE = r"(?:(?:the|your|ur|ال|لل|ل)\s*)?"
 _LATIN_ASK = re.compile(
     r"(?i)(?<![A-Za-z'])(?:"
     r"(?:send(?:ing)?|give|share|tell|te?xt|provide|forward|drop)\s+(?:(?:us|me|it|him|them|the\s+agent)\s+)?"
     rf"(?:(?:the|that|ur|your)\s+(?:sms|msg|message|text)\s+(?:with|containing)\s+)?{_LAT_THE}{_LAT_SECRET}"
-    rf"|read\s+(?:us|me|him|the\s+agent)\s+{_LAT_THE}{_LAT_SECRET}"
+    rf"|read\s+(?:(?:us|me|him|the\s+agent)\s+)?(?:out\s+)?{_LAT_THE}{_LAT_SECRET}"
+    rf"|(?:say|dictate)\s+{_LAT_THE}{_LAT_SECRET}"
     rf"|reply\s+(?:to\s+(?:us|this\s+(?:msg|message|chat|email))\s+)?(?:with|w/)\s+{_LAT_THE}{_LAT_SECRET}"
     rf"|(?:we|i)\s+need\s+{_LAT_THE}{_LAT_SECRET}|need\s+{_LAT_THE}{_LAT_SECRET}\s+from\s+(?:u|you)(?![A-Za-z])"
-    rf"|what(?:'s|’s|\s+is|\s+was)\s+(?:the|your|ur)\s+{_LAT_SECRET}(?!\s+for(?![A-Za-z]))"
+    rf"|what(?:'s|’s|\s+is|\s+was|\s+are|\s+were)\s+(?:the|your|ur)\s+{_LAT_SECRET}(?!\s+for(?![A-Za-z]))"
     r"(?!\s*\?\s*(?:it|this|that)(?:'s|’s|\s+is))"
     rf"|(?:type|write|put|paste|enter)\s+{_LAT_THE}{_LAT_SECRET}\s+(?:here|below|in\s+(?:the|this|ur|your)\s+"
-    r"(?:reply|chat|msg|message))(?![A-Za-z])(?!\s+in\s+the\s+app))")
+    r"(?:reply|chat|msg|message))(?![A-Za-z])(?!\s+in\s+the\s+app)"
+    # With no place named: only where the sentence names no app, screen or ATM (see _asks_in_english).
+    rf"|(?P<type>(?:type|write|enter)\s+(?:(?:us|me)\s+)?{_LAT_THE}{_LAT_SECRET}))")
+# «enter the code in the app», «type your PIN at the ATM», «write the new password on the login screen»: typed into
+# the app, not sent to us.
+_LAT_IN_APP = re.compile(r"(?i)(?<![A-Za-z])(?:app|application|atm|screen|field|website|portal|log\s*in|sign\s*in"
+                         r"|reset|keypad)(?![A-Za-z])")
 # The secret first, then "send it": «the code u got, send it», «We never ask for your password, but pls send it».
 _LATIN_SEND_IT = re.compile(r"(?i)(?<![A-Za-z'])(?:(?:send|share|give|te?xt|forward)\s+it|tell\s+(?:us|me)\s+it"
                             r"|(?:type|write|paste|put)\s+it\s+(?:here|below|in\s+(?:the|this)\s+(?:reply|chat)))"
@@ -1270,6 +1294,11 @@ def _asks_in_english(norm: str, pos: list[int]) -> tuple[int, int] | None:
     for rx in (_LATIN_ASK, _ARABIZI_ASK):
         for m in rx.finditer(norm):
             before = _CLAUSE_END.split(norm[max(0, m.start() - 40):m.start()])[-1]
+            if rx is _LATIN_ASK and m.group("type"):
+                s0, s1 = (max(norm.rfind(c, 0, m.start()) for c in ".!?\n") + 1,
+                          min([x for x in (norm.find(c, m.end()) for c in ".!?") if x >= 0] or [len(norm)]))
+                if _LAT_IN_APP.search(norm, s0, s1):
+                    continue
             if not (_LATIN_NOT.search(before) or (rx is _ARABIZI_ASK and _ARABIZI_NOT.search(before))
                     or _by_us(before)):
                 return _raw(pos, *m.span())

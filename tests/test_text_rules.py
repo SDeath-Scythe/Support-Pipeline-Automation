@@ -815,6 +815,46 @@ def test_held_out_false_alarms_are_not_asking(text):
     assert not _asks(text)
 
 
+# User tests (7 Nov, T04): the code described as "the digits that reached you" or "the message you got", and English
+# requests with other verbs. Each is paired with its warning or negated form.
+@pytest.mark.parametrize("text, asks", [
+    ("هلا بيك، ونحتاج الأرقام الستة اللي وصلتك على تلفونك حتى نوقف الحوالة.", True),
+    ("نحتاج الأرقام اللي وصلتك على تلفونك", True), ("ابعثلنا الأرقام اللي وصلت لتلفونك", True),
+    ("دزلنا الأرقام اللي توصلك", True), ("دزلنا الأرقام الستة اللي وصلتك برسالة", True),
+    ("نحتاج الرقم اللي وصلك على موبايلك", True), ("دزلنا الرسالة اللي وصلتك حتى نكمل.", True),
+    ("دزلنا المسج اللي وصلك", True), ("انسخ المسج اللي وصلك ودزه إلنا", True),
+    ("المسج اللي وصلك دزه إلنا حتى نكمل", True), ("اكتبلنا المسج اللي وصلك من التطبيق", True),
+    ("دزلنا رسالة التحقق", True),
+    ("لا تدز الأرقام اللي توصلك لأي أحد", False), ("الأرقام اللي توصلك برسالة لا تشاركها ويا أحد", False),
+    ("ما نحتاج الأرقام اللي وصلتك على تلفونك", False), ("الرسالة اللي وصلتك لا تدزها لأحد", False),
+    ("المسج اللي وصلك هو من النظام، لا تشاركه", False), ("إذا وصلتك رسالة بيها رمز، لا تدزها لأحد", False),
+    ("دزلنا صورة الرسالة اللي وصلتك", False), ("دزلنا الرسالة اللي وصلتك من الرقم الغريب حتى نبلغ عنه", False),
+    ("ارسلنا رمز جديد على رقمك", False), ("خبرنا إذا الأرقام ما وصلتك على تلفونك", False),
+])
+def test_the_code_described_as_the_digits_or_message_that_arrived(text, asks):
+    assert _asks(text) == asks
+
+
+@pytest.mark.parametrize("text, asks", [
+    ("Please reply with the verification code you received.", True), ("Reply with the 6 digits you received", True),
+    ("tell us the number you received", True), ("read out the code", True), ("read the code out to the agent", True),
+    ("write the code you got", True), ("Please enter the code you received.", True), ("type the OTP", True),
+    ("Please write us the code", True), ("what are the 6 digits you received?", True),
+    ("send us the digits in the SMS", True), ("what is the number we sent you?", True),
+    ("Please enter the code you received in the app.", False), ("Open the app and type the OTP you got.", False),
+    ("type your PIN at the ATM", False), ("enter the code on the login screen", False),
+    ("please enter the OTP\nin the app to complete the transfer", False),
+    ("never enter your PIN anywhere but the app", False), ("do not type the code here", False),
+    ("Do not share the 6 digits you received with anyone.", False), ("we sent you a 6-digit code", False),
+    ("You will receive a 6-digit code by SMS.", False), ("If you did not receive the digits, tap resend.", False),
+    ("We will never ask for the digits you received.", False), ("Please write to us with the reference number", False),
+    ("enter the reference number from the receipt", False), ("The 6-digit code expires in 5 minutes.", False),
+    ("send us the last 4 digits of the card", False),
+])
+def test_english_requests_with_other_verbs(text, asks):
+    assert _asks(text) == asks
+
+
 # --- promise: a time only from the policy facts ---
 
 TICKET_SAYS = "<ticket>\nالتطبيق عالق وكالولي يتصلح خلال يومين\n</ticket>\nKnown facts: none"
