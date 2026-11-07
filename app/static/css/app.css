@@ -264,6 +264,8 @@ body[data-mode="process"] .intro { display: none; }
   padding: 10px 12px; border-radius: 8px; cursor: pointer; border-inline-start: 3px solid transparent;
 }
 .row:hover { background: var(--surface-2); }
+/* Brought into view below the sticky tabs, not under them (second round of role-played test sessions). */
+.row { scroll-margin-top: 64px; scroll-margin-bottom: 8px; }
 .row[aria-selected="true"] { background: var(--accent-tint); border-inline-start-color: var(--accent); }
 /* The meta line: the priority, the id (small, muted), a decided row's icon. A live row's stage and a broken
    run's word come first, with their icon. Inside a tab the status is only in the row's name. */
@@ -806,8 +808,11 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   .actionbar .btn { min-height: 44px; }
   .actionbar .btn-primary { flex: 1; justify-content: center; }
   .no-send { margin-inline-start: 0; flex-basis: 100%; justify-content: center; order: 4; }
-  /* At the top, under the header: at the bottom it sat on the tick and the reasons above the action bar. */
-  .toast { inset-inline: 16px; top: calc(var(--top-h) + 8px); bottom: auto; max-width: none; flex-wrap: nowrap; transform: translateY(-8px); opacity: 0; transition: transform .2s ease, opacity .2s, visibility .2s; }
+  /* Just above the action bar. At the top it covered the next ticket's «القائمة», id and priority after each
+     decision (second round of role-played test sessions); here the pointer goes through it to what is under it,
+     except on its own buttons, and the tick's refusal is never a toast (it is said under the buttons). */
+  .toast { inset-inline: 16px; top: auto; bottom: calc(var(--bar-h) + 8px); max-width: none; flex-wrap: nowrap; transform: translateY(8px); opacity: 0; transition: transform .2s ease, opacity .2s, visibility .2s; pointer-events: none; }
+  .toast .btn { pointer-events: auto; }
   .toast.is-shown { transform: none; opacity: 1; }
   #toastUndo kbd { display: none; }   /* no keyboard shortcut hint on a phone: the toast stays short */
   body[data-mode="process"] .pane-nav { border-bottom: 1px solid var(--line); }
@@ -816,6 +821,21 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   html { scroll-padding-bottom: calc(var(--bar-h) + 16px); scroll-padding-top: 8px; }
   .stage { padding-inline-start: 36px; }
   table.grid { font-size: 13px; }
+}
+
+/* A phone on its side (wide but short): the header keeps to one row, with the new-ticket button as its icon
+   (its name stays), and the new-ticket box keeps at least three lines while its explanation scrolls (second round
+   of role-played test sessions: the header took two rows and the box collapsed to one line with the keyboard up). */
+@media (max-height: 480px) and (min-width: 721px) {
+  .topbar { flex-wrap: nowrap; padding-block: 4px; gap: 10px; }
+  .dev-badge { display: none; }
+  .brand-name { font-size: 15px; }
+  .mode-btn { padding: 4px 10px; min-height: 32px; }
+  #newTicket .btn-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .select-quiet { max-width: 180px; }
+  .new-text { min-height: calc(3 * 1.8em + 24px); }
+  #newNote { max-height: 3.4em; overflow-y: auto; }
+  .dialog-body { padding: 12px 18px; gap: 8px; }
 }
 
 /* A short screen (landscape, or a phone's keyboard open): while the agent types in the draft, the action

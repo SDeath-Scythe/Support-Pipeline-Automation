@@ -7,7 +7,7 @@
 import { checkDraft, ServerError } from "./api.js";
 import { CHECK_SHORT_AR, askMissingAR } from "./labels.js";
 import { S, draftDone, extractionOf, uid } from "./state.js";
-import { cpToUtf16, debounce, el, icon, realDraft, shownDraft, spanned, withTip } from "./util.js";
+import { cpToUtf16, debounce, el, icon, realAt, realDraft, shownAt, shownDraft, spanned, withTip } from "./util.js";
 
 /** The draft and its findings as saved by the pipeline (spans from 1 Nov, or recomputed by the server). */
 export function originalDraft(item) {
@@ -62,13 +62,22 @@ export function buildComposer(item, onUpdate) {
 
   const current = () => check === "ok" && checkedText === text;
 
+  /** A finding's ranges in the box: [start, end] in UTF-16 units of the text as shown (a left-to-right mark before a
+   *  hyphenated number is one unit more, util.js shownDraft). A dialect_words finding has one per word. */
+  function ranges(f) {
+    const shown = ta.value;
+    return (Array.isArray(f.spans) && f.spans.length ? f.spans : [[f.start, f.end]]).map(([a, b]) => {
+      const r = cpToUtf16(text, a, b);
+      return r && [shownAt(shown, r[0]), shownAt(shown, r[1])];
+    }).filter(Boolean);
+  }
+
   function spans() {
     if (checkedText !== text) return [];   // offsets of an older text would land on the wrong words
-    const all = findings.map((f, i) => {
-      const r = cpToUtf16(text, f.start, f.end);
+    const all = findings.flatMap((f, i) => {
       const block = isBlocking(f.kind);
-      return r && { start: r[0], end: r[1], block, make: (s) => el("mark", { class: `finding ${block ? "is-blocking" : "is-warn"}`, dataset: { finding: String(i) }, text: s }) };
-    }).filter(Boolean);
+      return ranges(f).map(([a, b]) => ({ start: a, end: b, block, make: (s) => el("mark", { class: `finding ${block ? "is-blocking" : "is-warn"}`, dataset: { finding: String(i) }, text: s }) }));
+    });
     // Where a warning and a blocking finding overlap (a card number is also an unknown number), the phrase
     // that stops the approval is the one drawn, whole.
     const blocks = all.filter((x) => x.block);
@@ -96,14 +105,16 @@ export function buildComposer(item, onUpdate) {
     if (findings.length) {   // while a newer check runs, the last answer stays listed (not highlighted)
       items.push(el("ul", { class: "checks-list", "aria-label": "فحص المسودة" }, findings.map((f, i) => {
         const block = isBlocking(f.kind);
-        const r = cpToUtf16(text, f.start, f.end);
+        const r = ranges(f)[0];
         // ask_missing has nothing in the draft to point at (an empty span at its end): it names the fields.
         const why = f.kind === "ask_missing" ? askMissingAR(f.fields).ask : S.meta.check_ar?.[f.kind] || f.kind;
+        // dialect_words names every word it found («نرجو»، «وكذلك»)
+        const words = Array.isArray(f.words) && f.words.length ? f.words : f.text ? [f.text] : [];
         const b = el("button", { type: "button", class: `check-item ${block ? "is-blocking" : "is-warn"}` },
           icon(block ? "lock" : "check"),
           el("span", { class: "check-tag", text: block ? "يمنع الاعتماد" : "انتبه" }),
           el("span", { class: "check-why", text: why }),
-          f.text ? el("span", { class: "check-text", dir: "rtl", text: `«${f.text}»` }) : null);
+          words.length ? el("span", { class: "check-text", dir: "rtl", text: words.map((w) => `«${w}»`).join("، ") }) : null);
         b.addEventListener("mouseenter", () => light(i, true));
         b.addEventListener("mouseleave", () => light(i, false));
         b.addEventListener("focus", () => light(i, true));
@@ -150,12 +161,14 @@ export function buildComposer(item, onUpdate) {
 
   function changed(e) {
     // Typed or pasted text is shown like the draft was: a no-break space between digit groups, a
-    // non-breaking hyphen in a reference. One character for one, so the caret stays where it was. Not
-    // while an input method is composing (it would break the word being composed).
+    // non-breaking hyphen in a reference, a left-to-right mark before a hyphenated number. The caret keeps its
+    // place in the real text (a mark added before it moves it one along). Not while an input method is
+    // composing (it would break the word being composed).
     if (!e?.isComposing && shownDraft(ta.value) !== ta.value) {
       const [from, to, way] = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection];
+      const [rf, rt] = [realAt(ta.value, from), realAt(ta.value, to)];
       ta.value = shownDraft(ta.value);
-      ta.setSelectionRange(from, to, way);
+      ta.setSelectionRange(shownAt(ta.value, rf), shownAt(ta.value, rt), way);
     }
     const shown = ta.value;
     text = shown === shownDraft(orig.text) ? orig.text : realDraft(shown);

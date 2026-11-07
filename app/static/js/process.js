@@ -11,7 +11,7 @@ import {
 import { QUICK_S, S, restoreDecisions, summarize } from "./state.js";
 import { showToast } from "./ui.js";
 import {
-  add, digitRuns, dict, el, fmtInt, ltr, median, mono, num, openDialog, plainText, reducedMotion, richText, spanned, stampOwn,
+  add, collapseBlank, digitRuns, dict, el, fmtInt, ltr, median, mono, num, openDialog, plainText, reducedMotion, richText, spanned, stampOwn,
   ticketId, ticketsAr, westernDigits,
 } from "./util.js";
 
@@ -66,16 +66,20 @@ const BUSY_AR = "اكو تذكرة دتنعالج هسه، انتظر لما ت�
 // its digits are written (the slip, the cleaned text, the models' answers and prompts, the draft, the team
 // note) until «اظهر الرقم». One reveal, for the ticket on screen: opening another ticket hides it again. The
 // list never shows it.
-const H = { key: null, text: "", spans: [], digits: [], shown: false };
+const H = { key: null, plain: "", text: "", spans: [], digits: [], shown: false };
 const hideTexts = new WeakMap();   // a box drawn by hideBox → its text
 
-/** The numbers to hide in the ticket on screen: its result's secret_spans in `text` (the message as the
- *  slip shows it); ranges that do not fit are dropped. Another ticket starts hidden. */
-function setHidden(key, text, result) {
+/** The numbers to hide in the ticket on screen: its result's secret_spans in `plain` (the message without
+ *  direction controls), moved to the slip's text (blank lines kept to one, util.js collapseBlank); ranges that do
+ *  not fit are dropped. Another ticket starts hidden. */
+function setHidden(key, plain, result) {
   if (key !== H.key) H.shown = false;
+  const c = collapseBlank(plain);
+  const text = c.text;
   H.key = key;
+  H.plain = plain;
   H.text = text;
-  H.spans = fitSpans(result?.secret_spans, text);
+  H.spans = fitSpans(fitSpans(result?.secret_spans, plain).map(([s, e]) => [c.at(s), c.at(e)]), text);
   H.digits = [...new Set(H.spans.map(([s, e]) => westernDigits(text.slice(s, e)).replace(/[^0-9]/g, "")).filter(Boolean))];
 }
 const PLAIN = { slip: digitRuns, runs: digitRuns, rich: richText, plain: (t) => t };
@@ -99,6 +103,13 @@ function refreshHidden() {
   if (row) row.hidden = !H.spans.length;
   const btn = $("pSecretToggle");
   if (btn) btn.textContent = H.shown ? SECRET_HIDE_AR : SECRET_SHOW_AR;
+}
+/** Leaving «كيف يشتغل»: a number the agent revealed here is hidden again, so the hidden view keeps no digits in
+ *  its nodes (second round of role-played test sessions: they stayed in the DOM after a switch to «وضع الموظف»). */
+export function hideSecretsAgain() {
+  if (!H.shown) return;
+  H.shown = false;
+  refreshHidden();
 }
 /** A row's text in the side list: a hidden number is «••••», and is never shown here. */
 function rowText(text, result) {
@@ -352,8 +363,9 @@ export function liveEvent(item, e) {
 /** The ticket's trace: its text (the slip), each stage, and the result. `result`, when known, says which
  *  numbers to hide (a live one's comes with its result event: render). */
 function buildView(ticket, origin, result = null) {
-  const shown = plainText(ticket.text).text;
-  setHidden(P.current, shown, result);
+  const plain = plainText(ticket.text).text;
+  setHidden(P.current, plain, result);
+  const shown = H.text;
   const list = el("ol", { class: "stages" });
   for (const [id, name, kind, desc] of STAGES) {
     const model = kind !== "rule" ? S.meta.models[kind] : null;
@@ -440,7 +452,7 @@ function render(e) {
   const d = e.data || {};
   if (e.stage === "result") {
     if (!H.spans.length && d.secret_spans) {   // a live run: its numbers are known once it ends
-      setHidden(H.key, H.text, d);
+      setHidden(H.key, H.plain, d);
       refreshHidden();
     }
     return renderResultBox(d, P.tickets.find((t) => t.id === P.current), e.own);

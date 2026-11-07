@@ -8,11 +8,11 @@
 
 import { NetworkError, ServerError } from "./api.js";
 import { buildComposer, isBlocking, originalDraft } from "./composer.js";
-import { factLine, factsOf, fitSpans, textWithFacts } from "./facts.js";
+import { factLine, factsOf, fitSpans, secretMask, secretRanges, textWithFacts } from "./facts.js";
 import {
   ACTION_ICON, ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, DRAFT_REASONS, FIELD_AR, IDENTITY_IF_REPLY_AR, NOT_NEEDED_AR,
-  PRIORITY_AR, QUIET_AR, SECRET_HIDE_AR, SECRET_MASK, SECRET_SHOW_AR, STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL,
-  TICK_IDENTITY_AND_REST, WHY_AR, askMissingAR, notNeededAR,
+  PRIORITY_AR, PRIORITY_RANK, QUIET_AR, SECRET_HIDE_AR, SECRET_MASK, SECRET_SHOW_AR, STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL,
+  TICK_IDENTITY_AND_REST, WHY_AR, WHY_ESC_AR, askMissingAR, complaintAR, notNeededAR, secretAdviceAR,
 } from "./labels.js";
 import {
   QUICK_S, S, allItems, correctedFor, correctionsOf, decide, draftDone, effective, errorEvent, escalatesNow, ev, extractionOf, findItem,
@@ -21,8 +21,8 @@ import {
 } from "./state.js";
 import { hideToastIf, setBanner, showToast, toastShows } from "./ui.js";
 import {
-  MOD, add, coarsePointer, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, masked, median, num, plainText,
-  richText, ticketId, ticketsAr, typingIn,
+  MOD, add, coarsePointer, collapseBlank, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, masked, median, num,
+  plainText, richText, rtlStarts, rtlText, spanned, ticketId, ticketsAr, typingIn, westernDigits,
 } from "./util.js";
 
 const hooks = { toProcess: null, newTicket: null, rerun: null, cancelLive: null, reload: null };
@@ -69,6 +69,15 @@ const PAGE_FLAG_AR = dict({ connection_lost: "انقطع الاتصال" });
 const flagShort = (f) => String(S.meta.flag_ar[f] || PAGE_FLAG_AR[f] || f).split(/[:،]/)[0].trim();
 /** A flag as one sentence with no colon in it (WHY_AR, else the server's wording joined with «، »). */
 const flagSentence = (f) => WHY_AR[f] || `${String(S.meta.flag_ar[f] || PAGE_FLAG_AR[f] || f).replace(/\s*:\s*/g, "، ")}.`;
+/** A flag's sentence for this ticket: what the customer wrote (secret_kinds) and why complaint_risk fired
+ *  (complaint_reasons) when the result says; on an escalation, what the receiving team does (WHY_ESC_AR). */
+function flagSentenceFor(it, f) {
+  const r = it.result || {};
+  if (r.outcome === "escalated" && WHY_ESC_AR[f]) return WHY_ESC_AR[f];
+  if (f === "secret_in_ticket") return secretAdviceAR(r.secret_kinds).why;
+  if (f === "complaint_risk") return complaintAR(r.complaint_reasons).why;
+  return flagSentence(f);
+}
 /** The shortcut letters, only while single-key shortcuts are on and not on a touch screen: « (T / ف)». */
 const keys = (latin, ar) => (S.prefs.singleKeys && !coarsePointer() ? ` (${latin} / ${ar})` : "");
 /** A button's pointer hint: what it does and its key (the key chips are gone from the buttons; every key
@@ -80,15 +89,27 @@ function prioNode(p) {
 }
 /** The same as words, with no pill (where it sits beside other words: the two models' answers). */
 const prioText = (p) => (p ? [ltr(p), ` · ${PRIORITY_AR[p] || ""}`] : "بدون أولوية");
-/** The customer's message as the page shows it (direction controls dropped). */
-const shownText = (it) => plainText(it.ticket.text || ev(it, "received")?.data?.text || "").text;
-/** The card numbers and codes the customer wrote (result.secret_spans: [start, end] in UTF-16 units of
- *  shownText), hidden until the agent asks to see them. Ranges that do not fit the text are dropped. */
-const secretSpans = (it, text) => fitSpans(it.result?.secret_spans, text);
+/** The customer's message as the pipeline read it, direction controls dropped: what result.secret_spans count in. */
+const plainOf = (it) => plainText(it.ticket.text || ev(it, "received")?.data?.text || "").text;
+/** The message as the page shows it: plainOf with each run of blank lines kept to one (collapseBlank). */
+const shownText = (it) => collapseBlank(plainOf(it)).text;
+/** The card numbers and codes the customer wrote (result.secret_spans: [start, end] in UTF-16 units of the
+ *  message without direction controls), moved to `text` (shownText, blank lines collapsed) and hidden until the
+ *  agent asks to see them. Ranges that do not fit are dropped. */
+function secretSpans(it, text) {
+  const plain = plainOf(it);
+  const c = collapseBlank(plain);
+  return fitSpans(fitSpans(it.result?.secret_spans, plain).map(([s, e]) => [c.at(s), c.at(e)]), text);
+}
+/** The digits of each hidden number, to hide them wherever a note writes them again (the team note). */
+const secretDigits = (it) => {
+  const text = shownText(it);
+  return [...new Set(secretSpans(it, text).map(([s, e]) => westernDigits(text.slice(s, e)).replace(/[^0-9]/g, "")).filter(Boolean))];
+};
 /** A row's text: the start of the message, with a card number or a code hidden (never revealed here). */
 const firstWords = (it) => {
   const text = shownText(it);
-  return masked(text, secretSpans(it, text), SECRET_MASK).replace(/\s+/g, " ").slice(0, 140);
+  return rtlText(masked(text, secretSpans(it, text), SECRET_MASK).replace(/\s+/g, " ").slice(0, 140));
 };
 /** A flag shown as a muted note and never ticked (meta.quiet_flags: instructions_in_ticket). */
 const isQuiet = (f) => (S.meta.quiet_flags || []).includes(f);
@@ -134,6 +155,8 @@ function whyLine(it) {
   const identity = identityOnEscalation(it) ? ` ${IDENTITY_IF_REPLY_AR}` : "";
   if (it.status === "lost") return box("bad", "انقطع الاتصال قبل ما تخلص المعالجة.", "اقراها وقرر، أو شغّلها مرة ثانية.");
   if (it.status === "cancelled") return box("bad", "انلغت المعالجة قبل ما تكمل.", `اقراها وقرر.${identity}`);
+  // The spending cap is not an error: it is said as what it is (second round of role-played test sessions).
+  if ((r.flags || []).includes("budget_reached")) return box("bad", "متصعّدة:", `${WHY_AR.budget_reached}${identity}`);
   if (err) return box("bad", `صار خطأ: ${err.data?.error || ""}`, `التذكرة راحت لموظف بدون مسودة.${identity}`);
   // The agent's correction made it a type that is never drafted: no reply, whatever the pipeline wrote.
   if (r.outcome !== "escalated" && escalatesNow(it)) {
@@ -143,17 +166,41 @@ function whyLine(it) {
   // identity check comes first, as in the list above the draft.
   if (r.outcome === "flagged" || (r.outcome === "drafted" && needsIdentity(it))) {
     // The two answers are offered under the message (choiceBox), and its question asks for the type.
-    const sentence = (f) => (f === "recheck_used_second" && hasChoice(it) ? "النموذجين اختلفوا بنوع المشكلة." : flagSentence(f));
+    const sentence = (f) => (f === "recheck_used_second" && hasChoice(it) ? "النموذجين اختلفوا بنوع المشكلة." : flagSentenceFor(it, f));
+    // A missing field the agent marked as not needed, or one the draft check found the customer cannot give (a lost
+    // receipt), is no longer a point; the line follows the points as they are now (second round of test sessions).
+    const notNeeded = notNeededFields(it);
     const said = [...(needsIdentity(it) ? [WHY_AR.account_risk] : []),
-      ...(r.flags || []).filter((f) => !f.startsWith("draft:") && f !== "account_risk" && !isQuiet(f)).map(sentence)];
-    return box("warn", "تحتاج تأكيد:", said.join(" ") || "بالمسودة شي لازم تراجعه، شوف الفحص تحت المسودة.");
+      ...(r.flags || []).filter((f) => !f.startsWith("draft:") && f !== "account_risk" && !isQuiet(f)
+        && !(f.startsWith("missing:") && notNeeded.has(f.slice(8)))).map(sentence)];
+    if (said.length) return box("warn", "تحتاج تأكيد:", said.join(" "));
+    // Only the draft's warnings: said while the draft has one; once an edit clears them, nothing is left to say.
+    const st = composer && S.agent.openKey === it.key ? composer.state() : null;
+    if (st && st.current && !st.findings.length) return null;
+    return box("warn", "تحتاج تأكيد:", "بالمسودة شي لازم تراجعه، شوف الفحص تحت المسودة.");
   }
   if (r.outcome === "escalated") {
+    // The agent corrected a fraud escalation to another type: the banner says what to do now, not «احتيال».
+    const fixedAway = correctedFor(it).subcategory && !S.meta.subcategories[correctedFor(it).subcategory]?.always_escalate;
+    if ((r.flags || []).includes("fraud") && fixedAway) {
+      const team = forwardTeam(it);
+      return box("warn", "صحّحت النوع:", team ? `حوّلها ${toTeam(teamAr(team))}، أو استلمها.` : "اختار القسم وحوّلها، أو استلمها.");
+    }
     if ((r.flags || []).includes("fraud")) return box("bad", "احتمال احتيال: ماكو رد للزبون.", "حوّلها أو استلمها.");
-    return box("bad", "متصعّدة:", ((r.flags || []).filter((f) => !isQuiet(f)).map(flagSentence).join(" ") || "يستلمها موظف بدون مسودة.") + identity);
+    return box("bad", "متصعّدة:", ((r.flags || []).filter((f) => !isQuiet(f)).map((f) => flagSentenceFor(it, f)).join(" ") || "يستلمها موظف بدون مسودة.") + identity);
   }
   return null;
 }
+/** The fields that are not a point any more on this ticket: marked «ما يحتاج بهالتذكرة» by the agent, and the
+ *  reference when the draft check found the customer lost the receipt (ask_missing's reference_lost). */
+function notNeededFields(it) {
+  const out = new Set(S.notNeeded.get(uid(it)) || []);
+  const st = composer && S.agent.openKey === it.key ? composer.state() : null;
+  const found = st ? st.findings : originalDraftFindings(it);
+  if (found.some((f) => f.kind === "ask_missing" && (f.fields || []).includes("reference_lost"))) out.add("reference");
+  return out;
+}
+const originalDraftFindings = (it) => originalDraft(it).findings || [];
 /** whyLine, or an empty slot with its id, so a correction can put the line in or take it out. */
 const whySlot = (it) => whyLine(it) || el("p", { id: "whyLine", hidden: true });
 
@@ -404,6 +451,11 @@ export function setTab(id, { openFirst = false, focusTab = false } = {}) {
     renderWhy();
   }
   renderQueue();
+  // On a phone the queue is the page: another tab starts at the top of its list, not at the last tab's place.
+  if (isPhone() && document.body.dataset.screen !== "ticket") {
+    const top = $("agentQueue")?.getBoundingClientRect().top;
+    if (top != null && top < 0) document.scrollingElement.scrollBy(0, top);
+  }
   if (focusTab) $(`tab-${id}`)?.focus();
 }
 
@@ -489,7 +541,8 @@ function titleChips(it) {
   const e = effective(it);
   const c = correctionsOf(it);
   return el("div", { id: "titleChips", class: "title-chips" }, it.status === "running" ? null : prioNode(e.priority),
-    c.priority && c.priority !== it.result?.priority ? el("span", { class: "fixed-tag", text: "صحّحتها" }) : null,
+    // a space first: glued to the word before it, Arabic letters join across the two elements («شكوى» read «شكود»)
+    c.priority && c.priority !== it.result?.priority ? [" ", el("span", { class: "fixed-tag", text: "صحّحتها" })] : null,
     el("span", { class: "title-tools" },
       el("button", { type: "button", class: "btn btn-quiet btn-small why-toggle", "aria-controls": "why",
         "aria-expanded": String(document.body.classList.contains("why-open")), title: keyTitle("كيف انحسمت", "W", "ص"),
@@ -523,7 +576,7 @@ function ticketView(it) {
     return art;
   }
   if (escalatesNow(it)) {
-    add(art, handoffSection(it), customerSection(it), reasonsBox(it), actionBar(it));
+    add(art, handoffSection(it), customerSection(it), reasonsBox(it), fraudTickBox(it), actionBar(it));
     return art;
   }
   // Read the message (and choose the type), read the draft, tick what to check, decide: the tick sits
@@ -575,7 +628,7 @@ function summaryBox(it) {
   const inBanner = new Set(it.result?.outcome === "flagged"
     ? (it.result.flags || []).filter((f) => f.startsWith("missing:")).map((f) => FIELD_AR[f.slice(8)] || f.slice(8)) : []);
   const miss = escalatesNow(it) || decided ? null : (missingOf(it) || []).filter((m) => !inBanner.has(m));
-  const fixed = (k) => (c[k] && c[k] !== (k === "subcategory" ? subOf(it) : it.result?.[k]) ? el("span", { class: "fixed-tag", text: "صحّحتها" }) : null);
+  const fixed = (k) => (c[k] && c[k] !== (k === "subcategory" ? subOf(it) : it.result?.[k]) ? [" ", el("span", { class: "fixed-tag", text: "صحّحتها" })] : null);
   const second = secondRequest(it);
   const quiet = decided ? [] : (it.result?.flags || []).filter(isQuiet);
   const sep = () => el("span", { class: "sep", "aria-hidden": "true", text: " · " });
@@ -638,7 +691,11 @@ function fixPanel(it) {
   subSel.value = e.subcategory || "";
   subSel.addEventListener("change", () => {
     const r = routeFor(subSel.value, extractionOf(it));
-    set({ subcategory: subSel.value || null, ...(r.team ? r : {}) });
+    // The team follows the type; the priority never goes down by itself: a P1 the pipeline raised (fraud, a large
+    // amount) stays P1 unless the agent lowers it here (second round of role-played test sessions).
+    const now = effective(it).priority;
+    const priority = r.priority && now && PRIORITY_RANK[now] < PRIORITY_RANK[r.priority] ? now : r.priority;
+    set({ subcategory: subSel.value || null, ...(r.team ? { team: r.team, priority } : {}) });
     $("fixSub")?.focus();
   });
   const teamSel = el("select", { id: "fixTeam" }, el("option", { value: "", text: "—" }),
@@ -651,8 +708,12 @@ function fixPanel(it) {
     ["P1", "P2", "P3"].map((p) => el("option", { value: p, text: `${p} · ${PRIORITY_AR[p]}` })));
   prSel.value = e.priority || "";
   prSel.addEventListener("change", () => { set({ priority: prSel.value || null }); $("fixPrio")?.focus(); });
+  // The priority kept above the type's own: said, so the agent can lower it on purpose.
+  const rule = e.subcategory ? routeFor(e.subcategory, extractionOf(it)).priority : null;
+  const kept = rule && e.priority && PRIORITY_RANK[e.priority] < PRIORITY_RANK[rule];
   return el("div", { id: "fixPanel", class: "fix-panel" },
-    el("p", { class: "hint", text: "التصحيح ينحفظ ويا قرارك، حتى نعرف وين يغلط النظام. تغيير النوع يغيّر القسم والأولوية حسب القواعد." }),
+    el("p", { class: "hint", text: "التصحيح ينحفظ ويا قرارك، حتى نعرف وين يغلط النظام. تغيير النوع يغيّر القسم حسب القواعد، والأولوية ما تنزل وحدها." }),
+    kept ? el("p", { id: "fixPrioNote", class: "hint hint-warn", text: `الأولوية بقت ${e.priority}: هذا النوع عادةً ${rule}. إذا تريد تنزّلها، اختارها هنا.` }) : null,
     el("div", { class: "fix-fields" },
       el("label", {}, el("span", { text: "النوع" }), subSel),
       el("label", {}, el("span", { text: "القسم" }), teamSel),
@@ -680,6 +741,7 @@ function refreshAfterCorrection(it) {
   // A correction to (or away from) a blocked account or a SIM change changes the line at the top.
   keepPlace(composer?.node, () => $("whyLine")?.replaceWith(whySlot(it)));
   $("handoffBox")?.replaceWith(handoffSection(it));
+  $("fraudTick")?.replaceWith(fraudTickBox(it));
   $("choiceBox")?.replaceWith(choiceBox(it));
   refreshGate(it);
   refreshActions(it);   // an escalation has no gate: its bar is drawn here
@@ -688,7 +750,8 @@ function refreshAfterCorrection(it) {
   renderWhy();
   rowInView(it);
 }
-/** A correction can re-sort the queue (a new priority), a live ticket comes back: the open row stays in view. */
+/** A correction can re-sort the queue (a new priority), a live ticket comes back, a decision opens the next one:
+ *  the open row stays in view, clear of the sticky tabs (its scroll-margin-top, app.css). */
 export function rowInView(it) {
   if (it && !isPhone()) $(`opt-${it.key}`)?.scrollIntoView({ block: "nearest" });
 }
@@ -697,19 +760,26 @@ export function rowInView(it) {
  *  the same facts written the normal way. (When nothing read the ticket, the summary line says so.) A card
  *  number or a code the customer wrote is «••••» until the agent presses «اظهر الرقم» (this ticket only). */
 function customerSection(it) {
-  // Direction controls are dropped: the agent reads the order the model and the rules read.
+  // Direction controls are dropped: the agent reads the order the model and the rules read. Runs of blank lines are
+  // kept to one (a padded message pushed the draft off the screen), and said.
   const raw = plainText(it.ticket.text || ev(it, "received")?.data?.text || "");
-  const text = raw.text;
+  const blank = collapseBlank(raw.text);
+  const text = blank.text;
   const secrets = secretSpans(it, text);
   const hide = secrets.length && revealedFor !== uid(it) ? secrets : [];
   // A fact read from a hidden number is hidden in the facts line too.
   const facts = factsOf(extractionOf(it), text, subOf(it)).map((f) => (f.at && hide.some(([s, e]) => f.at.start < e && s < f.at.end)
     ? { ...f, value: () => SECRET_MASK } : f));
-  const body = el("p", { class: "customer-text", dir: "rtl", lang: "ar" }, textWithFacts(text, facts, hide));
+  // A mostly Arabic paragraph that starts with a Latin word («SYSTEM: …») reads right to left (util.js rtlStarts).
+  const body = el("p", { class: "customer-text", dir: "rtl", lang: "ar" }, textWithFacts(text, facts, hide, rtlStarts(text)));
   const sec = el("section", { id: "custBox", class: "customer", "aria-labelledby": "custTitle" }, el("h3", { id: "custTitle", class: "section-title", text: "رسالة الزبون" }));
   if (raw.hidden) {
     sec.append(el("p", { class: "hint hint-warn" }, icon("check"),
       `بالنص ${raw.hidden === 1 ? "رمز اتجاه مخفي واحد" : raw.hidden === 2 ? "رمزين اتجاه مخفيين" : `${raw.hidden} رموز اتجاه مخفية`} يغيّر ترتيب الكتابة. شلناها، فالنص هنا بالترتيب اللي قراه النظام.`));
+  }
+  if (blank.removed) {
+    sec.append(el("p", { id: "blankNote", class: "hint" }, icon("check"),
+      `انشالت ${blank.removed === 1 ? "سطر فارغ واحد" : blank.removed === 2 ? "سطرين فارغين" : blank.removed <= 10 ? `${blank.removed} سطور فارغة` : `${blank.removed} سطر فارغ`} من الرسالة، حتى تبين باقي التذكرة.`));
   }
   sec.append(body);
   if (facts.length) sec.append(factLine(facts, body));
@@ -718,6 +788,7 @@ function customerSection(it) {
       onclick: () => {
         revealedFor = hide.length ? uid(it) : null;
         $("custBox")?.replaceWith(customerSection(it));
+        $("handoffBox")?.replaceWith(handoffSection(it));   // the team note's copy of the number follows
         $("secretToggle")?.focus();
       } }, hide.length ? SECRET_SHOW_AR : SECRET_HIDE_AR)));
   }
@@ -767,19 +838,27 @@ function confirmTargets(it, st) {
   const list = [];
   const push = (id, words) => { if (!list.some((x) => x.ask === words.ask)) list.push({ id, ...words }); };
   if (needsIdentity(it)) push("account_risk", CONFIRM_AR.account_risk);
-  const notNeeded = S.notNeeded.get(uid(it)) || new Set();
-  for (const f of it.result?.flags || []) {
+  const notNeeded = notNeededFields(it);
+  const r = it.result || {};
+  for (const f of r.flags || []) {
     if (f.startsWith("draft:") || f === "account_risk" || isQuiet(f)) continue;   // a quiet flag is a note, not a point
     // A missing field: the reply asks for it, or the agent says this ticket does not need it.
     const field = f.startsWith("missing:") ? f.slice(8) : null;
     if (field && notNeeded.has(field)) push(`${f}:not_needed`, { ...notNeededAR(FIELD_AR[field] || field), field });
+    else if (f === "secret_in_ticket") push(f, secretAdviceAR(r.secret_kinds));
+    else if (f === "complaint_risk") push(f, complaintAR(r.complaint_reasons));
     else push(f, { ...(CONFIRM_AR[f] || CONFIRM_OTHER), field });
   }
   if (secondRequest(it)) push("second_request", CONFIRM_AR.second_request);
   for (const f of st.findings) {
     if (isBlocking(f.kind)) continue;
-    push(`draft:${f.kind}`, f.kind === "ask_missing" ? askMissingAR(f.fields)
-      : CONFIRM_AR[`draft:${f.kind}`] || { ask: S.meta.check_ar?.[f.kind] ?? f.kind, done: "قريت التنبيه" });
+    if (f.kind === "ask_missing") {
+      // A field marked not needed is not asked for again; nothing left: no point.
+      const fields = (f.fields || []).filter((x) => !notNeeded.has(x));
+      if (fields.length || !(f.fields || []).length) push("draft:ask_missing", askMissingAR(fields));
+      continue;
+    }
+    push(`draft:${f.kind}`, CONFIRM_AR[`draft:${f.kind}`] || { ask: S.meta.check_ar?.[f.kind] ?? f.kind, done: "قريت التنبيه" });
   }
   if (retargeted(it)) {
     const other = effective(it).subcategory !== subOf(it) ? "draft_for_other_type" : "draft_for_other_team";
@@ -822,6 +901,12 @@ function refreshGate(it) {
   if (!composer || S.agent.openKey !== it.key) return;
   const st = composer.state();
   const t = confirmTargets(it, st);
+  // The line at the top says what is left to check: an edit that clears the draft's warning takes its sentence away.
+  const why = $("whyLine");
+  if (why && !S.decisions.has(it.key)) {
+    const next = whySlot(it);
+    if (why.textContent !== next.textContent || why.hidden !== next.hidden) keepPlace(composer.node, () => why.replaceWith(next));
+  }
   const u = uid(it);
   if (S.acks.has(u) && S.acks.get(u) !== t.key) S.acks.delete(u);   // the thing to confirm changed: tick again
   const box = $("confirmBox");
@@ -874,12 +959,16 @@ function handoffSection(it) {
   const lines = note.split("\n").map((l) => l.trim()).filter(Boolean);
   // Every line comes from rules, except «الخلاصة»: a model wrote it from the ticket alone (handoff.py).
   const SUMMARY = "الخلاصة";
+  // A card number or a code hidden in the message is hidden here too, wherever a line writes it again (the summary
+  // can copy it): the same «اظهر الرقم» shows both (second round of role-played test sessions).
+  const digits = revealedFor === uid(it) ? [] : secretDigits(it);
+  const line = (t) => spanned(t, secretRanges(t, digits).map(([a, b]) => ({ start: a, end: b, make: secretMask })), richText);
   const dl = el("dl", { class: "handoff-list" }, lines.map((l) => {
     const i = l.indexOf(":");
     const k = l.slice(0, i);
     return i > 0 && i < 20 ? el("div", {}, el("dt", {}, k, k === SUMMARY ? el("span", { class: "dt-tag", text: "كتبها نموذج" }) : null),
-      el("dd", { dir: "auto" }, richText(l.slice(i + 1).trim())))
-      : el("div", {}, el("dd", { dir: "auto" }, richText(l)));
+      el("dd", { dir: "auto" }, line(l.slice(i + 1).trim())))
+      : el("div", {}, el("dd", { dir: "auto" }, line(l)));
   }));
   const byModel = lines.some((l) => l.startsWith(`${SUMMARY}:`));
   // The note was written for the pipeline's type and team: after a correction it is marked as the
@@ -943,8 +1032,8 @@ function decidedSection(it, d) {
   const reasons = (d.reason_codes || []).map((c) => S.meta.reason_codes_ar[c] || c);
   const corrText = corrWords(d.corrected || {});
   let body = null;
-  if (final != null && d.action !== "took_over") body = [el("p", { class: "decided-k", text: "الرد اللي اعتمدته:" }), el("blockquote", { class: "decided-text", dir: "rtl" }, digitRuns(final))];
-  else if (d.action === "approved" && orig) body = [el("p", { class: "decided-k", text: "المسودة انعتمدت كما هي:" }), el("blockquote", { class: "decided-text", dir: "rtl" }, digitRuns(orig))];
+  if (final != null && d.action !== "took_over") body = [el("p", { class: "decided-k", text: "الرد اللي اعتمدته:" }), el("blockquote", { class: "decided-text", dir: "rtl" }, digitRuns(rtlText(final)))];
+  else if (d.action === "approved" && orig) body = [el("p", { class: "decided-k", text: "المسودة انعتمدت كما هي:" }), el("blockquote", { class: "decided-text", dir: "rtl" }, digitRuns(rtlText(orig)))];
   else if (d.action === "edited") body = el("p", { class: "hint" }, "انعدّلت قبل الاعتماد", d.edit_chars != null ? [" (", charsAr(d.edit_chars), ")"] : "", ". السجل يحفظ بصمة الرد بس، مو نصه.");
   return el("section", { class: "decided", "aria-labelledby": "decidedTitle" },
     // A forward names the team it went to (the corrected one, if the agent corrected it).
@@ -955,6 +1044,27 @@ function decidedSection(it, d) {
     d.action === "took_over" ? el("p", { class: "hint", text: TOOK_OVER_NEXT }) : null,
     reasons.length ? el("p", { class: "hint" }, "الأسباب: ", reasons.join("، ")) : null,
     corrText.length ? el("p", { class: "hint" }, "صحّحت: ", corrText.join("، ")) : null);
+}
+
+/** A ticket served as fraud (the fraud flag, or a type that is never drafted) that the agent will forward to another
+ *  team than fraud: it needs a tick first, logged as fraud_team_changed (second round of role-played test sessions:
+ *  C, Tab, ↓↓, Esc, F sent a P1 fraud escalation to the tech team with no confirmation). */
+function fraudForward(it) {
+  const served = flagsOf(it).includes("fraud") || !!S.meta.subcategories[subOf(it)]?.always_escalate;
+  const team = forwardTeam(it);
+  return served && !!team && team !== (S.meta.security_team || "fraud");
+}
+const FRAUD_ACK = "fraud_team_changed";
+function fraudTickBox(it) {
+  if (!fraudForward(it)) return el("div", { id: "fraudTick", tabindex: "-1" });
+  const u = uid(it);
+  return el("div", { id: "fraudTick", class: "confirm is-one", tabindex: "-1", role: "group", "aria-labelledby": "fraudTickTitle" },
+    el("p", { id: "fraudTickTitle", class: "sr-only", text: CONFIRM_AR[FRAUD_ACK].ask }),
+    el("div", { class: "confirm-row" },
+      el("label", { class: "confirm-check" },
+        el("input", { type: "checkbox", id: "fraudAck", checked: S.acks.get(u) === FRAUD_ACK,
+          onchange: (e) => { if (e.target.checked) S.acks.set(u, FRAUD_ACK); else S.acks.delete(u); refreshActions(it); } }),
+        el("span", { text: CONFIRM_AR[FRAUD_ACK].done }))));
 }
 
 /** Where «حوّلها» sends an escalation: the team as the agent now sees it, but none while the two models
@@ -1156,10 +1266,16 @@ export async function forward() {
   if (!it || deciding || settling() || !escalatesNow(it)) return;
   disarm();   // F after an armed take-over: the forward, with none of the take-over's reasons
   if (!forwardTeam(it)) return askForTeam(it);
+  const fraud = fraudForward(it);
+  if (fraud && S.acks.get(uid(it)) !== FRAUD_ACK) {
+    $("fraudTick")?.scrollIntoView({ block: "nearest" });
+    $("fraudAck")?.focus({ preventScroll: true });
+    return showToast(`أشّر على «${CONFIRM_AR[FRAUD_ACK].done}» أول.`);
+  }
   const at = itemsInTab(S.agent.tab).findIndex((x) => x.key === it.key);
   deciding = true;
   try {
-    const record = await decide(it, "forwarded");
+    const record = await decide(it, "forwarded", { acknowledged: fraud ? [FRAUD_ACK] : [] });
     after(it, record, at);
   } catch (e) {
     await failed(e, it);
@@ -1202,6 +1318,7 @@ function after(it, record, at) {
   renderTicket();
   renderWhy();
   if (next && S.agent.tab !== tab) settle(SWITCH_SETTLE_MS);   // another tab: a little longer before deciding
+  rowInView(next);
   (next ? $("ticketTitle") : $("doneTitle"))?.focus();
 }
 
@@ -1424,6 +1541,7 @@ export function liveUpdated(it) {
     renderQueue();
     renderTicket();
     renderWhy();
+    rowInView(it);   // the finished live ticket's row is brought into view in its tab
     if (hadFocus) $("ticketTitle")?.focus();
   }
 }

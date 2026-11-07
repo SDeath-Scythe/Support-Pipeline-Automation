@@ -41,7 +41,7 @@ export const STAGE_ORDER = ["received", "clean", "classify", "gate", "recheck", 
 
 // The reasons (server REASON_CODES) that are about a reply: offered only on a ticket that had a draft.
 export const DRAFT_REASONS = new Set(["tone", "dialect", "asks_unneeded", "promise", "false_claim", "wrong_number",
-  "missing_question", "shop_or_agent_name"]);
+  "missing_question", "shop_or_agent_name", "typo", "wrong_gender", "wrong_language"]);
 
 // What the drafter is asked to request (draft.FIELD_AR).
 export const FIELD_AR = dict({
@@ -54,9 +54,10 @@ export const FIELD_AR = dict({
 export const CHECK_SHORT_AR = dict({
   stray_latin: "حروف إنكليزية", promise: "وعد بنتيجة أو وقت", asks_secret: "طلب رمز أو كلمة سر",
   unknown_number: "رقم مو بالتذكرة", hold_reason: "ذكر تحقيق أو اشتباه أو بلاغ", sensitive_number: "تكرار رقم بطاقة أو رمز",
-  // The warnings from the 7 Nov user tests (always on since then).
+  // The warnings from the 7 Nov role-played test sessions (always on since then), and from their second round.
   claims_done: "تگول شي انسوى", repeated_text: "ترحيب أو جملة مكررة", ask_missing: "ما تسأل عن كل اللي ناقص",
   dialect_words: "كلمة مو عراقية", amount_not_in_ticket: "مبلغ مو مثل ما كتبه الزبون",
+  persona_slip: "تحجي بصيغة شخص واحد", asks_given: "تسأل عن شي الزبون كاتبه",
 });
 
 // What the agent checks before approving: what to look at ("ask"), and what the tick says once they
@@ -79,6 +80,8 @@ export const CONFIRM_AR = dict({
   "draft:ask_missing": { ask: "المسودة ما تسأل عن كل اللي ناقص", done: "راجعت، وما يحتاج نسأل" },
   "draft:dialect_words": { ask: "راجع الكلمة اللي مو عراقية", done: "راجعت الكلمة، وهي مقصودة" },
   "draft:amount_not_in_ticket": { ask: "قارن المبلغ اللي بالمسودة بالرسالة", done: "قارنت المبلغ بالرسالة" },
+  "draft:persona_slip": { ask: "المسودة تحجي بصيغة شخص واحد، خليها باسم الفريق", done: "راجعت صيغة المسودة" },
+  "draft:asks_given": { ask: "المسودة تسأل عن شي الزبون كاتبه بالرسالة", done: "راجعت السؤال، وهو مقصود" },
   draft_for_other_type: { ask: "المسودة انكتبت لنوع ثاني، راجع إنها تناسب النوع اللي اخترته",
     done: "راجعت إن المسودة تناسب النوع اللي اخترته" },
   // Only the team changed: the same point (logged as draft_for_other_type), said about the team.
@@ -96,7 +99,28 @@ export const CONFIRM_AR = dict({
   amount_disagreed: { ask: "تأكد من المبلغ بالرسالة", done: "تأكدت من المبلغ" },
   other_phone: { ask: "الزبون يكتب من رقم مو رقمه، تأكد من هويته", done: "تأكدت من هوية الزبون" },
   complaint_risk: { ask: "الزبون يهدد بشكوى أو راسلنا أكثر من مرة، راجع الرد بانتباه", done: "راجعت الرد بانتباه" },
+  // A fraud escalation forwarded to another team than fraud (the server wants this tick: fraud_team_changed).
+  fraud_team_changed: { ask: "هاي تذكرة احتيال، وراح تحوّلها لقسم ثاني", done: "متأكد أحوّل تذكرة احتيال لقسم ثاني" },
 });
+// What the customer wrote (result.secret_kinds, from the secret_forms rule) and what to tell them: a card number or its
+// code means the card; a PIN means the PIN; a one-time code only matters if shared. Without kinds: one sentence for all.
+const SECRET_WHAT = dict({ card: "رقم بطاقته", cvv: "الرمز اللي ورا البطاقة", pin: "رمزه السري", otp: "رمز تحقق" });
+const SECRET_DO = dict({ card: "يوقف البطاقة", cvv: "يوقف البطاقة", pin: "يغيّر رمزه السري", otp: "ما يشارك الرمز ويا أي أحد" });
+export function secretAdviceAR(kinds) {
+  const ks = (kinds || []).filter((k) => SECRET_WHAT[k]);
+  if (!ks.length) return { why: WHY_AR.secret_in_ticket, ...CONFIRM_AR.secret_in_ticket };
+  const what = ks.map((k) => SECRET_WHAT[k]).join(" و");
+  const todo = [...new Set(ks.map((k) => SECRET_DO[k]))].join(" و");
+  return { why: `الزبون كتب ${what}. نبّهه ${todo}، ولا تكرر الرقم بالرد.`,
+    ask: `تأكد إن الرد ينبّه الزبون ${todo}`, done: `تأكدت إن الرد ينبّه الزبون ${todo}` };
+}
+// Why complaint_risk fired (result.complaint_reasons, from the complaint_reasons rule).
+const COMPLAINT_WHY = dict({ threat: "الزبون يهدد بشكوى علينا أو للجهات الرقابية", repeat: "الزبون راسلنا قبل وما وصله رد" });
+export function complaintAR(reasons) {
+  const said = (reasons || []).map((r) => COMPLAINT_WHY[r]).filter(Boolean);
+  if (!said.length) return { why: WHY_AR.complaint_risk, ...CONFIRM_AR.complaint_risk };
+  return { why: `${said.join("، و")}.`, ask: `${said.join("، و")}، راجع الرد بانتباه`, done: "راجعت الرد بانتباه" };
+}
 // The fields an ask_missing warning names (draft_check.ask_missing_fields), as its point: FIELD_AR labels,
 // and reference_lost (the customer lost the receipt, and the draft asks them for its reference) apart.
 export function askMissingAR(fields) {
@@ -143,9 +167,16 @@ export const WHY_AR = dict({
   connection_lost: "انقطع الاتصال قبل ما تخلص المعالجة.",
   device_lost: "الموبايل ضايع أو مسروق والمحفظة مفتوحة عليه، فيستلمها قسم الاحتيال.",
   budget_reached: "وصل التشغيل لحد الصرف المسموح، فيستلمها موظف.",
+  second_request: "بالتذكرة طلب ثاني محد مستلمه، راجع شنو يكول الرد عنه.",
   secret_in_ticket: "الزبون كتب رقم بطاقة أو رمز سري. نبّهه يغيّر الرمز ويوقف البطاقة، ولا تكرر الرقم بالرد.",
   amount_disagreed: "النموذجين قروا مبلغ مختلف، تأكد من المبلغ بالرسالة.",
   complaint_risk: "الزبون يهدد بشكوى للجهات الرقابية أو راسلنا أكثر من مرة.",
+});
+// The same flags on an escalation, where nobody approves a reply: what the receiving team does about it.
+export const WHY_ESC_AR = dict({
+  "missing:reference": "رقم العملية ناقص، القسم يطلبه من الزبون.",
+  "missing:amount": "المبلغ ناقص، القسم يطلبه من الزبون.",
+  secret_in_ticket: "الزبون كتب رقم بطاقة أو رمز سري. القسم ينبّهه، ولا أحد يكرر الرقم.",
 });
 // Why a stage did not run, as the end of «ما انرسلت لنموذج لأن …» (no colon inside).
 export const BECAUSE_AR = dict({

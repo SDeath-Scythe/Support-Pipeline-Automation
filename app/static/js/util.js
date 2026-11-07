@@ -135,19 +135,23 @@ export function median(xs) {
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
 
-// Digit groups split by spaces («0791 079 0226», «9776 593217»): in a right-to-left paragraph each group
-// is its own number and the space between them is neutral, so the groups come out in reverse order.
-const DIGIT_GROUPS = /[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[ \u00A0][0-9\u0660-\u0669\u06F0-\u06F9]+)+/g;
+// Digit groups split by spaces or hyphens («0791 079 0226», «9776 593217», «2497-53512»), and a reference of letters,
+// a hyphen and digits («BP-77120458»): in a right-to-left paragraph each digit group after Arabic text is its own
+// number, and the space or hyphen between them does not join them, so the groups come out in reverse order (Unicode
+// bidi rules W2 and W4), and a reference can split across two lines.
+const DIGIT = "[0-9\\u0660-\\u0669\\u06F0-\\u06F9]";
+const DIGIT_GROUPS = new RegExp(`${DIGIT}+(?:[ \\u00A0\\u2011-]${DIGIT}+)+|(?<![A-Za-z])[A-Za-z]+-${DIGIT}+(?:-[A-Za-z0-9]+)*`, "g");
 
-/** Plain text with every run of space-separated digit groups in a left-to-right island, so a phone or a
- *  reference reads in the order it was written (read-only text: queue rows, replies, the customer). */
+/** Plain text with every run of space- or hyphen-separated digit groups (and every «BP-…» reference) in a
+ *  left-to-right island that does not break across lines, so a phone or a reference reads in the order it was
+ *  written (read-only text: queue rows, replies, the customer). */
 export function digitRuns(s) {
   const frag = document.createDocumentFragment();
   const str = String(s ?? "");
   let last = 0;
   for (const m of str.matchAll(DIGIT_GROUPS)) {
     if (m.index > last) frag.append(str.slice(last, m.index));
-    frag.append(ltr(m[0], "num"));
+    frag.append(ltr(m[0], "num nowrap"));
     last = m.index + m[0].length;
   }
   if (last < str.length) frag.append(str.slice(last));
@@ -157,14 +161,32 @@ export function digitRuns(s) {
 // The draft box can't hold an island, so a space between two digits is shown as a no-break space
 // (U+00A0): its bidi class (CS) joins the groups into one number. A hyphen between two letters or digits
 // («2497-53512», «M-30417») is shown as a non-breaking hyphen (U+2011), so a reference never splits across
-// lines. One character for one, so the check offsets stay valid; realDraft() turns them back before the
-// text is compared, checked or saved.
+// lines. After Arabic text, digits joined by a hyphen of either kind still read backwards (bidi rule W2 makes
+// them Arabic numbers, which a hyphen does not join), so a left-to-right mark (U+200E) goes before each such
+// run: the digits then read left to right, in order (second round of role-played test sessions). The mark is
+// one character more, so offsets in the real text are mapped (shownAt, realAt); realDraft() takes the marks out
+// and turns the rest back before the text is compared, checked or saved: the reply keeps its plain hyphen.
 const DIGIT_SPACE = /(?<=[0-9\u0660-\u0669\u06F0-\u06F9]) (?=[0-9\u0660-\u0669\u06F0-\u06F9])/g;
 const DIGIT_NBSP = /(?<=[0-9\u0660-\u0669\u06F0-\u06F9])\u00A0(?=[0-9\u0660-\u0669\u06F0-\u06F9])/g;
 const WORD_HYPHEN = /(?<=[\p{L}\p{N}])-(?=[\p{L}\p{N}])/gu;
 const WORD_NBHYPHEN = /(?<=[\p{L}\p{N}])\u2011(?=[\p{L}\p{N}])/gu;
-export const shownDraft = (text) => String(text ?? "").replace(DIGIT_SPACE, "\u00A0").replace(WORD_HYPHEN, "\u2011");
-export const realDraft = (shown) => String(shown ?? "").replace(DIGIT_NBSP, " ").replace(WORD_NBHYPHEN, "-");
+const HYPHEN_RUN = /(?<![\p{L}\p{N}\u200E])[0-9\u0660-\u0669\u06F0-\u06F9]+(?:[-\u2011][\p{L}\p{N}]+)+/gu;
+const LRM = "\u200E";
+export const shownDraft = (text) => String(text ?? "").replace(/\u200E/g, "").replace(HYPHEN_RUN, (m) => LRM + m)
+  .replace(DIGIT_SPACE, "\u00A0").replace(WORD_HYPHEN, "\u2011");
+export const realDraft = (shown) => String(shown ?? "").replace(/\u200E/g, "").replace(DIGIT_NBSP, " ").replace(WORD_NBHYPHEN, "-");
+/** Where offset `i` of the real text (realDraft(shown)) is in `shown`: the marks before it are counted in. */
+export function shownAt(shown, i) {
+  let real = 0;
+  for (let j = 0; j < shown.length; j++) {
+    if (shown[j] === LRM) continue;
+    if (real === i) return j;
+    real++;
+  }
+  return shown.length;
+}
+/** Where offset `j` of `shown` is in the real text. */
+export const realAt = (shown, j) => j - (shown.slice(0, j).match(/\u200E/g) || []).length;
 
 // Direction controls (embeddings, overrides, isolates, marks) change the order text is drawn in, not the
 // order the model and the rules read. The page shows the order they read, and says how many it hid.
@@ -176,6 +198,58 @@ export function plainText(s) {
   const hidden = (str.match(BIDI_CONTROLS) || []).length;
   return { text: str.replace(BIDI_CONTROLS, "").replace(BIDI_MARKS, ""), hidden };
 }
+
+// A message padded with blank lines («سطر وحد، 60 سطر فاضي، وبعدين نص») pushed the rest of the ticket and the draft
+// off the screen while approve was on (second round of role-played test sessions). Three or more line breaks, with
+// only spaces between them, are shown as one blank line.
+const BLANK_RUN = /\n(?:[ \t\u00A0]*\n){2,}/g;
+/** {text, removed, at(i)}: the text with each run of blank lines kept to one, how many blank lines went, and where
+ *  offset i of the original text is in the new one (for the hidden numbers' ranges). */
+export function collapseBlank(s) {
+  const str = String(s ?? "");
+  const cuts = [];   // [start, end] in the original that go, in order
+  let removed = 0;
+  const text = str.replace(BLANK_RUN, (m, off) => {
+    cuts.push([off + 2, off + m.length]);
+    removed += (m.match(/\n/g) || []).length - 2;
+    return "\n\n";
+  });
+  const at = (i) => {
+    let shift = 0;
+    for (const [a, b] of cuts) {
+      if (i >= b) shift += b - a;
+      else if (i > a) shift += i - a;
+    }
+    return i - shift;
+  };
+  return { text, removed, at };
+}
+
+// An Arabic paragraph that starts with a Latin word («SYSTEM: وأكد…») was laid out left to right: the page lets
+// each paragraph take the direction of its first letter (unicode-bidi: plaintext). A paragraph that is mostly
+// Arabic letters gets a right-to-left mark (U+200F) at its start, so it reads right to left; English stays left
+// to right (second round of role-played test sessions).
+const AR_LETTERS = /[\u0600-\u06FF\u0750-\u077F]/g;
+const LATIN_LETTERS = /[A-Za-z]/g;
+const FIRST_STRONG = /[A-Za-z\u0600-\u06FF\u0750-\u077F]/;
+/** The offsets where a paragraph of `text` needs a right-to-left mark: mostly Arabic, with a Latin letter first. */
+export function rtlStarts(text) {
+  const out = [];
+  let at = 0;
+  for (const para of String(text ?? "").split("\n")) {
+    const ar = (para.match(AR_LETTERS) || []).length, lat = (para.match(LATIN_LETTERS) || []).length;
+    const first = para.match(FIRST_STRONG);
+    if (ar > lat && first && /[A-Za-z]/.test(first[0])) out.push(at);
+    at += para.length + 1;
+  }
+  return out;
+}
+/** The same text with the mark put in (read-only text, where no offset is kept: queue rows, replies). */
+export const rtlText = (text) => {
+  let out = String(text ?? "");
+  for (const i of rtlStarts(out).reverse()) out = `${out.slice(0, i)}\u200F${out.slice(i)}`;
+  return out;
+};
 
 /** A count with its noun in the right form: 1 «تذكرة وحدة», 2 «تذكرتين», 3–10 «3 تذاكر», 11+ «11 تذكرة». */
 export function countAr(n, { one, two, few, many }) {
@@ -236,7 +310,9 @@ export function masked(text, ranges, mask) {
  *  plain(text) builds the parts between them (default: the text as it is). */
 export function spanned(text, spans, plain = (t) => t) {
   const frag = document.createDocumentFragment();
-  const sorted = spans.filter((x) => x && x.end > x.start).sort((a, b) => a.start - b.start);
+  // A span with insert (start === end) puts its node at that place and takes no text (a direction mark).
+  const sorted = spans.filter((x) => x && (x.end > x.start || (x.insert && x.end === x.start)))
+    .sort((a, b) => a.start - b.start || (b.insert ? 1 : 0) - (a.insert ? 1 : 0));
   let at = 0;
   for (const sp of sorted) {
     if (sp.start < at) continue;   // overlapping ranges: the first wins

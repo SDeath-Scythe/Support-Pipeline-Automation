@@ -369,6 +369,7 @@ function renderAgent() {
 async function setMode(mode, { quiet = false } = {}) {
   if (mode !== "agent" && mode !== "process") mode = "agent";
   if (S.mode !== mode) {
+    if (S.mode === "process") proc.hideSecretsAgain();   // a number revealed there is hidden again
     proc.stopProcess();
     hideToast();   // its «تراجع» acts on the inbox, which is not on screen in the other mode
     // Both modes share the pane: the other mode's scroll would open this one part way down.

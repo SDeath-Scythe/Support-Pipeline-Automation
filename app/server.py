@@ -702,6 +702,8 @@ def meta() -> dict:
         "account_risk_types": list(ACCOUNT_RISK),
         # Flags the page shows as a muted note, never as a point to tick (run.py QUIET_FLAGS).
         "quiet_flags": list(QUIET_FLAGS),
+        # Where fraud goes (run.py): a fraud escalation forwarded anywhere else needs the fraud_team_changed tick.
+        "security_team": SECURITY_TEAM,
         "check_ar": CHECK_AR,
         "checks_active": checks_active(),
     }

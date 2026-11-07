@@ -67,6 +67,13 @@ export function findLiteral(text, value) {
   return i < 0 ? null : { start: i, end: i + v.length };
 }
 
+/** The parts of a time with no Latin letter, joined; null when none is left. */
+export function arabicDate(value) {
+  if (!value) return null;
+  const kept = String(value).split(/[;؛()]/).map((p) => p.trim().replace(/^[ ,،-]+|[ ,،-]+$/g, "")).filter((p) => p && !/[A-Za-z]/.test(p));
+  return kept.join(" ") || null;
+}
+
 /** The facts of a ticket's extraction, each with a label, a display node and its place in `text`. */
 export function factsOf(extraction, text, subcategory) {
   const ex = extraction || {};
@@ -84,16 +91,21 @@ export function factsOf(extraction, text, subcategory) {
     out.push({ label: subcategory === "topup_failed" ? "الرقم اللي انشحن" : "رقم المستلم",
       value: () => mono(ex.recipient_phone), at: findLoose(text, ex.recipient_phone), ltr: true });
   }
-  if (ex.date) out.push({ label: "الوقت", value: () => el("span", { dir: "rtl", text: ex.date }), at: findLiteral(text, ex.date), words: true });
+  // The time as the model copied it, without an English gloss it sometimes adds («البارحة (card lost); …»), as in the
+  // team note (handoff.py arabic_date).
+  const date = arabicDate(ex.date);
+  if (date) out.push({ label: "الوقت", value: () => el("span", { dir: "rtl", text: date }), at: findLiteral(text, date), words: true });
   return out;
 }
 
 /** The customer's text with each found fact underlined (mark[data-fact]). Digit groups split by spaces
  *  that no fact matched keep their written order too (digitRuns). Each `hidden` range ([start, end], a card
- *  number or a code) is drawn as «••••» instead, with no underline on it. */
-export function textWithFacts(text, facts, hidden = []) {
+ *  number or a code) is drawn as «••••» instead, with no underline on it. A right-to-left mark (U+200F) goes at
+ *  each offset in `rtl` (a mostly Arabic paragraph that starts with a Latin word, util.js rtlStarts). */
+export function textWithFacts(text, facts, hidden = [], rtl = []) {
   const over = (at) => hidden.some(([s, e]) => at.start < e && s < at.end);
   return spanned(text, [
+    ...rtl.map((i) => ({ start: i, end: i, insert: true, make: () => "\u200F" })),
     ...hidden.map(([s, e]) => ({ start: s, end: e, make: secretMask })),
     ...facts.map((f, i) => f.at && !over(f.at) && {
       start: f.at.start, end: f.at.end,
