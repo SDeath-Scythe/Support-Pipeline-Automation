@@ -33,12 +33,12 @@ It has only ever processed **synthetic tickets**: "No real customer data is used
 
 **Who has checked this.** All assurance so far is in-house: the tests, the 1 Nov security review and the reviews of the agent inbox (including its security and privacy lens, `LOG.md:67`). The adversarial set is 14 tickets, run once (`AUDIT:27`). No review of the code or the controls by anyone outside the project is recorded.
 
-**Checked on 1 Nov 2026, and again on 5 Nov for the tests, with no model calls:**
+**Checked on 1 Nov 2026, and again on 5 and 7 Nov for the tests, with no model calls:**
 
 | Check | Result |
 |---|---|
-| `python -m pytest -q`, with API keys removed | all pass: 648 at `d1280b6` (`LOG.md:100`); 675 with the 5 Nov adoption of the three safety rules, 694 after its review (LOG, 5 Nov entry) |
-| `node tests/ui/smoke.cjs`: the page in Chromium through Playwright, with no key and no model call | 359/359 checks over five passes at `d1280b6`: desktop and phone, light and dark, and a fresh clone (`LOG.md:100`); 361/361 with the 5 Nov adoption, including the identity tick, 369/369 after its review (LOG, 5 Nov entry) |
+| `python -m pytest -q`, with API keys removed | all pass: 648 at `d1280b6` (`LOG.md:100`); 675 with the 5 Nov adoption of the three safety rules, 694 after its review, 697 with the calmer inbox (LOG, 5 Nov entries); 1,694 with the 7 Nov work on the code-request check (LOG, 7 Nov entry) |
+| `node tests/ui/smoke.cjs`: the page in Chromium through Playwright, with no key and no model call | 359/359 checks over five passes at `d1280b6`: desktop and phone, light and dark, and a fresh clone (`LOG.md:100`); 361/361 with the 5 Nov adoption, including the identity tick, 369/369 after its review (LOG, 5 Nov entry); 448/448 with the calmer inbox (LOG, 5 Nov entry), and again on 7 Nov (LOG, 7 Nov entry) |
 | Secret patterns in the whole git history (command below) | 0 |
 | `pip-audit`, run once on 1 Nov in a scratch environment with `requirements-dev.txt` installed (`LOG.md:118`) | No known vulnerabilities found. The bounded ranges can resolve to newer versions that were not scanned. The inbox added no Python package. |
 
@@ -314,9 +314,9 @@ No ticketing adapter exists today. The only outbound calls are model calls (`src
 - **Fraud tickets reach the model.** Classification and a summary line both see the full text. A flag to skip the summary call for fraud is not built.
 - **Attachments, images and voice notes** are future plans (`CONTEXT.md:160`). None may reach a model until assessed separately: verification tickets can carry identity documents.
 - **Classification and residency** are open (section 4). If the institution classifies ticket text as Confidential, an external model may be ruled out.
-- **Known misses in the rules** (`LOG.md:203`, `:206`):
+- **Known misses in the rules** (`LOG.md:203`, `:206`; LOG, 7 Nov entry):
   - A code written before its word («482913 هذا الرمز») is not masked.
-  - A request more than three words before the secret is not caught.
+  - A request five or more words before the secret, with other words between («دزلنا بعد ما تشوف الرسالة الرمز اللي وصلك»), is not caught, nor a code asked for as "the same number" a sentence later. Common English and Arabizi requests are caught since 7 Nov; those still missed get the `stray_latin` warning.
   - «خلال اربعة وعشرين ساعة» is not caught as a time.
 - **The three 1 Nov flags were adopted on 5 Nov** (LOG, 5 Nov entry). `hold_reason` and `sensitive_number` always run and block an approval, and `escalate_account_risk` became the `account_risk` flag (section 7). What is left:
   - `hold_reason` and `sensitive_number` fired on 0 of 2,531 saved drafts, so how often they catch a real draft, or raise a false alarm, is untested.

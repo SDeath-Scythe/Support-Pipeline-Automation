@@ -68,21 +68,30 @@ _SECRET_EXTRA = re.compile(
     r"(?<!\w)(?P<pfx>[وف]?(?:ال)?)(?:"
     r"رقم\s+(?:ال)?بطاق(?:[ةه]|ت(?:ك|ج|كم))(?!\w)"
     rf"|{_HOW_MANY}?[أا]رقام\s+{_HOW_MANY}?(?:"
-    r"(?:اللي\s+|الي\s+|(?:ال)?موجود[ةه]\s+)?(?:ورا|خلف|ب?ظهر|على\s+ظهر)\s+(?:ال)?بطاق\w*"
+    r"(?:اللي\s+|الي\s+|(?:ال)?(?:موجود|مطبوع|مكتوب)[ةه]\s+)?(?:ورا|خلف|ب?ظهر|على\s+ظهر)\s+(?:ال)?بطاق\w*"
     r"|(?:اللي|الي)\s+(?:ي?وصل|ج[اي]?ت|اج[اي]?ت)\w*|(?:ال)?سري[ةه](?!\w))"
     r"|[أا]رقام\s+(?:ال)?ست[ةه](?!\w)|ست[ةه]?\s+[أا]رقام(?!\w)"
     rf"|{_HOW_MANY}[أا]رقام\s+(?:(?:اللي|الي)\s+)?(?:بال|ب|ال)?(?:خلف|ورا|ظهر)(?!\w)"
+    # «الأرقام اللي بالظهر», «الأرقام الأربعة اللي اخترتها» (the PIN), «الكلمة اللي تدخل بيها» (the password)
+    r"|[أا]رقام\s+(?:اللي|الي)\s+(?:بال|ب|على\s+ال)(?:خلف|ظهر)(?!\w)"
+    rf"|(?:[أا]رقام\s+{_HOW_MANY}|{_HOW_MANY}[أا]رقام\s+)(?:اللي|الي)\s+(?:اختر|حطي)ت\w*"
+    r"|(?<=ال)كلم[ةه]\s+(?:اللي|الي)\s+ت(?:دخل|سجل)\s+بيها(?!\w)"
     r"|رقم\s+(?:ال)?(?:تحقق|تفعيل)(?!\w)|(?<=ال)(?:رمز|كود)(?=\s+ال(?:طلب|تحويل|عملي[ةه]|حوال[ةه])(?!\w))"
     r"|رقم\s+(?:اللي|الي)\s+(?:ي?وصل|ج[اي]|اج[اي])ت?(?:ك|ج|كم)(?!\w)(?!(?:\s+\S+){0,2}?\s+من[هها](?!\w))"
-    # «الرقم المكون من ستة أرقام», «الرقم السداسي», «الرقم اللي ورا الكارت», «الأرقام اللي بالمسج»
-    r"|رقم\s+(?:ال)?مكون\s+من\s+(?:\d|ست[ةه]?|[أا]ربع[ةه]?|خمس[ةه]?)\s+[أا]رقام(?!\w)|رقم\s+(?:ال)?سداسي(?!\w)"
-    r"|(?:رقم|[أا]رقام(?:\s+(?:ال)?(?:ثلاث[ةه]?|[أا]ربع[ةه]?))?)\s+(?:(?:اللي|الي|(?:ال)?موجود[ةه]?)\s+)?"
+    # «الرقم المكون من ستة أرقام» (or «ثلاث مراتب»), «الرقم السداسي», «الرقم اللي ورا الكارت», «الأرقام اللي بالمسج»
+    r"|رقم\s+(?:ال)?مكون\s+من\s+(?:\d|ست[ةه]?|[أا]ربع[ةه]?|خمس[ةه]?|ثلاث[ةه]?)\s+(?:[أا]رقام|مراتب|خانات)(?!\w)"
+    r"|رقم\s+(?:ال)?سداسي(?!\w)"
+    r"|(?:رقم|[أا]رقام(?:\s+(?:ال)?(?:ثلاث[ةه]?|[أا]ربع[ةه]?))?)\s+"
+    r"(?:(?:اللي|الي|(?:ال)?(?:موجود|مطبوع|مكتوب)[ةه]?)\s+)?"
     r"(?:ورا|خلف|ب?ظهر|على\s+ظهر)\s+(?:ال)?(?:بطاق\w*|كارت)"
     r"|[أا]رقام\s+(?:(?:اللي|الي|(?:ال)?موجود[ةه])\s+)?(?:بال|في\s+ال)(?:رسال[ةه]|مسج)(?!\w)"
     r"|\s*(?:[اأ]و\s*تي\s*بي|سي\s*في\s*في)(?!\w)|(?<=ال)\s*بي?ن(?=\s+(?:مال|حق)\s)"
     r"|\s*(?i:(?:verification\s+|otp\s+|sms\s+)?code|verification\s+number)(?![A-Za-z]))")
 # «آخر ٤ أرقام من البطاقة» is the safe way to find a card: «رقم البطاقة» after «آخر» is not the card.
 _LAST = {"آخر", "اخر", "أخر"}
+# «الكود اللي على الوصل», «الرمز المطبوع على الإيصال»: a reference printed on a receipt, not a secret.
+_ON_RECEIPT = re.compile(r"\s+(?:(?:اللي|الي)\s+|(?:ال)?(?:مكتوب|مطبوع|موجود)[ةه]?\s+)?"
+                         r"(?:على\s+(?:ال)?|عال|بال|ب|في\s+(?:ال)?)(?:وصل|[إا]يصال|فاتور[ةه])(?!\w)")
 # A request is one of these kinds, matched on a word with one leading و/ف dropped:
 # 1. send / give / share / tell, as an order or "you" form: دزلنا, تدزلي, ارسل, إرسال, ابعث, انطينا, عطونا,
 #    أعطني, شاركنا, زودنا, تكتبلنا, حطلي, خبرنا, أكدلنا, راسلنا, قلي, تقرالنا, موافاتنا, بلغنا, أفدنا, توصلنا.
@@ -103,7 +112,28 @@ _WE_DID = re.compile(r"(?:نا|ل)(?:ك|ج|كم)$|^دزينا$")
 _TELL = {"قلي", "قلنا", "قولي", "قولنا", "گلي", "گلنا", "گولي", "گولنا", "گللي", "قللي", "قوليلي", "گوليلي", "كلي",
          "تكلنا", "كولي", "گولولنا", "قولولنا", "تگولي", "تقولي", "تكلي", "تگلي", "تقلي", "تگلنا", "تقلنا", "تگولنا",
          "تقولنا", "خبرني", "خبرنا", "خبرنه", "گوليلنا", "قوليلنا", "كوليلنا", "كوليلي", "كولولنا", "گولولي", "قولولي",
-         "كولولي"}
+         "كولولي",
+         # "say" and "tell him/them": «گول للموظف كلمة السر», «گله الرمز» (see _TO_HIM)
+         "گول", "قول", "گوله", "قوله", "گله", "قله", "گلهم", "قلهم"}
+# "Read out" or "dictate" to someone: «اقرا عليه الرمز», «أملي على الموظف رمز التحقق», «تملي علينا الكود».
+_ALOUD = re.compile(r"(?:ا|أ|إ|ت)?(?:قر[اأ]|مل[يى])(?:ين|ون|وا|ي)?")
+# "Put it" only with a place that is ours: «حط الرمز بالخاص», not «حط الرمز بالتطبيق».
+_PUT = {"حط", "حطي", "حطوا", "تحط", "تحطين", "تحطون"}
+# "Reply to this message with the code": «رد على هاي الرسالة برمز التحقق».
+_REPLY = {"رد", "ردي", "ردوا", "ترد", "تردين", "تردون"}
+_REPLY_TO = {"على", "علينا", "هاي", "هذه", "هذي", "هالرسالة", "هالرساله", "الرسالة", "الرساله", "رسالتنا", "المسج",
+             "هالمسج", "مسجنا"}
+# The secret belongs to another verb between: «خبرنا لمن تغير الرقم السري», «اكتبه بالتطبيق واختار كلمة سر جديدة».
+_CHANGE = re.compile(r"(?:[تيا]|[وف][تا]?)(?:غير|بدل|صفر)\w*|[تيا]?خت(?:ار|ر)\w*")
+# «خبرنا لو الرمز ما وصلك»: "if/whether" with the code arriving, not Iraqi «لو» = "or".
+_ARRIVAL = re.compile(r"\s+(?:(?:ما|مو|لا|بعد|بعده)\s+)?م?(?:ي|ت)?(?:وصل|جا|اجا|ظهر|طلع)\w*")
+# A courtesy or "soon" phrase between a request and the secret: «دزلنا بأسرع وقت ممكن رجاءً الرمز».
+_COURTESY_PHRASE = re.compile(r"ب[أا]سرع\s+وقت(?:\s+ممكن)?|لو\s+سمحت(?:ي|وا)?|من\s+فضل(?:ك|ج|كم)|[إا]ذا\s+ممكن"
+                              r"|بعد\s+[إا]ذن(?:ك|ج|كم)|[إا]ذا\s+ما\s+علي(?:ك|ج|كم)\s+[أا]مر|رجاء[ًا]?")
+# «ما راح نتصل بيك نطلب كلمة السر»: "we won't call you asking for it", one negation over both verbs.
+_CONTACT = re.compile(r"[نيت](?:تصل|كلم|راسل|تواصل|دز|رسل|بعث)\w*")
+_YOU_OBJ = {"بيك", "بيج", "بيكم", "عليك", "عليج", "عليكم", "وياك", "وياج", "لك", "الك", "إلك", "لج", "بالتلفون",
+            "بالهاتف", "بالموبايل"}
 # «گلنا سابقاً الرمز ما ينطلب منك»: "we said" before.
 _BEFORE_NOW = {"سابقا", "سابقاً", "قبل", "السابق", "السابقة", "السابقه", "بالرد", "بالرسالة", "بالرساله", "سابق"}
 # A verbal noun: «إرسال», «مشاركة». «تم إرسال الرمز» is passive, «صار تأخير بإرسال الرمز» is about a delay, and as
@@ -157,7 +187,8 @@ _APP_STEP = re.compile(r"(?<!\w)[وف]?(?:سجل\s+(?:ال)?دخول|(?:ي|ت)ط
                        r"|(?:ال)?(?:تطبيق|برنامج)\s+(?:ي|ت)طلب)"
                        r"|(?<!\w)[وف]?(?:افتح|ارجع|ادخل|روح|من|حدث|تحدث)\s+(?:على\s+)?(?:ل|لل|ب|بال|ال)?"
                        r"(?:تطبيق|برنامج|[إا]عدادات)")
-_HERE = re.compile(r"(?<!\w)(?:هنا|بالرد|الرد|بردك|ردك|بالمحادث[ةه]|بالشات|[إا]?ل(?:ي)?نا)(?!\w)")
+_HERE = re.compile(r"(?<!\w)(?:هنا|بالرد|الرد|بردك|ردك|بالمحادث[ةه]|بالشات|بالخاص|[إا]?ل(?:ي)?نا"
+                   r"|(?:بال|ب)رسا[ئي]ل\s+(?:ال)?خاص[ةه]|يشوف(?:ه|ها)\s+(?:ال)?موظف)(?!\w)")
 # «خبرنا إذا وصلك الرمز», «گلنا هل دزيت الرمز لأحد؟», «تگلنا شلون وصلك الرمز؟», «گلنا كم مرة جربت الرمز» ask
 # whether, how, when or how many times, «خبرنا إنه الرمز ما وصلك» says it did not, and in «خبرنا حتى ندزلك رمز
 # جديد» the secret is ours. But «إذا ممكن» and «لو سمحت» are "please".
@@ -172,6 +203,7 @@ _SEND_IT = re.compile(r"(?:ت?دز|(?:ا|أ|إ|ت)رسل|(?:ا|أ|إ|ت)بع[ث�
 _SEND_TO = re.compile(r"(?:ت?دز|(?:ا|أ|إ|ت)رسل|(?:ا|أ|إ|ت)بع[ثت]|(?:ا|ت)?نطي|حط|ت?شارك)(?:لنا|لي|نا|ني)"
                       r"|[گقك]و?(?:لنا|لي)")
 _IT = {"ياه", "اياه", "إياه", "ياها", "إلنا", "النا", "لنا", "الجديد", "الجديدة", "الجديده"}
+_CHOSE = re.compile(r"(?:اختر|حطي|كتب)ت(?:ي|وا)?")             # «گلنا شنو اخترت»
 _IS_SENT = re.compile(r"[يت](?:رسل|ندز|نرسل|نبعث|نكتب)\w*")
 _HERE_NEXT = re.compile(r"\s+(?:هنا|بالرد|بالمحادث[ةه]|بالشات)(?!\w)")   # «الرمز ينكتب هنا بالرد»
 _REACH_US = re.compile(r"[يت]وصل(?:نا|لنا)")              # «الرمز لازم يوصلنا منك»
@@ -210,10 +242,11 @@ _COURTESY_CLAUSE = re.compile(r"[،,]\s*(?:[إا]ذا\s+ما\s+علي(?:ك|ج|ك
                               r"\s*[،,]")
 
 # A negation is a whole word, not a prefix: «لازم» and «ماكو مشكلة» are not negations. «لا»/«ما» glued
-# to a verb counts («لاتشارك», «ماتحتاج»); «ماكو/مافي/ماله» see _NO_NEED. «بعدم» and MSA «ليس» count too.
+# to a verb counts («لاتشارك», «ماتحتاج»); «ماكو/مافي/ماله» see _NO_NEED. «بعدم», MSA «ليس» and «مش» (an
+# agent from elsewhere: «مش لازم تدزلنا الرمز») count too.
 _NEGATIONS = {"لا", "ما", "مو", "بدون", "دون", "ممنوع", "أبد", "ابد", "أبدا", "ابدا", "أبداً", "ابداً", "ماراح", "مراح",
               "محد", "احذر", "حذاري", "تجنب", "اوعى", "اوعا", "إياك", "اياك", "بالك", "عدم", "بعدم", "لعدم", "يمنع",
-              "مستحيل", "المستحيل", "لم", "لن", "ليس", "ليست", "لست", "لسنا", "لستم"}
+              "مستحيل", "المستحيل", "لم", "لن", "ليس", "ليست", "لست", "لسنا", "لستم", "مش"}
 # «دزلنا بدون زحمة الرمز», «ارسل لنا بدون تأخير الرمز»: a courtesy, not "without".
 _NO_TROUBLE = {"زحمة", "زحمه", "تأخير", "تاخير", "تأخر", "تاخر", "تعب", "إزعاج", "ازعاج"}
 _GLUED_NEG = re.compile(r"(?:لا|ما)[تين]\w{2,}")
@@ -531,6 +564,19 @@ def _to_us(words: list[str], i: int) -> bool:
     return bool(re.search(r"(?:لنا|النا|لي|نا|ني)$", words[i])) or words[i + 1:i + 2] in [[u] for u in _US]
 
 
+def _courtesy_run(words: list[str], j: int) -> int:
+    """How many words right before word j are fillers or courtesy phrases: four in «دزلنا بأسرع وقت ممكن رجاءً
+    الرمز», two in «نحتاج منك لو سمحت الرمز» (see _FILLER, _COURTESY_PHRASE)."""
+    n = j
+    while n:
+        size = next((k for k in (4, 3, 2, 1) if k <= n and (_COURTESY_PHRASE.fullmatch(" ".join(words[n - k:n]))
+                                                            or (k == 1 and words[n - 1] in _FILLER))), 0)
+        if not size:
+            break
+        n -= size
+    return j - n
+
+
 def _item(w: str) -> bool:
     """A word that can be part of a list of things asked for (see _ITEM_NOUNS)."""
     return bool(re.match(r"(?:ب|ل|لل)?ال", w)) or w in _ITEM_NOUNS or w in _FILLER or w in _US or w.isdigit()
@@ -553,9 +599,11 @@ def _where(after: str) -> str:
 
 
 def _denied_after(after: str) -> bool:
-    """«دزلنا صورة الهوية والرمز لا تشاركه», «- الرمز ما نحتاجه»: a negation in the three words after the secret."""
+    """«دزلنا صورة الهوية والرمز لا تشاركه», «- الرمز ما نحتاجه»: a negation in the three words after the secret, or
+    "keep it to yourself": «انطيه الهوية والرمز خليه عندك»."""
     tw = [_bare(x) for x in after.split()[:4]]
-    return any(_is_negation(tw, k) for k in range(min(3, len(tw))))
+    return (any(_is_negation(tw, k) for k in range(min(3, len(tw))))
+            or (tw[:1] in (["خليه"], ["خليها"]) and tw[1:2] in (["عندك"], ["عندج"], ["سري"], ["بينك"], ["لنفسك"])))
 
 
 def _not_asked(words: list[str], j: int, after: str) -> bool:
@@ -585,15 +633,16 @@ def _request_at(words: list[str], i: int, j: int, pfx: str, after: str, app: boo
     b = between + ["", ""]
     if _PURPOSE & set(between) or any((x in _WHETHER and y not in _IF_PLEASE
                                        and not (y == "ما" and (z in _COURTESY or x in _WHENEVER))
-                                       and not (x == "لو" and not y)) or (x == "كم" and y in {"مرة", "مره"})
+                                       and not (x == "لو" and not y and not _ARRIVAL.match(after)))
+                                      or (x == "كم" and y in {"مرة", "مره"})
                                       for x, y, z in zip(between, b[1:], b[2:])):
         return False                                        # «خبرنا إذا وصلك الرمز», «خبرنا حتى ندزلك رمز جديد»
     topic = any(x in {"شنو", "شني", "شنهو", "ايش", "إيش"} or (x[:1] == "ب" and x not in _FILLER) for x in between)
     if (w in _TELL or _INFORM.fullmatch(w)) and (any(_ARRIVED.fullmatch(x) for x in between)
                                                 or (topic and _after_preposition(pfx))):
         return False                                        # «خبرنا أول ما يوصلك الرمز», «تخبرنا شنو المشكلة بالرمز»
-    if any(_HIDE.fullmatch(x) for x in between):
-        return False                                        # «دزلنا صورة الإشعار وخفي الرمز»
+    if any(_HIDE.fullmatch(x) or _CHANGE.fullmatch(x) for x in between):
+        return False                                        # «دزلنا صورة الإشعار وخفي الرمز», «خبرنا لمن تغير الرمز»
     where = _where(after)
     if _TYPE.fullmatch(w) and (where == "app" or (app and where != "here")):
         return False
@@ -602,7 +651,7 @@ def _request_at(words: list[str], i: int, j: int, pfx: str, after: str, app: boo
     by = next((x for x in range(i - 1, max(-1, i - 4), -1) if words[x] in _SYSTEM), None)
     system = ((by is not None and all(x in _ITSELF or (x == "من" and _NOUN.match(w)) for x in words[by + 1:i]))
               or words[i + 1:i + 2] in [[x] for x in _SYSTEM])   # «إذا لم يتمكن النظام من إرسال الرمز»
-    if (system and _SEND.match(w) and not to_us) or (prev in _WHO and _is_order(w)):
+    if (system and _SEND.match(w) and not to_us and where != "here") or (prev in _WHO and _is_order(w)):
         return False                                        # «المنصة ترسل رمز التحقق», «منو دز الرمز»
     soon = [_bare(x) for x in after.split()[:2]]
     said = any(x in {"ما", "لا", "مو"} and _is_negation(soon, k) for k, x in enumerate(soon)) and "دام" not in soon
@@ -619,8 +668,14 @@ def _request_at(words: list[str], i: int, j: int, pfx: str, after: str, app: boo
         if all(x in _LEAD for x in words[:i]) and _NOT_NEEDED.match(after):
             return False                                    # «إرسال الرمز إلنا مو ضروري»
     if (_SEND.match(w) and not _WE_DID.search(w)) or (w in _TELL and not (w == "كلي" and prev in {"بشكل", "شكل"})):
-        return not ((_TO_HIM.search(w) and not to_us)       # «حتى تنطيهم الرمز»: to them
+        if w in {"گول", "قول"} and prev in _AS | {"بحسب", "على"}:
+            return False                                    # «حسب قول الموظف الرمز يوصل»: a noun, "as he said"
+        him = (_TO_HIM.search(w) or w in {"گول", "قول"}) and not to_us
+        return not ((him and not _is_order(w))              # «حتى تنطيهم الرمز»: to them, but «انطيه الرمز» (our
+                    or (him and _denied_after(after))       # agent) asks; «گله الرمز سري وما أنطيه» is advice;
                     or between[:1] in [[x] for x in _A_MOMENT])   # «عطني فرصة أتأكد من الرمز»
+    if (_ALOUD.fullmatch(w) and between and between[0][:2] == "عل") or (w in _PUT and where == "here"):
+        return True                                         # «اقرا عليه الرمز», «حط الرمز بالخاص»
     if us and _IS_SENT.fullmatch(w) and w[:1] == "ي":
         return True                                         # «يُرسل رمز التحقق إلينا بالرد»
     if question and w[:2] == "ما" and _SEND.match(w[2:]) and w[2:3] == "ت" and _to_us([w[2:]], 0) and all(
@@ -634,8 +689,10 @@ def _request_at(words: list[str], i: int, j: int, pfx: str, after: str, app: boo
                                      or (before[0] in _IF_NOT and before[1] == "ما") or why) and (
             bool(m.group("us")) or to_us
             or ((cant in ("we", "it") or why) and where != "app" and (w != "كتبت" or where == "here")))
-    if w in _WITH or (w == "علينا" and i and words[i - 1] in {"رد", "ردي", "ردوا", "ترد", "تردين"}):
+    if w in _WITH or (w == "علينا" and i and words[i - 1] in _REPLY):
         return not between and pfx.lstrip("وف").startswith("ب")
+    if w in _REPLY and all(x in _REPLY_TO for x in between):
+        return pfx.lstrip("وف").startswith("ب")             # «رد على هاي الرسالة برمز التحقق»
     without = w in _WITHOUT or (w == "غير" and prev == "من")  # «ما نگدر نكمل من غير الرمز»
     if without or w in _EXCEPT:                             # «ما نگدر نساعدك بدون الرمز», «... إلا بالرمز»
         return not between and cant == "we" and (without or pfx.lstrip("وف").startswith("ب"))
@@ -652,7 +709,8 @@ def _request_at(words: list[str], i: int, j: int, pfx: str, after: str, app: boo
             or (w in {"اطلب", "أطلب"} and between[:1] in [[f] for f in _FROM_YOU])):   # «اسمحلي اطلب منك الرمز»
         if _ASK_VERB.fullmatch(w) and where == "app":
             return False                                    # «احنا نطلب الرمز بس داخل التطبيق»
-        return ((listed or (len(between) <= 5 and all(x in _FILLER or x in _EXCEPT for x in between)))
+        return ((listed or (len(between) <= 5 and (all(x in _FILLER or x in _EXCEPT for x in between)
+                                                   or _courtesy_run(between, len(between)) == len(between))))
                 and not _ARRIVES.match(after))
     if w in _WHAT or (w == "ما" and question and between[:1] in (["هو"], ["هي"])   # MSA «ما هو الرمز الذي وصلك؟»
                       and re.search(r"(?:ك|ج|كم)(?!\w)", after)):
@@ -886,7 +944,11 @@ def _negated(words: list[str], i: int, j: int, cant: str = "", question: bool = 
                 or any((_is_negation(words, k) or words[k] in _FORBID)
                        and ((w[:1] == "ي" and _reaches(words, k, i, free=True, noun=True))
                             or all(x in _PASS | _RIGHT | _MAY or _TAKES.fullmatch(x) for x in words[k + 1:i]))
-                       for k in range(max(0, i - 4), i)))
+                       for k in range(max(0, i - 4), i))
+                or any(_is_negation(words, k) and any(_CONTACT.fullmatch(x) for x in words[k + 1:i])
+                       and all(x in _PASS | _YOU_OBJ | _MESSAGE | _HOLDS or _CONTACT.fullmatch(x)
+                               for x in words[k + 1:i])     # «ما راح نتصل بيك نطلب كلمة السر»
+                       for k in range(max(0, i - 6), i)))
     noun = bool(_NOUN.match(w))
     k = _reaching_negation(words, i, free=w.startswith("ت") or noun, noun=noun)
     if k is None:
@@ -913,7 +975,8 @@ def _negated(words: list[str], i: int, j: int, cant: str = "", question: bool = 
 
 
 def _secrets(text: str) -> list[tuple[int, int, str]]:
-    found = [(m.start(), m.end(), m.group("pfx") or "") for m in CREDENTIAL.finditer(text)]
+    found = [(m.start(), m.end(), m.group("pfx") or "") for m in CREDENTIAL.finditer(text)
+             if not _ON_RECEIPT.match(text, m.end())]
     for m in _SECRET_EXTRA.finditer(text):
         if not _LAST & {_bare(w) for w in text[max(0, m.start() - 80):m.start()].split()[-4:]}:
             found.append((m.start(), m.end(), m.group("pfx") or ""))
@@ -985,6 +1048,9 @@ def _asks_secret(norm: str, pos: list[int]) -> tuple[int, int] | None:
                     or (waiting and (waiting.group("cond") or _STILL_WAITING[1].match(tail)))):
                 return _raw(pos, base + lead, base + end)
             j = bisect_right(starts, start) - 1
+            if j and words[j - 1] in {"ال", "بال", "لل"} and tokens[j - 1].end() < start:
+                j -= 1                                      # «نحتاج منك الـ OTP», folded to «ال OTP»
+                pfx = words[j] + pfx
             if (j == 1 and needs and words[0] in _EXCEPT | {"بس", "فقط"}
                     and not any(_is_negation(words, k) for k in range(len(words)))):
                 return _raw(pos, base + tokens[0].start(), base + end)   # «ما نحتاج شي ثاني، بس الرمز»
@@ -1000,9 +1066,10 @@ def _asks_secret(norm: str, pos: list[int]) -> tuple[int, int] | None:
             listed = pfx.startswith("و")
             back = (10 if listed else 7 if j and words[j - 1] in _HOLDS and _SHOT & set(words[max(0, j - 6):j])
                     else 6 if j and words[j - 1] in _EXCEPT else 4)
-            fill = next((n for n in range(j) if words[j - 1 - n] not in _FILLER), j)
+            fill = _courtesy_run(words, j)
+            fill += fill < j and words[j - 1 - fill] in _US     # «ارسل لنا بأسرع وقت ممكن الرقم السري»
             soon = any(words[x] in _WHENEVER and words[x + 1] == "ما" for x in range(max(0, j - 5), j - 1))
-            back = max(back, fill + 1) + 2 * soon       # «نحتاج منك هسه وبأسرع وقت الرمز», «ارسل لنا متى ما وصلك الرمز»
+            back = max(back, fill + 1) + 2 * soon       # «دزلنا بأسرع وقت ممكن رجاءً الرمز», «ارسل لنا متى ما وصلك»
             for i in range(j - 1, max(-1, j - 1 - back), -1):
                 if listed and j - i > 4 and not _item(words[i + 1]):
                     break                                   # past four words, only the items of a list
@@ -1035,7 +1102,9 @@ def _reported(words: list[str]) -> bool:
 
 def _asks_for_it(norm: str, pos: list[int]) -> tuple[int, int] | None:
     """The secret named first, then "send it" within eight words, across a comma: «الكود اللي اجاك دزه النا». A
-    question or a new line may come between: «وين الرمز؟ دزه حتى نكمل»."""
+    question or a new line may come between: «وين الرمز؟ دزه حتى نكمل». "Send us the last one" and "tell us what you
+    chose" count too: «إذا وصلك أكثر من رمز، دزلنا آخر واحد», «اختار رقم سري جديد وگلنا شنو اخترت». A "send it"
+    that is negated or quoted stops only its own clause: «الرمز لا تكتبه بأي موقع. دزه إلنا بس هنا» asks."""
     stops = [m.start() for m in _STOP.finditer(norm)]
     for start, end, _ in _secrets(norm):
         n = bisect_left(stops, end)
@@ -1055,11 +1124,18 @@ def _asks_for_it(norm: str, pos: list[int]) -> tuple[int, int] | None:
         said = [_bare(w) for w in lead][-6:]                # the words before the secret
         if lead and said[-1] == "لا" and lead[-1][-1] not in "،,":
             continue                                        # «لا الرمز ولا الرقم السري نحتاجه منك»
+        blocked = None                                      # the clause of a negated "send it"
         for k, w in enumerate(words):
+            if parts[k] == blocked:
+                continue
             nxt_w = words[k + 1] if k + 1 < len(words) else ""
+            last_one = nxt_w in _LAST and [t.group() for t in tokens[k + 2:k + 3]] in (["واحد"], ["وحدة"], ["وحده"])
+            chose = (nxt_w in _WHAT and bool(words[k + 2:k + 3]) and bool(_CHOSE.fullmatch(words[k + 2]))
+                     and parts[k] == 0 and words[k + 3:k + 4] not in (["من"], ["بين"]))   # not «... من الخيارات»
             bare = (_BARE_ORDER.fullmatch(w) and nxt_w in _US | {"هنا"} and k <= 2 and parts[k] == 0
                     and (k + 2 >= len(words) or parts[k + 2] != parts[k] or words[k + 2] in _AFTER_BARE))
-            if not (_SEND_IT.fullmatch(w) or (_SEND_TO.fullmatch(w) and nxt_w in _IT) or bare
+            if not (_SEND_IT.fullmatch(w) or (_SEND_TO.fullmatch(w) and (nxt_w in _IT or last_one)) or bare
+                    or ((_SEND_TO.fullmatch(w) or w in _TELL) and chose)
                     or (_IS_SENT.fullmatch(w) and (_TO_US.match(norm, tokens[k].end())
                                                    or ("كتب" in w and _HERE_NEXT.match(norm, tokens[k].end()))))
                     or (_REACH_US.fullmatch(w) and nxt_w in _FROM_YOU)):
@@ -1068,8 +1144,8 @@ def _asks_for_it(norm: str, pos: list[int]) -> tuple[int, int] | None:
                 continue                                    # «... الرمز. تكدر ترسل لنا رقم المستلم» is another thing
             back = [x for x in (said + words[:k])[::-1] if x not in _ITSELF]
             prev = back[0] if back else ""
-            if prev in _SYSTEM | _WHO:
-                break                                       # «النظام ارسله», «ما ندري منو دزه», «النظام هو اللي دزه»
+            if prev in _SYSTEM | _WHO or nxt_w in _SYSTEM:
+                break                                       # «النظام ارسله», «ما ندري منو دزه», «... دزه النظام»
             if nxt_w in _TO_ANYONE or (tokens[k].group()[:1] == "و" and _coordinated(said + words[:k + 1], len(said) + k,
                                                                                     True)):
                 break                                       # «ترسله لأحد», «لا تصور الرسالة اللي بيها الرمز وتدزها»
@@ -1084,7 +1160,8 @@ def _asks_for_it(norm: str, pos: list[int]) -> tuple[int, int] | None:
             else:
                 hit = False
             if past or hit or (negs and any(_SAY.fullmatch(words[x]) for x in gap)):
-                break
+                blocked = parts[k]
+                continue
             if words[k - 1:k] in (["او"], ["أو"]) and any(_is_negation(said, x) for x in range(len(said))[-4:]):
                 break                                       # «ما يحتاج تخبرنا بالرمز أو تكتبه»
             if _reported(said + words[:k]):
@@ -1098,24 +1175,30 @@ def _asks_for_it(norm: str, pos: list[int]) -> tuple[int, int] | None:
 
 _CLAUSE_END = re.compile(r"[.،,!?؟؛;\n]")
 _MARKER = re.compile(r"[ \t]*(?:[-•*·●▪]|\d{1,2}[ \t]*[.)-]|\(\d{1,2}\))[ \t]*")
+_INLINE_SEP = re.compile(r"[،,]|(?<!\S)(?:\d{1,2}\)|\(\d{1,2}\))[ \t]*")   # «صورة الهوية 2) الرقم السري»
 
 
 def _asks_in_list(norm: str, pos: list[int]) -> tuple[int, int] | None:
     """The secret as an item of a list after a request and a colon: «حتى نكمل نحتاج منك:\n- الرمز اللي وصلك\n- صورة
-    الهوية», «المطلوب منك:\n١. صورة الهوية\n٢. رمز التحقق», «نحتاج منك: صورة الهوية، رمز التحقق». The items are the
-    marked lines below the colon («-», «•», «1.»), or the rest of the sentence split at commas."""
+    الهوية», «المطلوب منك:\n١. صورة الهوية\n٢. رمز التحقق», «نحتاج منك: صورة الهوية، رمز التحقق», «نحتاج: 1) صورة
+    الهوية 2) الرقم السري», «pls send:\n- full name\n- OTP». The items are the marked lines below the colon («-», «•»,
+    «1.»), or the rest of the sentence split at commas and at «1)» or «(1)»."""
     for colon in re.finditer(":", norm):
         start = max(norm.rfind(c, 0, colon.start()) for c in ".!?؟\n") + 1
         head = [_bare(w) for w in norm[start:colon.start()].split()][-6:]
-        if not any(all(_item(x) for x in head[i + 1:]) and _request_at(head, i, len(head), "", "", listed=True)
-                   and not _negated(head, i, len(head)) for i in range(len(head))):
+        latin = _LATIN_HEAD.search(norm, start, colon.start())
+        if not ((latin and not _LATIN_NOT.search(norm, start, latin.start()))
+                or any(all(_item(x) for x in head[i + 1:]) and _request_at(head, i, len(head), "", "", listed=True)
+                       and not _negated(head, i, len(head)) for i in range(len(head)))):
             continue
         items = []
         if norm[colon.end():].split("\n", 1)[0].strip():   # on the same line, up to the end of the sentence
             stop = _STOP.search(norm, colon.end())
-            hi = stop.start() if stop else len(norm)
-            items = [(colon.end() + m.start(), colon.end() + m.end())
-                     for m in re.finditer(r"[^،,]+", norm[colon.end():hi])]
+            seg = norm[colon.end():stop.start() if stop else len(norm)]
+            seps = [m.span() for m in _INLINE_SEP.finditer(seg)]
+            items = [(colon.end() + a, colon.end() + b) for a, b in zip([0] + [e for _, e in seps],
+                                                                         [s for s, _ in seps] + [len(seg)])
+                     if seg[a:b].strip()]
         else:
             at = norm.find("\n", colon.end()) + 1
             while 0 < at < len(norm):
@@ -1135,18 +1218,88 @@ def _asks_in_list(norm: str, pos: list[int]) -> tuple[int, int] | None:
     return None
 
 
-# A request in English: «Can you send us the verification code?», «send me الكود», «ممكن تعمل send للكود؟».
-_LATIN_ASK = re.compile(r"(?i)(?<![A-Za-z'])(?:send|give|share|tell|text|provide)\s+(?:(?:us|me|it)\s+)?"
-                        r"(?:(?:the|your|ال|لل|ل)\s*)?(?:verification\s+|otp\s+|sms\s+)?"
-                        r"(?:code|otp|pin|password|passcode|cvv|كود|الكود|رمز|الرمز)(?![A-Za-z])")
-_LATIN_NOT = re.compile(r"(?i)(?<![A-Za-z])(?:don'?t|do\s+not|never|not|won'?t|will\s+not|no\s+need)(?![A-Za-z])")
+# A request in English or Arabizi: «Can you send us the verification code?», «send me الكود», «ممكن تعمل send للكود؟»,
+# «Kindly share the 6-digit code», «reply with the verification code», «What is the code you received?», «we need your
+# OTP», «type ur OTP here», «dizlna el ramz», «ib3atli el code». Not after a negation or a quoted ask in the clause
+# («never share your OTP», «if someone asks u to send the OTP»), but «don't forget to send us the OTP» asks. And not
+# "we/it send the code" («we'll send the OTP to ur number»).
+_LAT_SECRET = (r"(?:(?:(?:verification|otp|sms|security|activation|login|online|banking|account|card|app|new|old"
+               r"|current|one[\s-]?time|\d[\s-]?digits?)\s+){0,3}(?:code|otp|pin|password|passcode|cvv|cvc)(?![A-Za-z])"
+               r"|(?:\d|three)\s+digits\s+on\s+the\s+back|(?:ال)?(?:كود|رمز)(?!\w))")
+_LAT_THE = r"(?:(?:the|your|ur|ال|لل|ل)\s*)?"
+_LATIN_ASK = re.compile(
+    r"(?i)(?<![A-Za-z'])(?:"
+    r"(?:send(?:ing)?|give|share|tell|te?xt|provide|forward|drop)\s+(?:(?:us|me|it|him|them|the\s+agent)\s+)?"
+    rf"(?:(?:the|that|ur|your)\s+(?:sms|msg|message|text)\s+(?:with|containing)\s+)?{_LAT_THE}{_LAT_SECRET}"
+    rf"|read\s+(?:us|me|him|the\s+agent)\s+{_LAT_THE}{_LAT_SECRET}"
+    rf"|reply\s+(?:to\s+(?:us|this\s+(?:msg|message|chat|email))\s+)?(?:with|w/)\s+{_LAT_THE}{_LAT_SECRET}"
+    rf"|(?:we|i)\s+need\s+{_LAT_THE}{_LAT_SECRET}|need\s+{_LAT_THE}{_LAT_SECRET}\s+from\s+(?:u|you)(?![A-Za-z])"
+    rf"|what(?:'s|’s|\s+is|\s+was)\s+(?:the|your|ur)\s+{_LAT_SECRET}(?!\s+for(?![A-Za-z]))"
+    r"(?!\s*\?\s*(?:it|this|that)(?:'s|’s|\s+is))"
+    rf"|(?:type|write|put|paste|enter)\s+{_LAT_THE}{_LAT_SECRET}\s+(?:here|below|in\s+(?:the|this|ur|your)\s+"
+    r"(?:reply|chat|msg|message))(?![A-Za-z])(?!\s+in\s+the\s+app))")
+# The secret first, then "send it": «the code u got, send it», «We never ask for your password, but pls send it».
+_LATIN_SEND_IT = re.compile(r"(?i)(?<![A-Za-z'])(?:(?:send|share|give|te?xt|forward)\s+it|tell\s+(?:us|me)\s+it"
+                            r"|(?:type|write|paste|put)\s+it\s+(?:here|below|in\s+(?:the|this)\s+(?:reply|chat)))"
+                            r"(?![A-Za-z])")
+_LAT_WORD = re.compile(r"(?i)(?<![A-Za-z])(?:code|otp|pin|password|passcode|cvv|cvc)(?![A-Za-z])")
+_LATIN_NOT = re.compile(r"(?i)(?<![A-Za-z])(?:(?:don['’]?t|do\s+not)(?!\s+(?:forget|hesitate)(?![A-Za-z]))|never|not"
+                        r"|won['’]?t|will\s+not|no\s+need|nobody|no\s+one|if\s+(?:someone|anyone|somebody)"
+                        r"|(?:asks?|asking|tells?|told)\s+(?:u|you)(?:\s+to)?)(?![A-Za-z])")
+_LAT_SUBJ = {"we", "i", "we'll", "i'll", "we’ll", "i’ll", "we've", "i've", "system", "app", "bank", "it", "they"}
+# Arabizi: «dizlna el ramz», «tdizlna el password», «ib3atli el code», «ersil el otp», «gulli el pin», «ni7taj el ramz».
+_ARABIZI_ASK = re.compile(
+    r"(?i)(?<![A-Za-z0-9'])(?:t?d[ie]?z+[ie]?l+(?:na|ne|i|y)|t?[iea]?b3[ae]?th?(?:l+(?:i|y|na|ena))?"
+    r"|t?[ie]?rs[ie]l+(?:i|y|na|ena)?|t?[ie]?kt[ie]?b[ie]?l+(?:i|y|na|ena)|t?(?:e?2|g|q)[oui]?l+(?:i|y|na|ena)"
+    r"|n[ie]?7t[ae]j|m[ie]?7t[ae]j[ie]+n|t?shar[ie]?kn[ae])"
+    r"(?:\s+(?:plz|pls|please|bsor3a|hassa|hessa|hasa|menak|mnak|minnak|ilna|elna|lna|ili|li))?"
+    r"\s+(?:(?:el|al|il|l)[\s-]?)?(?:code|kod|kood|otp|ramz|ramez|rmz|pin|password|pass|passcode|cvv)(?![A-Za-z])")
+_ARABIZI_NOT = re.compile(r"(?i)(?<![A-Za-z0-9])(?:la|lat|ma|mat|mo|mu|mesh|mish|msh|ma7ad|ma7ed)(?![A-Za-z0-9])"
+                          r"|(?<!\w)(?:لا|ما|مو|مش)(?!\w)")
+# A list after an English request and a colon: «Hi, to continue pls send:\n- full name\n- OTP».
+_LATIN_HEAD = re.compile(r"(?i)(?<![A-Za-z'])(?:send|share|give|provide|need)(?:\s+(?:us|me))?"
+                         r"(?:\s+(?:the\s+)?(?:following|these))?\s*$")
+
+
+def _by_us(before: str) -> bool:
+    """«we'll send the OTP», «the app will send the code»: the sender is us or the system, nobody is asked."""
+    return bool(_LAT_SUBJ & {w.lower() for w in before.split()[-2:]})
 
 
 def _asks_in_english(norm: str, pos: list[int]) -> tuple[int, int] | None:
-    for m in _LATIN_ASK.finditer(norm):
-        if not _LATIN_NOT.search(_CLAUSE_END.split(norm[max(0, m.start() - 40):m.start()])[-1]):
-            return _raw(pos, *m.span())
+    for rx in (_LATIN_ASK, _ARABIZI_ASK):
+        for m in rx.finditer(norm):
+            before = _CLAUSE_END.split(norm[max(0, m.start() - 40):m.start()])[-1]
+            if not (_LATIN_NOT.search(before) or (rx is _ARABIZI_ASK and _ARABIZI_NOT.search(before))
+                    or _by_us(before)):
+                return _raw(pos, *m.span())
+    for m in _LATIN_SEND_IT.finditer(norm):
+        s0 = max(norm.rfind(c, 0, m.start()) for c in ".!?\n") + 1
+        named = list(_LAT_WORD.finditer(norm, s0, m.start()))
+        if named and not (_LATIN_NOT.search(norm[named[-1].end():m.start()]) or _by_us(norm[s0:m.start()])):
+            return _raw(pos, named[-1].start(), m.end())
     return None
+
+
+_LINE_BREAK = re.compile(r"(?<=\S)[ \t]*\n[ \t]*(?=\S)")
+
+
+def _join_lines(norm: str) -> str:
+    """«ممكن تدزلنا\nالرمز اللي وصلك؟», «نحتاج منك\nرمز التحقق»: a single line break right after a request word and
+    right before a secret is a space. Not after punctuation or in a list («نحتاج منك:\n- الرمز»), and not after a
+    word that asks for nothing («دزلنا صورة الهوية\nالرمز لا تشاركه» stays two lines)."""
+    out = norm
+    for m in _LINE_BREAK.finditer(norm):
+        line = norm[norm.rfind("\n", 0, m.start()) + 1:m.start()]
+        last = _bare(line.split()[-1])
+        nxt = norm[m.end():norm.find("\n", m.end()) % (len(norm) + 1)]
+        first = _secrets(nxt)[:1]
+        lead = nxt[:first[0][0]].split() if first else ["-"]
+        if (line.rstrip()[-1] in ".،,!?؟؛;:" or _MARKER.match(line) or lead not in ([], ["ال"])
+                or not (_SEND.match(last) or last in _TELL | _US | _FILLER | _ASKING or last.startswith(_NEED))):
+            continue
+        out = out[:m.start()] + " " * (m.end() - m.start()) + out[m.end():]
+    return out
 
 
 def _unknown_number(norm: str, pos: list[int], allowed_text: str) -> tuple[int, int] | None:
@@ -1197,7 +1350,10 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
     since 5 Nov, when they stopped being flags).
     """
     norm, pos = _normalise(draft)
-    plain = _COURTESY_CLAUSE.sub(lambda m: " " * len(m.group()), norm)   # same length, so spans still map
+    # Same length, so spans still map: a courtesy clause between commas is blanked unless it names a secret
+    # («، حتى الأرقام اللي بالظهر،»), and a request split from its secret by one line break is joined.
+    plain = _COURTESY_CLAUSE.sub(lambda m: m.group() if _secrets(m.group()) else " " * len(m.group()), norm)
+    plain = _join_lines(plain)
     spans = {
         "stray_latin": _stray_latin(draft, allowed_text),
         "promise": _promise(draft, norm, pos, facts_text),

@@ -69,7 +69,7 @@ A fixed workflow, not a free-roaming agent: predictable and testable. Models are
 
 ```bash
 pip install -r requirements-dev.txt             # adds pytest to requirements.txt
-pytest                                          # 694 tests, no model calls
+pytest                                          # 1,694 tests, no model calls
 python app/server.py                            # viewer: http://localhost:8000; saved runs replay with no key
 
 export SUPPORT_PIPELINE_API_KEY=...             # or ANTHROPIC_API_KEY; live runs need a key

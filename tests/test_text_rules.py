@@ -692,6 +692,129 @@ def test_asks_secret_span_runs_from_the_request_to_the_secret():
     assert f["text"] == "دزلنا الرمز"
 
 
+# Held-out review (7 Nov): two sets of replies and hurried edits, written by people who had not read the rule, and
+# the misses the earlier rounds left. Each test pairs the requests a fix catches with sentences it must leave alone.
+def _asks(text: str) -> bool:
+    return "asks_secret" in problems(text, "… " + text)
+
+
+@pytest.mark.parametrize("text, asks", [
+    ("ممكن تدزلنا\nالرمز اللي وصلك؟", True), ("دزلنا\nالرمز اللي وصلك حتى نكمل.", True),
+    ("نحتاج منك\nرمز التحقق اللي وصلك.", True), ("ارسل لنا\nالرقم السري حتى نفتح الحساب.", True),
+    ("ممكن تدزلنا\nالـ OTP اللي وصلك؟", True),
+    ("دزلنا صورة الهوية\nالرمز لا تشاركه ويا أحد", False), ("لا تدزلنا\nالرمز اللي وصلك", False),
+    ("نحتاج منك:\n- صورة الهوية\n- رقم الهاتف", False), ("اكتب\nالرمز بالتطبيق", False),
+    ("أرسلنا لك\nالرمز على رقمك", False), ("نحتاج منك\nتغير الرقم السري", False),
+])
+def test_a_request_split_from_its_code_by_one_line_break(text, asks):
+    assert _asks(text) == asks
+
+
+def test_a_line_break_inside_the_request_keeps_its_span():
+    text = "ممكن تدزلنا\nالرمز اللي وصلك؟"
+    [f] = findings(text, "…")
+    assert f["text"] == "تدزلنا\nالرمز" == text[f["start"]:f["end"]]
+
+
+@pytest.mark.parametrize("text, asks", [
+    ("دزلنا بأسرع وقت ممكن رجاءً الرمز اللي وصلك.", True), ("دزلنا لو سمحت الرمز اللي وصلك.", True),
+    ("ارسل لنا من فضلك رمز التحقق.", True), ("نحتاج منك لو سمحت الرمز اللي وصلك.", True),
+    ("دزلنا إذا ممكن بأسرع وقت الرمز.", True), ("ارسل لنا بأسرع وقت ممكن الرقم السري", True),
+    ("نحتاج منك الـ OTP اللي وصلك", True),
+    ("لا تدزلنا بأسرع وقت ممكن الرمز", False), ("دزلنا لو سمحت رقم العملية، والرمز لا تشاركه.", False),
+])
+def test_a_courtesy_phrase_between_the_request_and_the_code(text, asks):
+    assert _asks(text) == asks
+
+
+@pytest.mark.parametrize("text, asks", [
+    ("Please send us the OTP", True), ("give us the code", True), ("share the PIN with us", True),
+    ("tell us your password", True), ("provide us the CVV", True), ("What is the code you received?", True),
+    ("Kindly share the 6-digit code you received via SMS.", True), ("reply with the verification code", True),
+    ("Please provide your card security code (CVV) to proceed.", True), ("we need the OTP to continue", True),
+    ("please don't hesitate to share the code with us", True), ("don't forget to send us the OTP", True),
+    ("the code u got, send it", True), ("can u read me the code from the SMS pls", True),
+    ("type ur OTP in the reply box here", True), ("Hi, to continue pls send:\n- full name\n- OTP", True),
+    ("We never ask for your password, but in this case pls send it", True),
+    ("never share your OTP", False), ("don't send the code to anyone", False), ("we will never ask for your PIN", False),
+    ("if someone asks u to send the OTP, ignore them", False), ("no need to send us the OTP", False),
+    ("Don't share your PIN. If someone asks you to send it, report them.", False),
+    ("type the code in the app, not in this chat", False), ("What is an OTP? It is a one-time code.", False),
+    ("we'll send the OTP to ur number", False), ("If you didn't get the code, we can send it again.", False),
+    ("You will need your PIN at the ATM.", False), ("send us the reference code from the receipt", False),
+])
+def test_english_requests_and_warnings(text, asks):
+    assert _asks(text) == asks
+
+
+@pytest.mark.parametrize("text, asks", [
+    ("dizlna el ramz elli wslak", True), ("plz dizlna el code elli wislak", True), ("ib3atli el code elli wslak", True),
+    ("dezelna el otp plz", True), ("momken tdizlna el password?", True), ("gulli el ramz elli wslak", True),
+    ("ni7taj el ramz elli wslak", True),
+    ("la tdiz el ramz l ay a7ad", False), ("mo lazim tdizlna el ramz", False), ("ma ni7taj el ramz", False),
+    ("ib3atli screenshot bidoon el code", False), ("matedish el code l ay 7ad", False),
+])
+def test_arabizi_requests_and_warnings(text, asks):
+    assert _asks(text) == asks
+
+
+@pytest.mark.parametrize("text, asks", [
+    ("حتى نتأكد من البطاقة، دزلنا الثلاث أرقام المطبوعة بظهر البطاقة.", True),
+    ("اكتبلنا الرقم المكون من ثلاث مراتب اللي جنب التوقيع بظهر البطاقة.", True),
+    ("حتى نفتح القفل عن الحساب، اكتبلنا الأرقام الأربعة اللي اخترتها لمن فتحت الحساب.", True),
+    ("دزلنا الكلمة اللي تدخل بيها للتطبيق حتى نجرب ندخل من عدنا.", True),
+    ("صوّر البطاقة من الوجهين بحيث تبين كل الأرقام، حتى الأرقام اللي بالظهر، ودزها إلنا.", True),
+    ("دزلنا آخر أربع أرقام من البطاقة بس حتى نلگاها بالنظام.", False),
+    ("الكود اللي على الوصل هو رقم العملية، تگدر تدزه إلنا عادي حتى نتابع.", False),
+])
+def test_a_secret_described_rather_than_named(text, asks):
+    assert _asks(text) == asks
+
+
+@pytest.mark.parametrize("text, asks", [
+    ("الوكيل المعتمد عدنا راح يتصل بيك. انطيه الرمز اللي يوصلك على الموبايل حتى يكمل العملية.", True),
+    ("مندوبنا راح يمرك اليوم. انطيه الرقم السري مال الحساب حتى يثبت العملية على جهازه.", True),
+    ("خابر خدمة العملاء وگول للموظف كلمة السر حتى يصفر الأجهزة المربوطة.", True),
+    ("راح يتصل بيك موظف. من يتصل اقرا عليه الرمز اللي يوصلك حتى يأكد هويتك.", True),
+    ("خابر الرقم 6060 وأملي على الموظف رمز التحقق اللي يوصلك.", True), ("ممكن تملي علينا الكود؟", True),
+    ("سجل بصمة صوت وگول بيها الرمز اللي وصلك والرقم السري، وإحنا نكمل الباقي.", True),
+    ("افتح المحادثة داخل التطبيق واكتب بيها الرقم السري حتى يشوفه الموظف ويتأكد منه.", True),
+    ("إذا أحد اتصل بيك لا تنطيه الرمز.", False), ("إذا سألك الموظف عن الرمز، گله الرمز سري وما أنطيه.", False),
+    ("گول للموظف إن الرمز ما وصلك.", False), ("إذا أحد گلك اقرا عليه الرمز، سد الخط.", False),
+    ("انطيه الهوية والرمز خليه عندك.", False), ("حمل التطبيق واكتب الرمز اللي يوصلك.", False),
+    ("حسب قول الموظف الرمز يوصل برسالة.", False),
+])
+def test_handing_the_code_to_our_staff(text, asks):
+    assert _asks(text) == asks
+
+
+@pytest.mark.parametrize("text, asks", [
+    ("الرمز لا تكتبه بأي موقع خارجي. دزه إلنا بس هنا بالمحادثة الرسمية حتى نتحقق.", True),
+    ("إذا وصلك أكثر من رمز، دزلنا آخر واحد بس حتى نفعّله يدوياً.", True),
+    ("صفرنا الرقم السري مالتك. اختار رقم سري جديد وگلنا شنو اخترت حتى نسجله عدنا.", True),
+    ("حتى نكمل طلب تبديل الشريحة نحتاج: 1) صورة الهوية الوطنية 2) رقم الهاتف القديم 3) الرقم السري للحساب.", True),
+    ("رد على هاي الرسالة برمز التحقق المكون من 6 أرقام اللي وصلك قبل شوية.", True),
+    ("شكراً لتعليقك. حط الرمز اللي يوصلك بالرسائل الخاصة للصفحة حتى نفعل حسابك.", True),
+    ("الرمز لا تكتبه هنا. اكتبه بالتطبيق.", False), ("الرمز اللي وصلك ما دزه موظف، دزه النظام", False),
+    ("ما نحتاج الرمز، بس گلنا شنو اخترت من الخيارات.", False), ("حط الرمز بالخانة وكمل.", False),
+    ("رد على هاي الرسالة بكلمة نعم إذا وصلك الرمز.", False),
+])
+def test_the_code_named_in_one_place_and_asked_for_in_another(text, asks):
+    assert _asks(text) == asks
+
+
+@pytest.mark.parametrize("text", [
+    "إحنا ما راح نتصل بيك نطلب كلمة السر أو الرمز. أي مكالمة بهالشكل احتيال، سد الخط وبلغنا.",
+    "موظفينا ما يتصلون بيك يطلبون الرقم السري.",
+    "إذا نسيت كلمة السر، اضغط 'نسيت كلمة السر'، يوصلك رمز على الموبايل، اكتبه بالتطبيق واختار كلمة سر جديدة.",
+    "الكود اللي على الوصل هو رقم العملية، تگدر تدزه إلنا عادي. أما رمز التحقق اللي يوصلك برسالة لا تدزه لأحد.",
+    "خبرنا لو الرمز ما وصلك.", "دزلنا رسالة لمن تغير الرقم السري.", "خبرنا لمن تغير الرقم السري.",
+    "مش لازم تدزلنا الرمز.",
+])
+def test_held_out_false_alarms_are_not_asking(text):
+    assert not _asks(text)
+
+
 # --- promise: a time only from the policy facts ---
 
 TICKET_SAYS = "<ticket>\nالتطبيق عالق وكالولي يتصلح خلال يومين\n</ticket>\nKnown facts: none"

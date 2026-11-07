@@ -4,6 +4,57 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were model-written, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 7 Nov: The code-request check and an unrelated «ما» (no model calls)
+
+**The problem.** While the inbox tour was being recorded, «وما نگدر دزلنا الرمز اللي وصلك» ("and we can't; send us the code you got") was typed into a draft. `asks_secret`, the blocking rule against a draft that asks the customer for a code, OTP, PIN, password or CVV, did not flag it, in the page or at the server. The same request with nothing before it was flagged.
+
+**The cause.** Any negation within four words before a request hid the request. Here «ما» negates «نگدر» ("we can"), not «دزلنا» ("send us").
+
+**The new rule** (`src/pipeline/draft_check.py`: `_negated`, `_reaching_negation`, `_reaches`). A negation hides a request only when it negates that request. It reaches a later word only through words that pass it on: an auxiliary («ما راح»), "can" or "need" before a verb of the same person, "think" or "that", a pronoun, an adverb, "or". An order is negated with «لا», never «ما» («ما دز» is the past). So «ما نگدر نطلب منك الرمز» ("we can't ask you for the code") is still allowed, and «وما نگدر دزلنا الرمز اللي وصلك» and «ما نگدر نكمل ترسلنا الرمز» ("we can't go on, send us the code") are caught.
+
+**Three test rounds.** Each round wrote sentences for this test in two passes, one hunting missed requests and one hunting false alarms, ran the rule on them with no model call, and fixed what it got wrong. Each round's fixes were then checked by the next round, and all the sentences are kept as a regression set.
+- Round 1: 197 sentences hunting misses and 178 hunting false alarms. The rule as it then stood got 155 and 74 wrong.
+- Round 2: 108 and 146; 71 and 98 wrong. Many of round 2's false alarms came from round 1's fixes; they were fixed.
+- Round 3: 152 and 416; 108 and 101 wrong.
+
+**Held-out sets.** Two more sets of 150 were then written by evaluators who had not read the rule: replies as the drafter might write them (68 ask for a secret, 82 are safe; mostly Baghdadi, some southern, Mosuli and feminine address; login, an OTP not arriving, SIM change, a blocked account, transfers, cards, agent cash-in) and hurried edits as a support agent might type them (69 ask, 81 are safe; English, Arabizi and other dialects mixed in). Every label was read again and none was changed. The most arguable is "give the OTP to our authorised agent", kept as a request. They were measured once, before the last fixes below.
+
+**Results** (requests caught / safe sentences passed; old is the rule at 4242ea6):
+
+| Set (requests / safe) | Old rule | New rule, before the last fixes | After the last fixes |
+|---|---|---|---|
+| Rounds 1-2 (266 / 363) | 65 (24%) / 288 (79%) | 259 (97%) / 363 (100%) | 263 (99%) / 363 (100%) |
+| Round 3 (144 / 424) | 19 (13%) / 374 (88%) | 140 (97%) / 424 (100%) | 143 (99%) / 424 (100%) |
+| Held-out replies (68 / 82) | 41 (60%) / 75 (91%) | **48 (71%) / 79 (96%)** | 66 (97%) / 82 (100%), not held out |
+| Held-out edits (69 / 81) | 15 (22%) / 80 (99%) | **30 (43%) / 77 (95%)** | 61 (88%) / 81 (100%), not held out |
+
+- **The held-out result is the bold column.** The last column is not held out: the fixes were made from those lists.
+- **Then fixed:** 18 of the replies' 20 misses and all 3 of their false alarms; 31 of the edits' 39 misses and all 4 of theirs. The ten left are under "Still not caught" below.
+- On the replies the new rule got 16 items right that the old one got wrong, and 5 wrong that the old one got right: three requests to hand a secret to our side (type the PIN in the in-app chat for the employee, give the OTP to our authorised agent, give the PIN to our representative) and two false alarms («إحنا ما راح نتصل بيك نطلب كلمة السر أو الرمز», where the negation sits on "call"; a code on a receipt that the reply says is the transaction number). On the edits, 15 and 3 (three new false alarms). All eight were fixed.
+- The replies' misses had five shapes: the secret described, not named («الثلاث أرقام المطبوعة بظهر البطاقة»); read out, dictated, said or handed to our staff; "reply with the code" or "put it in our private messages"; the code named in one place and asked for later, through a pronoun or a list; a warning, then a request. Most of the edits' misses were English or Arabizi, or used a verb other than "send".
+
+**The last fixes,** each small and each with tests in `tests/test_text_rules.py`:
+- **A line break** between a request and its code («ممكن تدزلنا⏎الرمز اللي وصلك؟») is read as a space when it comes right after a request word and right before the code (`_join_lines`). «دزلنا صورة الهوية⏎الرمز لا تشاركه» stays two lines.
+- **Courtesy words between** (up to four: «دزلنا بأسرع وقت ممكن رجاءً الرمز», «نحتاج منك لو سمحت الرمز»), and «الـ OTP» typed with a space (`_courtesy_run`).
+- **English:** share, give, tell, provide, forward, read me, reply with, "what is the code", "we need your OTP", "type it here", "the 6-digit code", "card security code", and «the code u got, send it». Not after «never», «don't», «no need» or «if someone asks you to», or with "we" or "the app" as the sender; «don't forget to» and «don't hesitate to» still ask.
+- **Arabizi:** «dizlna», «tdizlna», «dezelna», «ib3atli», «ersil», «gulli» or «ni7taj» before code, otp, ramz, pin or password; not after «la», «ma» or «mo».
+- **Handing it to our side:** «انطيه الرمز» (our agent), «گول للموظف كلمة السر», «اقرا عليه الرمز», «أملي على الموظف رمز التحقق», «گول بيها الرمز» (a voice note), and the PIN typed in a chat «حتى يشوفه الموظف». «گله الرمز سري وما أنطيه» is advice and stays allowed.
+- **A secret described:** «الثلاث أرقام المطبوعة بظهر البطاقة», «الرقم المكون من ثلاث مراتب», «الأرقام الأربعة اللي اخترتها», «الكلمة اللي تدخل بيها», «الأرقام اللي بالظهر».
+- **Named first, asked later:** a warning, then a request in the next sentence («الرمز لا تكتبه بأي موقع خارجي. دزه إلنا»); «دزلنا آخر واحد»; «گلنا شنو اخترت»; an inline numbered list («نحتاج: 1) … 3) الرقم السري»); «رد على هاي الرسالة برمز التحقق»; «حط الرمز بالخاص».
+- **False alarms:** «إحنا ما راح نتصل بيك نطلب كلمة السر» (one negation over "call" and "ask"); «… اكتبه بالتطبيق واختار كلمة سر جديدة» and «دزلنا رسالة لمن تغير الرقم السري» (the code belongs to "choose" or "change"); a code printed on a receipt; «خبرنا لو الرمز ما وصلك» ("whether"); «مش لازم تدزلنا الرمز»; «if someone asks u to send the OTP».
+
+**Guards.** A scratch script (outside the repo) runs the old rule (a copy of 4242ea6), the new rule before the last fixes (a copy of feaff34) and the working tree, with the API keys removed and no model call, on the 629 sentences of rounds 1-2, the 568 of round 3, both held-out sets and the saved drafts; the full pytest suite runs beside it. It was run after the fixes and after every later change, and no guard is worse than at feaff34 on any item. **The saved drafts are unchanged:** on the 74 drafts of the final test (`docs/runs/test2/final.json`) all three give the same findings (one `stray_latin`, no `asks_secret`). No file under `data/heldout*` or the git-ignored `runs/` was opened.
+
+**Still not caught:**
+- A request five or more words before the code, with other words between («دزلنا بعد ما تشوف الرسالة الرمز اللي وصلك»).
+- The code named in one sentence and asked for as "the same number" or "which number" («رد علينا بنفس الرقم», «گلّنا شنو الرقم اللي تريده»). Reading "the number" as the code would also flag «گلنا شنو الرقم اللي تحول عليه».
+- Kurdish-speaker word order («رجاء انت رمز ارسل حتى حساب يفتح»), «الغمز» for «الرمز», and an indirect question («ما ادري تگدر تدزلنا الرمز لو لا»).
+- Egyptian forms («ابعت», «اديني», «ابعتهولنا»), outside the Iraqi Arabic the drafter writes; English in the passive («The OTP should be sent to us») or with no verb («OTP pls»), «confirm your PIN … just type it», and a misspelt «pasword».
+
+**Why that is accepted.** Latin text still gets the `stray_latin` warning, so the English and Arabizi misses are still highlighted for the agent. An agent who wants to get past a text rule can (a spelling, a space, a picture). The rule is a safety net under a person's approval, not the control itself, and the server applies it too, so a hand-made request is refused (409).
+
+**Size and tests.** `draft_check.py` grew from 381 to 1,375 lines (1,219 before the last fixes). **pytest: 1,694 pass** (697 before this work, 1,591 before the last fixes): 894 new for the three rounds and 103 for the last fixes, with the API keys removed and no model call. Each test function for the last fixes fails on the code before them (checked against a copy of feaff34). **`node tests/ui/smoke.cjs`: 448/448**, unchanged.
+
 ## 5 Nov: A calmer inbox (no model calls)
 
 **The problem,** in the author's words: "the UI is too flooded with information, it's overwhelming." At 1280 × 800 a ready ticket showed, at once: the header with a labelled source picker, a saved-run pill and two buttons; the «ليش؟ كيف انحسمت» panel open with six stages of text; a row of key chips; a five-cell summary grid and «صحّح»; fact boxes above the message; the message; the draft; a sentence listing every check that passed; an action bar with key chips, a lock badge and a helper sentence; and a queue head with a counter, a bar, a run note and an urgent line, over rows that each showed an icon, a status word, the id, a priority pill, the team and two lines of text.
