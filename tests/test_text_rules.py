@@ -1317,7 +1317,7 @@ def test_drafter_gets_the_customers_words_for_an_amount_not_written_as_a_number(
     assert "Amount: 1000 USD" in draft.user_prompt(text, usd, "transfers")
     monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
     prompt = draft.user_prompt(text, usd, "transfers")
-    assert "1000" not in prompt and "quote their words «عشر ورقات»" in prompt
+    assert "1000" not in prompt and "the customer wrote «عشر ورقات»" in prompt
     iqd = Extraction(category="transfers", subcategory="not_received", amount_iqd=50000, confidence=0.9)
     assert "Amount: 50,000 IQD" in draft.user_prompt("حولت 50 الف وما وصلت", iqd, "transfers")
     words = draft.user_prompt("حولت خمسين لأخوي وما وصلت", iqd, "transfers")    # no money word to quote
@@ -1328,6 +1328,8 @@ def test_drafter_gets_the_customers_words_for_an_amount_not_written_as_a_number(
     ("دزيت عشر ورقات لصديقي", "عشر ورقات"), ("حولت مليون ونص دينار", "مليون ونص دينار"),
     ("دزيت 5 ورقات", "5 ورقات"), ("دزيت خمسين ورقة، وانتظرت عشر دقايق", "خمسين ورقة"),
     ("صارلي عشر دقايق انتظر", None), ("حولت خمسين لأخوي", None),
+    ("ادفع بمتجر بستين الف وطلعت مرفوضة", "بستين الف"), ("سويت transfer ميت الف لصديقي", "ميت الف"),
+    ("الف شكر، حولت خمسمية الف دينار", "خمسمية الف دينار"),
 ])
 def test_own_words_finds_number_words_that_name_money(text, words):
     assert draft.own_words(text) == words

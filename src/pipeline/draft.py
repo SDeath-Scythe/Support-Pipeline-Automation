@@ -46,21 +46,20 @@ def system_prompt() -> str:
 # amount_own_words: the amount as the customer wrote it, when it is not a number in the ticket («عشر ورقات»).
 # A run of number words with a money word in it; «ورقة» (a 100 USD note) is how the classifier reads it, not
 # something the customer wrote, so the draft quotes the words instead of the converted number.
-_NUM_WORD = (r"و?(?:واحد|وحدة|ثنين|اثنين|ثنتين|ثلاث|ثلاثة|تلاث|تلاثة|اربع|أربع|اربعة|أربعة|خمس|خمسة|ست|ستة|سبع|سبعة|"
-             r"ثمان|ثمانية|ثمن|ثمنية|تسع|تسعة|عشر|عشرة|احدعش|اثنعش|ثلطعش|ربعطعش|خمسطعش|عشرين|ثلاثين|تلاثين|اربعين|"
-             r"أربعين|خمسين|ستين|سبعين|ثمانين|تسعين|مية|ميه|مئة|ميتين|ربع|نص|نصف|الف|ألف|الفين|ألفين|آلاف|الاف|"
-             r"مليون|ملايين|\d+)")
+_NUM_WORD = (r"(?:و|ب|وب)?(?:واحد|وحدة|ثنين|اثنين|ثنتين|ثلاث|ثلاثة|تلاث|تلاثة|اربع|أربع|اربعة|أربعة|خمس|خمسة|ست|ستة|"
+             r"سبع|سبعة|ثمان|ثمانية|ثمن|ثمنية|تسع|تسعة|عشر|عشرة|احدعش|اثنعش|ثلطعش|ربعطعش|خمسطعش|عشرين|ثلاثين|تلاثين|"
+             r"اربعين|أربعين|خمسين|ستين|سبعين|ثمانين|تسعين|مية|ميه|مئة|ميت|ميتين|\w+مي[ةه]|ربع|نص|نصف|الف|ألف|الفين|"
+             r"ألفين|آلاف|الاف|مليون|ملايين|\d+)")
 _MONEY_WORD = r"(?:ورق[ةه]|ورقات|اوراق|أوراق|دولار|دينار|الف|ألف|آلاف|الاف|مليون|ملايين)"
-_TOKEN = rf"(?:{_NUM_WORD}|و?{_MONEY_WORD})"
+_TOKEN = rf"(?:{_NUM_WORD}|(?:و|ب|وب)?{_MONEY_WORD})"
 _OWN_WORDS = re.compile(rf"(?<!\w){_TOKEN}(?:\s+{_TOKEN})*(?<=\w)(?!\w)")
 
 
 def own_words(text: str) -> str | None:
-    """The first run of number words in the ticket that names money («عشر ورقات», «مليون ونص»), or None."""
-    for m in _OWN_WORDS.finditer(text):
-        if re.search(rf"(?<!\w)و?{_MONEY_WORD}(?!\w)", m.group()):
-            return m.group()
-    return None
+    """The longest run of number words in the ticket that names money («عشر ورقات», «بستين الف»), or None."""
+    runs = [m.group() for m in _OWN_WORDS.finditer(text)
+            if re.search(rf"(?<!\w)(?:و|ب|وب)?{_MONEY_WORD}(?!\w)", m.group())]
+    return max(runs, key=lambda r: len(r.split()), default=None)
 
 
 def amount_line(cleaned_text: str, ex: Extraction) -> str | None:
@@ -75,8 +74,11 @@ def amount_line(cleaned_text: str, ex: Extraction) -> str | None:
     if not fixes.enabled("amount_own_words") or amount_written(cleaned_text, n, currency):
         return line
     words = own_words(cleaned_text)
-    return ("Amount: the customer wrote it in words, not as a number. If you mention it, quote their words"
-            + (f" «{words}»" if words else "") + " and write no number for it.")
+    if words:
+        return (f"Amount: the customer wrote «{words}». If you mention the amount, use those words as they are, "
+                "without quotation marks, and write no number for it.")
+    return ("Amount: the customer did not write it as a number. If you mention it, use their own words from the "
+            "ticket and write no number for it.")
 
 
 _CHECKED = {"reference", "amount", "date", "recipient_number", "phone_number"}   # fields _have() can see
