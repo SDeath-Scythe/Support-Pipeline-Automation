@@ -8,7 +8,7 @@
 
 import { NetworkError, ServerError } from "./api.js";
 import { buildComposer, isBlocking, originalDraft } from "./composer.js";
-import { factLine, factsOf, textWithFacts } from "./facts.js";
+import { factLine, factsOf, fitSpans, textWithFacts } from "./facts.js";
 import {
   ACTION_ICON, ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, DRAFT_REASONS, FIELD_AR, IDENTITY_IF_REPLY_AR, NOT_NEEDED_AR,
   PRIORITY_AR, QUIET_AR, SECRET_HIDE_AR, SECRET_MASK, SECRET_SHOW_AR, STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL,
@@ -84,11 +84,7 @@ const prioText = (p) => (p ? [ltr(p), ` · ${PRIORITY_AR[p] || ""}`] : "بدون
 const shownText = (it) => plainText(it.ticket.text || ev(it, "received")?.data?.text || "").text;
 /** The card numbers and codes the customer wrote (result.secret_spans: [start, end] in UTF-16 units of
  *  shownText), hidden until the agent asks to see them. Ranges that do not fit the text are dropped. */
-function secretSpans(it, text) {
-  const s = it.result?.secret_spans;
-  return Array.isArray(s) ? s.filter((x) => Array.isArray(x) && Number.isInteger(x[0]) && Number.isInteger(x[1])
-    && x[0] >= 0 && x[0] < x[1] && x[1] <= text.length) : [];
-}
+const secretSpans = (it, text) => fitSpans(it.result?.secret_spans, text);
 /** A row's text: the start of the message, with a card number or a code hidden (never revealed here). */
 const firstWords = (it) => {
   const text = shownText(it);

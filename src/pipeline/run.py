@@ -136,8 +136,9 @@ def _clean_changes(raw: str) -> dict[str, int]:
     }
 
 
-def _text_flags(raw: str, text: str) -> list[str]:
-    """The flags the code rules raise on the customer's text (ticket_rules.py)."""
+def text_flags(raw: str, text: str) -> list[str]:
+    """The flags the code rules raise on the customer's text (ticket_rules.py). The viewer adds them to a
+    run saved before the rules (app/server.py apply_current_rules)."""
     flags = []
     if sensitive_numbers(text) or ticket_rules.secret_spans(raw):
         flags.append("secret_in_ticket")
@@ -345,7 +346,7 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         text = clean(raw_text)
         ctx["text"] = text
         send("clean", "done", {"text": text, "changes": _clean_changes(raw_text)})
-        ctx["text_flags"] = _text_flags(raw_text, text)
+        ctx["text_flags"] = text_flags(raw_text, text)
         ctx["secret_spans"] = ticket_rules.secret_spans(raw_text)
 
         # A very long ticket is not sent to a model: it costs more and is the usual shape of an

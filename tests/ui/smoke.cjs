@@ -21,7 +21,9 @@
 // A few of its checks feed the page a changed /api/meta or run file through a browser route (a cache-only
 // viewer, a run with one escalation); the server itself is never changed. Since the 5 Nov review the
 // server gives the committed run (made on 30 Oct) the account_risk flag as run.py does now, so the six
-// blocked-account and SIM-change tickets are «تحتاج تأكيد» and the tab counts are 15 / 6 / 59.
+// blocked-account and SIM-change tickets are «تحتاج تأكيد». Since 7 Nov it serves the run as today's code
+// would decide it for the rules that need no model call (apply_current_rules): six more ready drafts have a
+// draft warning and are «تحتاج تأكيد», so the tab counts are 21 / 6 / 53.
 //
 // Since 5 Nov the inbox is calmer: «ليش؟» is a drawer, closed until the agent opens it; the queue head is
 // the counter and its bar; a row is its priority, id and text (its status is in its name); the ticket has
@@ -46,7 +48,7 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..", "..");
 const PYTHON = process.env.PYTHON || "python";
 const RUN = "saved/test2/final";
-const EXPECT = { flagged: 15, escalated: 6, drafted: 59, total: 80, type: "78/80", priority: "79/80" };
+const EXPECT = { flagged: 21, escalated: 6, drafted: 53, total: 80, type: "78/80", priority: "79/80" };
 const SECRET_ASK = " دزلنا الرمز اللي وصلك";
 const LIVE_NO_KEY = "ماكو مفتاح API";   // «كيف يشتغل»'s cause when there is no key (labels.js LIVE_CAUSE_AR)
 
@@ -1047,7 +1049,11 @@ async function runPass(browser, pass) {
       const at = secretText.indexOf(PIN);
       a.ticket.text = secretText;
       Object.assign(a.result, { outcome: "flagged", flags: ["secret_in_ticket", "complaint_risk"], secret_spans: [[at, at + PIN.length]] });
-      a.events.find((e) => e.stage === "clean" && e.status === "done").data.changes.format_chars = 2;
+      a.events.find((e) => e.stage === "received").data.text = secretText;
+      const cleanEv = a.events.find((e) => e.stage === "clean" && e.status === "done");
+      cleanEv.data.changes.format_chars = 2;
+      cleanEv.data.text = secretText;
+      a.events.find((e) => e.stage === "classify" && e.status === "done").data.user_prompt = `<ticket>\n${secretText}\n</ticket>`;
       row(quietId).result.flags.push("instructions_in_ticket");
       const c = row(warnId);
       const n = [...warnDraft].length;
@@ -1123,6 +1129,18 @@ async function runPass(browser, pass) {
     check("ask_missing and dialect_words: the server takes them as acknowledged kinds", dC.ticket_id === warnId && dC.action === "approved"
       && JSON.stringify(dC.warnings_acknowledged) === '["ask_missing","dialect_words"]', JSON.stringify(dC));
 
+    // account_risk (5 Nov review): approve waits for «تأكدت من هوية الزبون», and the log keeps the tick as a kind.
+    {
+      const riskId = open.find((r) => (r.result.flags || []).includes("account_risk") && r.ticket.id !== secretId)?.ticket.id;
+      await openId(f, riskId);
+      const off = await f.getAttribute("#approveBtn", "aria-disabled");
+      await f.check("#ackBox");
+      const dR = await fAct(() => f.click("#approveBtn"), "the approve with the identity tick");
+      check(`account_risk ${riskId}: approve waits for the identity tick; the log line keeps it (warnings_acknowledged «account_risk»)`,
+        off === "true" && dR.ticket_id === riskId && JSON.stringify(dR.flags) === '["account_risk"]'
+        && JSON.stringify(dR.warnings_acknowledged) === '["account_risk"]', JSON.stringify(dR));
+    }
+
     // device_lost and budget_reached: escalations, each with its reason; the quiet flag stays out of the banner.
     await openId(f, lostId);
     const lw = await t(f, "#whyLine");
@@ -1144,6 +1162,33 @@ async function runPass(browser, pass) {
     await f.waitForSelector("#pResult .result", { timeout: 8000 });
     const chips = await f.evaluate(() => [...document.querySelectorAll(".chips .chip")].map((x) => x.textContent).join(" | "));
     check("format_chars: «كيف يشتغل»'s clean step says «رمز مخفي انشال»", chips.includes("رمز مخفي انشال"), chips);
+    // secret_spans in «كيف يشتغل» (7 Nov): hidden as in «رسالة الزبون», in the list, the slip, the cleaned text and the
+    // prompt; one «اظهر الرقم» for the ticket on screen, reset when another ticket opens; the list never shows it.
+    const proc = () => f.evaluate((id) => ({
+      row: [...document.querySelectorAll("#pList .prow")].find((b) => b.textContent.includes(id))?.querySelector(".prow-text")?.textContent || "",
+      slip: document.getElementById("pSlip")?.textContent || "", cleaned: document.querySelector("#st-clean .cleaned")?.textContent || "",
+      prompt: document.querySelector("#st-classify details.io pre")?.textContent || "",
+      sr: [...document.querySelectorAll("#pSlip .secret-mask .sr-only")].map((x) => x.textContent).join("|"),
+      toggles: document.querySelectorAll("#pSecretToggle").length, toggle: document.getElementById("pSecretToggle")?.textContent || "",
+      offered: document.getElementById("pSecretRow")?.hidden === false }), secretId);
+    const h1 = await proc();
+    check("secret_spans in «كيف يشتغل»: «••••» («رقم مخفي» for a screen reader) in the list row, the slip, the cleaned text and the prompt, with one «اظهر الرقم»",
+      [h1.row, h1.slip, h1.cleaned, h1.prompt].every((x) => x.includes("••••") && !x.includes(PIN)) && h1.sr === "رقم مخفي"
+      && h1.toggles === 1 && h1.offered && h1.toggle === "اظهر الرقم", JSON.stringify(h1));
+    await f.click("#pSecretToggle");
+    const h2 = await proc();
+    check("secret_spans in «كيف يشتغل»: «اظهر الرقم» shows it in the slip, the cleaned text and the prompt, keeps the focus; the list row stays hidden",
+      [h2.slip, h2.cleaned, h2.prompt].every((x) => x.includes(PIN) && !x.includes("••••")) && h2.row.includes("••••") && !h2.row.includes(PIN)
+      && h2.toggle === "اخفي الرقم" && (await active(f)) === "pSecretToggle", JSON.stringify(h2));
+    await f.locator("#pList .prow", { hasText: quietId }).first().click();
+    await f.waitForSelector("#pResult .result", { timeout: 8000 });
+    const hq = await proc();
+    await f.locator("#pList .prow", { hasText: secretId }).first().click();
+    await f.waitForSelector("#pResult .result", { timeout: 8000 });
+    const h3 = await proc();
+    check("secret_spans in «كيف يشتغل»: a ticket with nothing hidden has no «اظهر الرقم»; back on the first one the code is hidden again",
+      !hq.offered && !hq.slip.includes("••••") && h3.offered && !h3.slip.includes(PIN) && h3.slip.includes("••••")
+      && !h3.cleaned.includes(PIN) && h3.toggle === "اظهر الرقم", JSON.stringify({ hq, h3 }));
     await f.click("#modeAgent");
     await cspOf(f, "flags");
     await f.close();
@@ -1275,7 +1320,7 @@ async function runPass(browser, pass) {
       (t) => [t, Number(document.querySelector(`#tab-${t} .tab-count`)?.textContent.replace(/\D/g, ""))])));
     const fromRun = { flagged: 0, escalated: 0, drafted: 0 };
     for (const r of run.tickets) fromRun[r.result.outcome]++;
-    check(`tab counts 15 / 6 / 59 / 0 match the run (${JSON.stringify(counts)})`,
+    check(`tab counts ${EXPECT.flagged} / ${EXPECT.escalated} / ${EXPECT.drafted} / 0 match the run (${JSON.stringify(counts)})`,
       counts.flagged === EXPECT.flagged && counts.escalated === EXPECT.escalated && counts.drafted === EXPECT.drafted && counts.done === 0
       && counts.flagged === fromRun.flagged && counts.escalated === fromRun.escalated && counts.drafted === fromRun.drafted, JSON.stringify({ counts, fromRun }));
     const tabWords = await page.evaluate(() => [...document.querySelectorAll("[role=tab] .tab-label")].map((x) => x.textContent));
@@ -1422,18 +1467,11 @@ async function runPass(browser, pass) {
     // 5. A flagged ticket: approve stays off until the box is ticked.
     let k2;
     {
+      // Since 7 Nov the first one is t2-0058, a P1 whose draft has a warning (amount_not_in_ticket); the others are P2s and P3s.
       k2 = await openTab("flagged");
-      // 5 Nov calm: P1s wait in «متصعّدة» and «جاهزة», only P2s here: a dot on those two tabs, in their names.
-      {
-        const marks = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[role=tab]")].map((b) => [b.dataset.tab, b.querySelector(".tab-urgent")?.textContent || ""])));
-        // (On a phone the queue is hidden behind the ticket screen: the names are read there all the same.)
-        const named = await page.getByRole("tab", { name: /متصعّدة.*فيها تذكرة عاجلة/, includeHidden: true }).count();
-        check("5 Nov calm / review: from «تحتاج تأكيد» (P2s), a tiny «P1» on «متصعّدة» and «جاهزة» (P1s wait there), named «فيها تذكرة عاجلة»; none here",
-          marks.escalated === "P1" && marks.drafted === "P1" && !marks.flagged && !marks.done && named === 1, JSON.stringify({ marks, named }));
-      }
       check(`flagged ${k2}: approve is disabled and reads «تأكدت، اعتمد»`,
         (await page.getAttribute("#approveBtn", "aria-disabled")) === "true" && (await text("#approveBtn")).includes("تأكدت، اعتمد"), await text("#approveBtn"));
-      check("flagged: the box names what to check", (await text("#confirmBox")).includes("تأكد من"), await text("#confirmBox"));
+      check("flagged: the box names what to check", /تأكد من|قارن|راجع/.test(await text("#confirmBox")), await text("#confirmBox"));
       {
         const lay = await page.evaluate(() => {
           const d = document.getElementById("draft").getBoundingClientRect(), c = document.getElementById("confirmBox").getBoundingClientRect();
@@ -1484,17 +1522,27 @@ async function runPass(browser, pass) {
       const d = await act(() => (pass.phone ? page.click("#approveBtn") : page.keyboard.press("Control+Enter")), "the flagged approve");
       check(`flagged approve logs «approved» for ${k2}${pass.phone ? "" : " (T21: Ctrl+Enter, Space, Ctrl+Enter; the draft as it was)"}`,
         d.action === "approved" && d.ticket_id === k2 && d.pipeline_outcome === "flagged" && d.final_sha256 === d.draft_sha256, JSON.stringify(d));
-      // 5 Nov review: the first flagged ticket is a SIM change (account_risk); the log keeps the identity tick.
+      // 5 Nov review, then 7 Nov: the log keeps the ticket's flags as served and each point ticked, as kinds (the identity
+      // tick of a blocked account or a SIM change is checked in flagFixes and in fresh-clone).
       const k2Flags = run.tickets.find((r) => r.ticket.id === k2)?.result.flags || [];
-      check(`flagged ${k2} [${k2Flags.join(", ")}]: the log line keeps the identity tick (warnings_acknowledged «account_risk»)`,
-        k2Flags.includes("account_risk") && JSON.stringify(d.flags) === '["account_risk"]'
-        && JSON.stringify(d.warnings_acknowledged) === '["account_risk"]', JSON.stringify(d));
+      const k2Points = k2Flags.filter((f) => !(meta.quiet_flags || []).includes(f)).map((f) => (f.startsWith("draft:") ? f.slice(6) : f));
+      check(`flagged ${k2} [${k2Flags.join(", ")}]: the log line keeps its flags as served and each point ticked (warnings_acknowledged)`,
+        k2Points.length > 0 && JSON.stringify(d.flags) === JSON.stringify(k2Flags)
+        && JSON.stringify(d.warnings_acknowledged) === JSON.stringify(k2Points), JSON.stringify(d));
       // T13 (user tests, 7 Nov): a P1 escalation waits, more urgent than every flagged P2. The inbox stays
       // in «تحتاج تأكيد» and says so in one quiet line above the ticket; «روح لـ…» goes there.
       const note = await text("#urgentNote");
       check("T13: after the flagged approve the inbox stays in «تحتاج تأكيد»; a quiet line says an urgent ticket waits in «متصعّدة»",
         (await page.getAttribute("#tab-flagged", "aria-selected")) === "true" && !(await text("#status")).includes("انتقلنا")
         && (await page.isVisible("#urgentNote")) && note.includes("تذكرة عاجلة بـ«متصعّدة»") && note.includes("روح لـ«متصعّدة»"), `${note} | ${await text("#status")}`);
+      // 5 Nov calm: P1s wait in «متصعّدة» and «جاهزة», only P2s and P3s are left here: a «P1» on those two tabs, in their names.
+      {
+        const marks = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("[role=tab]")].map((b) => [b.dataset.tab, b.querySelector(".tab-urgent")?.textContent || ""])));
+        // (On a phone the queue is hidden behind the ticket screen: the names are read there all the same.)
+        const named = await page.getByRole("tab", { name: /متصعّدة.*فيها تذكرة عاجلة/, includeHidden: true }).count();
+        check("5 Nov calm / review: from «تحتاج تأكيد» (P2s and P3s left), a tiny «P1» on «متصعّدة» and «جاهزة» (P1s wait there), named «فيها تذكرة عاجلة»; none here",
+          marks.escalated === "P1" && marks.drafted === "P1" && !marks.flagged && !marks.done && named === 1, JSON.stringify({ marks, named }));
+      }
       await settled(page);
       await page.click("#urgentGo");
       await waitUntil(() => page.evaluate(() => document.getElementById("tab-escalated")?.getAttribute("aria-selected") === "true"), 3000, "the escalated tab").catch(() => {});
@@ -1956,7 +2004,7 @@ async function runFresh(browser, pass) {
       const t17 = await p.evaluate(() => ({ banner: document.getElementById("whyLine")?.textContent || "",
         notes: [...document.querySelectorAll("#sumBox .summary-note")].map((n) => [n.className, n.textContent, getComputedStyle(n).fontWeight]) }));
       check(`5 Nov review: the ${served.length} flagged tickets at 1280 x 800 show the draft's first two lines above the bar, the tick under the draft`,
-        served.length === 15 && !under.length, under.join(" | "));
+        served.length === EXPECT.flagged && !under.length, under.join(" | "));
       check("5 Nov review: t2-0017 names «رقم العملية» in its banner only; its agreed re-check is a quiet line, not a warning",
         t17.banner.includes("رقم العملية ناقص") && t17.notes.every(([, x]) => !x.includes("رقم العملية"))
         && t17.notes.some(([c, x, w]) => x === "النوع انراجع بنموذج ثاني، واتفقوا" && c.includes("muted") && Number(w) < 500), JSON.stringify(t17));
@@ -2142,8 +2190,10 @@ async function runFresh(browser, pass) {
     await pr.waitForSelector(".trace .gold table", { timeout: 10000 });
     const goldRow = await pr.evaluate(() => [...document.querySelectorAll(".trace .gold tbody tr")].find((r) => r.querySelector("th")?.textContent === "النتيجة")?.textContent || "");
     const resBox = await t(pr, "#pResult .result");
-    check(`«كيف يشتغل»: outcome 74/80 by the 5 Nov rule, said in the overview, and ${rk}'s expected «تحتاج تأكيد» with ✓ and the note`,
-      outcomeStat === "74/80" && ruleNote.includes("6 تذاكر حساب مقفول أو تبديل شريحة") && ruleNote.includes("انعلّمت هسه بنفس القاعدة")
+    // 7 Nov: six ready drafts with a draft warning are «تحتاج تأكيد» now; the gold file says «جاهزة», so 74 → 68.
+    check(`«كيف يشتغل»: outcome 68/80 by the 5 Nov rule and the 7 Nov rules, said in the overview, and ${rk}'s expected «تحتاج تأكيد» with ✓ and the note`,
+      outcomeStat === "68/80" && ruleNote.includes("6 تذاكر حساب مقفول أو تبديل شريحة") && ruleNote.includes("انعلّمت هسه بنفس القاعدة")
+      && ruleNote.includes("قواعد 7 تشرين الثاني") && ruleNote.includes("9 تذاكر انضافتلها علامة") && ruleNote.includes("6 تذاكر كانت «جاهزة» وصارت «تحتاج تأكيد»")
       && goldRow.includes("تحتاج تأكيد (قاعدة 5 تشرين الثاني)") && goldRow.includes("✓") && !goldRow.includes("✗")
       && resBox.includes("أقدم من قاعدة 5 تشرين الثاني"), `${outcomeStat} | ${ruleNote} | ${goldRow} | ${resBox.slice(0, 300)}`);
     await done(pr, "account-risk");

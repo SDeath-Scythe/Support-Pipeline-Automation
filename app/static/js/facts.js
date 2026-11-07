@@ -20,6 +20,31 @@ export function findLoose(text, value) {
   return firstMatch(text, new RegExp(`(?<![0-9A-Za-z])${chars.map(esc).join(SEP)}(?![0-9A-Za-z])`, "i"));
 }
 
+// --- a card number or a code the customer wrote (result.secret_spans), hidden until the agent asks ---
+
+/** The ranges of result.secret_spans ([start, end] in UTF-16 units of the message as shown) that fit `text`.
+ *  Ranges that do not fit are dropped. */
+export function fitSpans(spans, text) {
+  return Array.isArray(spans) ? spans.filter((x) => Array.isArray(x) && Number.isInteger(x[0]) && Number.isInteger(x[1])
+    && x[0] >= 0 && x[0] < x[1] && x[1] <= text.length) : [];
+}
+
+/** «••••» in place of a hidden number, read as «رقم مخفي» by a screen reader. */
+export const secretMask = () => el("span", { class: "secret-mask" },
+  el("span", { "aria-hidden": "true", text: SECRET_MASK }), el("span", { class: "sr-only", text: "رقم مخفي" }));
+
+/** Every place in `text` where one of the hidden numbers (`digits`: each a string of Western digits) is
+ *  written again, however its digits are split or written (the cleaned text, a model's answer, a prompt). */
+export function secretRanges(text, digits) {
+  const out = [];
+  const plain = westernDigits(text);   // one character for one: offsets are the original text's
+  for (const d of digits) {
+    if (!d) continue;
+    for (const m of plain.matchAll(new RegExp(`(?<![0-9])${[...d].join(SEP)}(?![0-9])`, "g"))) out.push([m.index, m.index + m[0].length]);
+  }
+  return out;
+}
+
 /** An amount written as digits (2,000,000), or as «12 الف», «2 مليون» or «5 ورقة» (100-dollar notes). */
 export function findAmount(text, n, currency) {
   if (!Number.isInteger(n) || n <= 0) return null;
@@ -69,8 +94,7 @@ export function factsOf(extraction, text, subcategory) {
 export function textWithFacts(text, facts, hidden = []) {
   const over = (at) => hidden.some(([s, e]) => at.start < e && s < at.end);
   return spanned(text, [
-    ...hidden.map(([s, e]) => ({ start: s, end: e, make: () => el("span", { class: "secret-mask" },
-      el("span", { "aria-hidden": "true", text: SECRET_MASK }), el("span", { class: "sr-only", text: "رقم مخفي" })) })),
+    ...hidden.map(([s, e]) => ({ start: s, end: e, make: secretMask })),
     ...facts.map((f, i) => f.at && !over(f.at) && {
       start: f.at.start, end: f.at.end,
       // A reference or a phone keeps its own left-to-right order inside the Arabic sentence.

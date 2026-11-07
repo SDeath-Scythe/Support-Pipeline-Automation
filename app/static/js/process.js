@@ -3,12 +3,15 @@
 // was sent and returned, a replay, "run all" over a ticket set, and what agents decided on the run.
 
 import { NetworkError, ServerError, getJSON } from "./api.js";
+import { fitSpans, secretMask, secretRanges } from "./facts.js";
 import { streamTicket, liveState } from "./live.js";
-import { CHANGE_AR, DECISION_AR, DIFF_AR, FIELD_AR, LIVE_CAUSE_AR, OUTCOME_AR, OUTCOME_SHORT, STAGES, TAG_AR } from "./labels.js";
+import {
+  CHANGE_AR, DECISION_AR, DIFF_AR, FIELD_AR, LIVE_CAUSE_AR, OUTCOME_AR, OUTCOME_SHORT, SECRET_HIDE_AR, SECRET_SHOW_AR, STAGES, TAG_AR,
+} from "./labels.js";
 import { QUICK_S, S, restoreDecisions, summarize } from "./state.js";
 import { showToast } from "./ui.js";
 import {
-  add, digitRuns, dict, el, fmtInt, ltr, median, mono, num, openDialog, plainText, reducedMotion, richText, stampOwn,
+  add, digitRuns, dict, el, fmtInt, ltr, median, mono, num, openDialog, plainText, reducedMotion, richText, spanned, stampOwn,
   ticketId, ticketsAr, westernDigits,
 } from "./util.js";
 
@@ -57,6 +60,51 @@ const took = (ms) => (ms == null ? "" : ms < 50 ? "خذت أقل من 0.1 ث" : 
 const modelPair = (models) => el("bdi", { dir: "ltr", class: "mono" },
   el("span", { class: "nowrap", text: models?.classifier || "" }), "\u00a0/ ", el("span", { class: "nowrap", text: models?.drafter || "" }));
 const BUSY_AR = "اكو تذكرة دتنعالج هسه، انتظر لما تخلص.";
+
+// --- a card number or a code the customer wrote (result.secret_spans) ---
+// Hidden here as in «رسالة الزبون»: «••••» (read «رقم مخفي») in the list, and in the ticket on screen wherever
+// its digits are written (the slip, the cleaned text, the models' answers and prompts, the draft, the team
+// note) until «اظهر الرقم». One reveal, for the ticket on screen: opening another ticket hides it again. The
+// list never shows it.
+const H = { key: null, text: "", spans: [], digits: [], shown: false };
+const hideTexts = new WeakMap();   // a box drawn by hideBox → its text
+
+/** The numbers to hide in the ticket on screen: its result's secret_spans in `text` (the message as the
+ *  slip shows it); ranges that do not fit are dropped. Another ticket starts hidden. */
+function setHidden(key, text, result) {
+  if (key !== H.key) H.shown = false;
+  H.key = key;
+  H.text = text;
+  H.spans = fitSpans(result?.secret_spans, text);
+  H.digits = [...new Set(H.spans.map(([s, e]) => westernDigits(text.slice(s, e)).replace(/[^0-9]/g, "")).filter(Boolean))];
+}
+const PLAIN = { slip: digitRuns, runs: digitRuns, rich: richText, plain: (t) => t };
+/** A box whose text may write a hidden number. how: "slip" (the message as shown: hidden by its spans), or,
+ *  hidden wherever its digits are written again, "runs" (digits as islands), "rich" (notes) or "plain". */
+function hideBox(tag, attrs, text, how = "runs") {
+  const node = el(tag, { ...attrs, dataset: { hide: how } });
+  hideTexts.set(node, String(text ?? ""));
+  fillHidden(node);
+  return node;
+}
+function fillHidden(node) {
+  const text = hideTexts.get(node), how = node.dataset.hide;
+  const ranges = H.shown ? [] : how === "slip" ? H.spans : secretRanges(text, H.digits);
+  node.replaceChildren(spanned(text, ranges.map(([s, e]) => ({ start: s, end: e, make: secretMask })), PLAIN[how]));
+}
+/** The ticket on screen drawn again with its numbers hidden or shown, and its one reveal. */
+function refreshHidden() {
+  $("processMain")?.querySelectorAll("[data-hide]").forEach((n) => hideTexts.has(n) && fillHidden(n));
+  const row = $("pSecretRow");
+  if (row) row.hidden = !H.spans.length;
+  const btn = $("pSecretToggle");
+  if (btn) btn.textContent = H.shown ? SECRET_HIDE_AR : SECRET_SHOW_AR;
+}
+/** A row's text in the side list: a hidden number is «••••», and is never shown here. */
+function rowText(text, result) {
+  const shown = plainText(text).text;
+  return spanned(shown, fitSpans(result?.secret_spans, shown).map(([s, e]) => ({ start: s, end: e, make: secretMask })), digitRuns);
+}
 
 // --- the side list ---
 
@@ -217,7 +265,7 @@ function drawList() {
       t.trap ? [" · ", ltr(t.trap)] : null];
     const b = el("button", { type: "button", class: "prow", "aria-current": P.current === key ? "true" : null },
       el("span", { class: `pdot ${st}`, "aria-hidden": "true" }),
-      el("span", { class: "prow-body" }, el("span", { class: "prow-text", dir: "rtl" }, digitRuns(plainText(t.text).text)),
+      el("span", { class: "prow-body" }, el("span", { class: "prow-text", dir: "rtl" }, rowText(t.text, res)),
         el("span", { class: "prow-meta" }, meta, st ? ` · ${OUTCOME_SHORT[st] || (st === "running" ? "تنعالج" : "")}` : "", verdict)));
     b.addEventListener("click", () => openTicket(i));
     return el("li", {}, b);
@@ -230,7 +278,7 @@ function liveRow(it) {
   const st = it.status === "running" ? "running" : it.result?.outcome || "";
   const b = el("button", { type: "button", class: "prow", "aria-current": P.current === it.key ? "true" : null },
     el("span", { class: `pdot ${st}`, "aria-hidden": "true" }),
-    el("span", { class: "prow-body" }, el("span", { class: "prow-text", dir: "rtl" }, digitRuns(plainText(it.ticket.text).text)),
+    el("span", { class: "prow-body" }, el("span", { class: "prow-text", dir: "rtl" }, rowText(it.ticket.text, it.result)),
       el("span", { class: "prow-meta" }, ticketId(it.key), " · تذكرة مباشرة", st ? ` · ${OUTCOME_SHORT[st] || (st === "running" ? "تنعالج" : "")}` : "")));
   b.addEventListener("click", () => { showLive(it); $("traceTitle")?.focus(); });
   return el("li", {}, b);
@@ -259,7 +307,7 @@ function openTicket(i) {
   drawList();
   if (P.run) return replay(i);
   const done = P.results.get(t.id);
-  buildView(t, `مجموعة ${P.source.slice(4)}`);
+  buildView(t, `مجموعة ${P.source.slice(4)}`, done?.result);
   if (done) { done.events.forEach(render); renderResultBox(done.result, t); return; }
   const st = liveState();
   $("pResult").replaceChildren(el("div", { class: "result" },
@@ -286,7 +334,7 @@ export function showLive(item) {
   clearTimers();
   P.current = item.key;
   drawList();
-  buildView({ id: item.key, text: item.ticket.text }, "تذكرة مباشرة");
+  buildView({ id: item.key, text: item.ticket.text }, "تذكرة مباشرة", item.result);
   item.events.forEach(render);
   P.follow = item.key;
 }
@@ -301,7 +349,11 @@ export function liveEvent(item, e) {
 
 // --- one ticket, stage by stage ---
 
-function buildView(ticket, origin) {
+/** The ticket's trace: its text (the slip), each stage, and the result. `result`, when known, says which
+ *  numbers to hide (a live one's comes with its result event: render). */
+function buildView(ticket, origin, result = null) {
+  const shown = plainText(ticket.text).text;
+  setHidden(P.current, shown, result);
   const list = el("ol", { class: "stages" });
   for (const [id, name, kind, desc] of STAGES) {
     const model = kind !== "rule" ? S.meta.models[kind] : null;
@@ -316,7 +368,9 @@ function buildView(ticket, origin) {
   $("processMain").replaceChildren(el("article", { class: "trace", "aria-labelledby": "traceTitle" },
     el("h2", { id: "traceTitle", class: "trace-title", tabindex: "-1" }, ticket.id ? ["التذكرة ", ticketId(ticket.id)] : "تذكرة جديدة",
       el("span", { class: "trace-origin", text: ` · ${origin}` })),
-    el("div", { class: "slip", dir: "rtl" }, digitRuns(plainText(ticket.text).text)),
+    hideBox("div", { id: "pSlip", class: "slip", dir: "rtl" }, shown, "slip"),
+    el("p", { id: "pSecretRow", class: "secret-row", hidden: !H.spans.length }, el("button", { type: "button", id: "pSecretToggle",
+      class: "link-btn", text: H.shown ? SECRET_HIDE_AR : SECRET_SHOW_AR, onclick: () => { H.shown = !H.shown; refreshHidden(); } })),
     list,
     el("div", { id: "pResult" })));
 }
@@ -340,14 +394,15 @@ function usageText(u, what = "") {
 function promptDetails(d) {
   return el("details", { class: "io" }, el("summary", { text: "شوف اللي انرسل للنموذج وجوابه" }),
     usageText(d.usage),
-    el("p", { class: "note", text: "الرسالة:" }), el("pre", { dir: "ltr", text: d.user_prompt || "" }),
-    el("p", { class: "note", text: "الجواب كما هو:" }), el("pre", { dir: "ltr", text: d.reply || "" }));
+    el("p", { class: "note", text: "الرسالة:" }), hideBox("pre", { dir: "ltr" }, d.user_prompt || "", "plain"),
+    el("p", { class: "note", text: "الجواب كما هو:" }), hideBox("pre", { dir: "ltr" }, d.reply || "", "plain"));
 }
 
 function fieldsList(ex) {
   const rows = [
     ["سؤال ثاني", ex.secondary_subcategory ? subLabel(ex.secondary_subcategory) : null],
-    ["رقم العملية", ex.reference ? mono(ex.reference) : null], ["رقم المستلم", ex.recipient_phone ? mono(ex.recipient_phone) : null],
+    ["رقم العملية", ex.reference ? hideBox("bdi", { dir: "ltr", class: "mono" }, ex.reference, "plain") : null],
+    ["رقم المستلم", ex.recipient_phone ? hideBox("bdi", { dir: "ltr", class: "mono" }, ex.recipient_phone, "plain") : null],
     ["المبلغ", fmtAmount(ex) ? richText(fmtAmount(ex)) : null], ["الوقت", ex.date],
     ["الاحتمال الثاني", ex.runner_up ? subLabel(ex.runner_up) : null],
   ];
@@ -383,7 +438,13 @@ function scale(d) {
 
 function render(e) {
   const d = e.data || {};
-  if (e.stage === "result") return renderResultBox(d, P.tickets.find((t) => t.id === P.current), e.own);
+  if (e.stage === "result") {
+    if (!H.spans.length && d.secret_spans) {   // a live run: its numbers are known once it ends
+      setHidden(H.key, H.text, d);
+      refreshHidden();
+    }
+    return renderResultBox(d, P.tickets.find((t) => t.id === P.current), e.own);
+  }
   const body = setStage(e.stage, e.status, e.own, !!d.usage?.cached);
   if (!body) return;
   body.replaceChildren();
@@ -392,7 +453,7 @@ function render(e) {
   if (e.status === "running") return;
   if (e.stage === "received") add(body, el("p", { class: "note" }, num(d.chars), " حرف"));
   if (e.stage === "clean") {
-    add(body, el("div", { class: "cleaned", dir: "rtl" }, digitRuns(plainText(d.text).text)));
+    add(body, hideBox("div", { class: "cleaned", dir: "rtl" }, plainText(d.text).text));
     const ch = Object.entries(d.changes || {}).filter(([, n]) => n > 0);
     add(body, el("div", { class: "chips" }, ch.length ? ch.map(([k, n]) => el("span", { class: "chip" }, num(n), ` ${CHANGE_AR[k] || k}`)) : el("span", { class: "note", text: "ما احتاجت تنظيف" })));
   }
@@ -401,7 +462,7 @@ function render(e) {
     if (e.stage === "recheck") add(body, el("p", { class: `chip ${d.agree ? "ok" : "bad"}`, text: d.agree ? "متفق مع التصنيف الأول" : `مختلف: قال ${subLabel(d.second)}` }));
     add(body, el("p", { class: "big", text: subLabel(ex.subcategory) }), fieldsList(ex),
       el("p", { class: "note" }, "ثقة النموذج بنفسه: ", ltr((ex.confidence ?? 0).toFixed(2))),
-      ex.rationale ? el("div", { class: "rationale" }, el("p", { class: "note", text: "تفسير النموذج (إنكليزي):" }), el("p", { dir: "ltr", lang: "en", class: "rationale-text", text: ex.rationale })) : null,
+      ex.rationale ? el("div", { class: "rationale" }, el("p", { class: "note", text: "تفسير النموذج (إنكليزي):" }), hideBox("p", { dir: "ltr", lang: "en", class: "rationale-text" }, ex.rationale, "plain")) : null,
       d.cleared_secondary ? el("p", { class: "note", text: `انشال السؤال الثاني (${subLabel(d.cleared_secondary)}): نتيجة للاحتيال مو طلب ثاني.` }) : null,
       promptDetails(d));
   }
@@ -418,9 +479,9 @@ function render(e) {
   }
   if (e.stage === "draft") {
     if (d.ask_for?.length) add(body, el("div", { class: "chips" }, el("span", { class: "note", text: "يطلب من الزبون: " }), d.ask_for.map((f) => el("span", { class: "chip warn", text: FIELD_AR[f] || f }))));
-    add(body, el("div", { class: "bubble", dir: "rtl" }, digitRuns(d.reply)));
+    add(body, hideBox("div", { class: "bubble", dir: "rtl" }, d.reply));
     const checks = d.check_spans || [];
-    if (checks.length) add(body, el("div", { class: "chips" }, checks.map((f) => el("span", { class: "chip warn" }, S.meta.check_ar[f.kind] || f.kind, ": «", f.text, "»"))));
+    if (checks.length) add(body, el("div", { class: "chips" }, checks.map((f) => el("span", { class: "chip warn" }, S.meta.check_ar[f.kind] || f.kind, ": «", hideBox("span", {}, f.text, "plain"), "»"))));
     else add(body, el("p", { class: "note", text: "فحص المسودة ما لكى شي." }));
     if (d.check_spans_recomputed) add(body, el("p", { class: "note", text: "هذا التشغيل أقدم من فحص المسودات، فانفحصت هسه بنفس القواعد." }));
     add(body, promptDetails(d));
@@ -429,6 +490,11 @@ function render(e) {
 
 // The 5 Nov rule (run.py ACCOUNT_RISK), as this page says it.
 const RULE_5NOV = "قاعدة 5 تشرين الثاني";
+// The 7 Nov rules that need no model call (the draft warnings and the code rules on the customer's text), which
+// the server applies to a run saved before them (server.py apply_current_rules).
+const RULES_7NOV = "قواعد 7 تشرين الثاني";
+/** A flag's wording up to its first ":" or "،". */
+const flagWords = (f) => String(S.meta.flag_ar[f] || f).split(/[:،]/)[0].trim();
 /** The gold outcome as the rules give it now. The gold files predate the 5 Nov rule: a ready blocked
  *  account or SIM change is «تحتاج تأكيد» now (account_risk), so it is scored against that and the page
  *  says so; the files are not changed. {outcome, byRule} */
@@ -445,8 +511,9 @@ function renderResultBox(d, gold, own = null) {
     el("p", { class: "outcome", text: OUTCOME_AR[d.outcome] || d.outcome }),
     d.notes_ar?.length ? el("div", { class: "chips" }, d.notes_ar.map((n) => el("span", { class: "chip", text: n }))) : null,
     d.account_risk_recomputed ? el("p", { class: "note", text: `هذا التشغيل أقدم من ${RULE_5NOV} (حساب مقفول أو تبديل شريحة)، فالعلامة انضافت هسه بنفس القاعدة. المسودة نفسها، والنتيجة صارت «تحتاج تأكيد».` }) : null,
+    d.rules_recomputed?.length ? el("p", { id: "rulesNote", class: "note", text: `هذا التشغيل أقدم من ${RULES_7NOV}، فانضافت هسه بنفس القواعد: ${d.rules_recomputed.map((f) => `«${flagWords(f)}»`).join("، ")}. المسودة والنوع والقسم والأولوية نفسها${d.outcome_recomputed ? "، والنتيجة صارت «تحتاج تأكيد»" : ""}.` }) : null,
     d.team ? el("p", { class: "note" }, `${S.meta.teams[d.team]?.label_ar || d.team} · `, ltr(d.priority || "—")) : null,
-    d.handoff_ar ? el("div", { class: "handoff-box" }, el("p", { class: "note", text: "ملاحظة للقسم المستلم" }), el("p", { class: "handoff-body", dir: "rtl" }, richText(d.handoff_ar))) : null,
+    d.handoff_ar ? el("div", { class: "handoff-box" }, el("p", { class: "note", text: "ملاحظة للقسم المستلم" }), hideBox("p", { class: "handoff-body", dir: "rtl" }, d.handoff_ar, "rich")) : null,
     d.usage ? el("p", { class: "note" }, summary ? "«الخلاصة» بالملاحظة كتبها نموذج التصنيف، والباقي قواعد" : "استدعاء نموذج التصنيف للملاحظة",
       own != null && own >= 50 ? [" · ", took(own)] : "") : null,
     d.usage ? usageText(d.usage) : null);
@@ -461,7 +528,7 @@ function goldTable(g, d) {
   const ex = d.extraction || {};
   const rows = [
     ["subcategory", "النوع", g.subcategory, ex.subcategory, subLabel],
-    ["reference", "رقم العملية", g.reference, ex.reference, (x) => x ?? "—", true],
+    ["reference", "رقم العملية", g.reference, ex.reference, (x) => (x == null ? "—" : hideBox("span", {}, x, "plain")), true],
     ["amount_iqd", "المبلغ (دينار)", g.amount_iqd, ex.amount_iqd, (x) => (x != null ? fmtInt(x) : "—")],
     ["amount_usd", "المبلغ (دولار)", g.amount_usd, ex.amount_usd, (x) => x ?? "—"],
     ["priority", "الأولوية", g.priority, d.priority, (x) => x ?? "—"],
@@ -483,7 +550,7 @@ function goldTable(g, d) {
 
 function replay(i, { instant = false } = {}) {
   const row = P.run.tickets[i];
-  buildView(row.ticket, "إعادة عرض من تشغيل محفوظ");
+  buildView(row.ticket, "إعادة عرض من تشغيل محفوظ", row.result);
   $("processMain").querySelector(".trace").prepend(el("p", { class: "note" }, `تشغيل محفوظ · ${backendAr(P.run.meta.backend)} · `,
     secs(row.seconds), " بالمجموع، والوقت جنب كل مرحلة وقتها هي"));
   // Own times from every event, the "running" ones too (a model stage took from its start to its end).
@@ -657,9 +724,15 @@ async function renderOverview() {
   // The 5 Nov rule: what the scores count, and which outcomes this page added to an older run.
   const byRule = rows.filter((r) => expectedOutcome(r.ticket).byRule).length;
   const added = rows.filter((r) => r.result.account_risk_recomputed).length;
-  const ruleNote = byRule || added ? el("p", { id: "ruleNote", class: "note" },
+  // The 7 Nov rules: the flags they added, and the ready tickets they moved (scored against the file as it is).
+  const marked = rows.filter((r) => r.result.rules_recomputed?.length).length;
+  const moved = rows.filter((r) => r.result.outcome_recomputed).length;
+  const ruleNote = byRule || added || marked ? el("p", { id: "ruleNote", class: "note" },
     byRule ? ["حسب ", RULE_5NOV, "، النتيجة الصحيحة لـ", ticketsAr(byRule), " حساب مقفول أو تبديل شريحة هي «تحتاج تأكيد»، وعليها تنحسب «النتيجة صحيحة». ملف التذاكر أقدم من القاعدة ويقول «جاهزة». "] : "",
-    added ? ["التشغيل نفسه أقدم من القاعدة، فـ", ticketsAr(added), " انعلّمت هسه بنفس القاعدة، بنفس المسودة."] : "") : null;
+    added ? ["التشغيل نفسه أقدم من القاعدة، فـ", ticketsAr(added), " انعلّمت هسه بنفس القاعدة، بنفس المسودة. "] : "",
+    marked ? ["وهو أقدم من ", RULES_7NOV, " (تنبيهات المسودة وقواعد نص الزبون)، فـ", ticketsAr(marked), " انضافتلها علامة هسه",
+      moved ? ["، منها ", ticketsAr(moved), " كانت «جاهزة» وصارت «تحتاج تأكيد» لأن مسودتها بيها تنبيه أو الرسالة بيها شي ينراجع، و«النتيجة صحيحة» تقارنها بملف التذاكر كما هو"] : "",
+      ". المسودات نفسها."] : "") : null;
 
   // The bar shows the share; the words and counts are in the legend under it, so a narrow segment
   // never cuts them off.

@@ -766,6 +766,23 @@ def test_a_saved_run_ticket_needs_the_tick_even_when_the_request_leaves_the_flag
     assert rec["flags"] == ["account_risk"] and rec["pipeline_outcome"] == "flagged"   # as served, not as sent
 
 
+def test_a_saved_ticket_is_decided_as_today_s_rules_served_it(srv, tmp_path):
+    """7 Nov: t2-0004 was drafted on 30 Oct; today's amount_not_in_ticket check fires on its draft, so it is served
+    flagged with draft:amount_not_in_ticket (apply_current_rules), and the log records that, not the request's
+    drafted. t2-0030 is served with the quiet instructions_in_ticket flag and stays ready."""
+    served = server.served_ticket("saved/test2/final", "t2-0004")
+    assert served["outcome"] == "flagged" and served["flags"] == ["draft:amount_not_in_ticket"] and served["ticket_sha256"] is None
+    body = _decision(run="saved/test2/final", ticket_id="t2-0004", action="approved", pipeline_outcome="drafted", flags=[],
+                     reason_codes=[], corrected={}, draft_text=_saved_draft("t2-0004"), final_text=_saved_draft("t2-0004"),
+                     warnings_acknowledged=["amount_not_in_ticket"])
+    assert call(srv, "POST", "/api/decision", body)[0] == 200
+    rec = server.read_decisions("saved/test2/final")[-1]
+    assert rec["pipeline_outcome"] == "flagged" and rec["flags"] == ["draft:amount_not_in_ticket"]
+    assert rec["warnings_acknowledged"] == ["amount_not_in_ticket"] and rec["ticket_sha256"] is None
+    quiet = server.served_ticket("saved/test2/final", "t2-0030")
+    assert quiet["outcome"] == "drafted" and quiet["flags"] == ["instructions_in_ticket"]
+
+
 SAVED = "saved/test2/final"
 
 

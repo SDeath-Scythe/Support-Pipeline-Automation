@@ -50,13 +50,13 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pipeline import classify as cls  # noqa: E402
 from pipeline import draft as drf  # noqa: E402
-from pipeline import draft_check, fixes, handoff  # noqa: E402
+from pipeline import draft_check, fixes, handoff, ticket_rules  # noqa: E402
 from pipeline.clean import clean  # noqa: E402
 from pipeline.config import CONFIG_DIR, limits, models, pipeline_mode, taxonomy  # noqa: E402
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.llm import (BackendError, api_key, assert_real_data_safe, backend, budget_usd, cache_only,  # noqa: E402
                           model_for, real_data)
-from pipeline.run import ACCOUNT_RISK, FLAG_AR, QUIET_FLAGS, process  # noqa: E402
+from pipeline.run import ACCOUNT_RISK, FLAG_AR, QUIET_FLAGS, process, text_flags  # noqa: E402
 
 STATIC = Path(__file__).parent / "static"
 PROBES = ROOT / "data" / "probes"
@@ -427,11 +427,139 @@ def apply_account_risk(tickets: list) -> int:
     return n
 
 
+# --- today's rules that need no model call, on a saved run (the author's decision, 7 Nov) ---
+
+# The flags of the code rules on the customer's text and of the two models' amounts (run.py), in the order
+# the team note lists them (handoff.NOTE_AR).
+RULE_FLAGS = tuple(handoff.NOTE_AR)
+
+
+def _received_text(row: dict) -> str | None:
+    """The customer's text as the pipeline received it: the "received" event's, else the run's ticket."""
+    events = row.get("events") if isinstance(row.get("events"), list) else []
+    got = next((e.get("data") for e in events if isinstance(e, dict) and e.get("stage") == "received"
+                and isinstance(e.get("data"), dict)), None)
+    text = got.get("text") if got else None
+    if not isinstance(text, str) and isinstance(row.get("ticket"), dict):
+        text = row["ticket"].get("text")
+    return text if isinstance(text, str) else None
+
+
+def _saved_answer(events: list, stage: str) -> dict | None:
+    done = [e.get("data") for e in events if isinstance(e, dict) and e.get("stage") == stage and e.get("status") == "done"]
+    ex = done[-1].get("extraction") if done and isinstance(done[-1], dict) else None
+    return ex if isinstance(ex, dict) else None
+
+
+def _saved_amounts_differ(events: list) -> bool:
+    """run.py's amount_disagreed on the saved answers: the re-check ran, and both models read an amount in
+    the same currency, and not the same one."""
+    a, b = _saved_answer(events, "classify"), _saved_answer(events, "recheck")
+    return bool(a and b) and any(a.get(k) is not None and b.get(k) is not None and a.get(k) != b.get(k)
+                                 for k in ("amount_iqd", "amount_usd"))
+
+
+def _shown_findings(row: dict) -> list:
+    """The draft-check findings the page shows for a ticket: its last finished draft's spans, else the
+    result's (the order composer.js originalDraft reads them in)."""
+    events = row.get("events") if isinstance(row.get("events"), list) else []
+    done = [e.get("data") for e in events if isinstance(e, dict) and e.get("stage") == "draft"
+            and e.get("status") == "done" and isinstance(e.get("data"), dict)]
+    spans = done[-1].get("check_spans") if done else None
+    if not isinstance(spans, list):
+        result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        spans = result.get("draft_checks")
+    return spans if isinstance(spans, list) else []
+
+
+def current_rules(row: dict) -> dict:
+    """What today's rules that need no model call find in a saved ticket, as run.py would flag it now:
+    "draft", a flag draft:<kind> for each draft-check finding the page shows (recompute_checks gives an old
+    run today's findings); "rules", the code rules on the customer's text (run.text_flags) and
+    amount_disagreed from the two saved answers; "spans", where a card number or a code is
+    (ticket_rules.secret_spans). Nothing that needs a model: no type, team, priority or draft changes."""
+    raw = _received_text(row)
+    events = row.get("events") if isinstance(row.get("events"), list) else []
+    kinds = [f.get("kind") for f in _shown_findings(row) if isinstance(f, dict)]
+    draft = [f"draft:{k}" for k in draft_check.KINDS + draft_check.FLAG_KINDS if k in kinds]
+    rules = text_flags(raw, clean(raw)) if raw is not None else []
+    rules += ["amount_disagreed"] if _saved_amounts_differ(events) else []
+    return {"draft": draft, "rules": [f for f in RULE_FLAGS if f in rules],
+            "spans": ticket_rules.secret_spans(raw) if raw is not None else []}
+
+
+def _with_current_rules(result, found: dict) -> dict | None:
+    """The result with what current_rules found and it lacks, the way run.py ends a ticket now; None when
+    nothing is added. Only adds: a flag draft:<kind> on a ticket with a draft, after its other draft flags
+    (or before the code rules' flags); the code rules' flags at the end; their notes at the same places;
+    secret_spans; and, on an escalation, the team note's line for each new code-rule flag (before the
+    identity reminder). A ready ticket with a new flag that is not quiet becomes flagged. Marked
+    rules_recomputed (the flags added) and, when the outcome moved, outcome_recomputed, so the page can
+    say the run is older than the rules. Outcome, team, priority, type and draft are otherwise as saved."""
+    if not isinstance(result, dict) or not isinstance(result.get("flags"), list):
+        return None
+    old = result["flags"]
+    drafted = result.get("outcome") in ("drafted", "flagged") and isinstance(result.get("draft_ar"), str)
+    new_draft = [f for f in found["draft"] if f not in old] if drafted else []
+    new_rules = [f for f in found["rules"] if f not in old]
+    spans = found["spans"] if found["spans"] and "secret_spans" not in result else []
+    if not (new_draft or new_rules or spans):
+        return None
+    last = max((i for i, f in enumerate(old) if isinstance(f, str) and f.startswith("draft:")), default=None)
+    at = last + 1 if last is not None else next((i for i, f in enumerate(old) if f in RULE_FLAGS), len(old))
+    out = {**result, "flags": old[:at] + new_draft + old[at:] + new_rules, "rules_recomputed": new_draft + new_rules}
+    notes = result.get("notes_ar")
+    if isinstance(notes, list) and len(notes) == len(old):
+        out["notes_ar"] = (notes[:at] + [FLAG_AR.get(f, f) for f in new_draft] + notes[at:]
+                           + [FLAG_AR.get(f, f) for f in new_rules])
+    if result.get("outcome") == "drafted" and any(f not in QUIET_FLAGS for f in new_draft + new_rules):
+        out["outcome"], out["outcome_recomputed"] = "flagged", True
+    if spans:
+        out["secret_spans"] = spans
+    note = result.get("handoff_ar")
+    lines = [handoff.NOTE_AR[f] for f in new_rules]
+    if result.get("outcome") == "escalated" and isinstance(note, str) and lines:
+        parts = note.split("\n")
+        end = len(parts) - 1 if parts[-1] == handoff.IDENTITY_AR else len(parts)
+        out["handoff_ar"] = "\n".join(parts[:end] + lines + parts[end:])
+    return out
+
+
+def apply_current_rules(tickets: list) -> int:
+    """A saved run served as today's code would decide it, for the rules that need no model call (the
+    author's decision, 7 Nov): a ready ticket whose draft has a draft-check finding today is flagged with
+    draft:<kind>, as run.py flags a live one, and the code rules on the customer's text add their flags,
+    notes and secret_spans (see _with_current_rules), in its result and in its "result" event, the way
+    apply_account_risk does. Nothing is re-routed, re-prioritised, re-typed or re-drafted, and the file is
+    never written. A decision is checked against this copy (served_ticket). Returns how many tickets it
+    changed."""
+    n = 0
+    for row in tickets:
+        if not isinstance(row, dict):
+            continue
+        found = current_rules(row)
+        changed = _with_current_rules(row.get("result"), found)
+        if changed is None:
+            continue
+        row["result"] = changed
+        n += 1
+        events = row.get("events") if isinstance(row.get("events"), list) else []
+        for j in range(len(events) - 1, -1, -1):
+            ev = events[j]
+            if isinstance(ev, dict) and ev.get("stage") == "result" and ev.get("status") == "done":
+                data = _with_current_rules(ev.get("data"), found)
+                if data is not None:
+                    events[j] = {**ev, "data": data}
+                break
+    return n
+
+
 def with_current_gold(f: Path) -> dict:
     """A saved run with each ticket's gold label taken from its set file as it is now, so a label
     corrected after the run (e.g. the author's t2-0033) is scored the same way as in the reports.
     A sealed set's file is never read. Drafts from runs made before 1 Nov get their check spans
-    (recompute_checks), and runs made before 5 Nov the account_risk flag (apply_account_risk)."""
+    (recompute_checks), runs made before 5 Nov the account_risk flag (apply_account_risk), and every run
+    today's rules that need no model call (apply_current_rules)."""
     before = f.stat()
     raw = f.read_text(encoding="utf-8")
     after = f.stat()
@@ -441,6 +569,7 @@ def with_current_gold(f: Path) -> dict:
         _with_checks(f, run, stamp if stamp == (before.st_mtime_ns, before.st_size) else None)
         if isinstance(run.get("tickets"), list):
             apply_account_risk(run["tickets"])
+            apply_current_rules(run["tickets"])
     if f.parent.parent in (RUNS / "exp", SAVED):
         name = f.parent.name
         run["meta"] = {**run.get("meta", {}), "set": name}
