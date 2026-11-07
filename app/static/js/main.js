@@ -7,7 +7,7 @@ import { initKeys } from "./keyboard.js";
 import { CACHE_AR, cancelLive, initNewTicket, liveState, rerun, setLiveHooks } from "./live.js";
 import * as proc from "./process.js";
 import { OUTCOME_SHORT } from "./labels.js";
-import { S, findItem, mostUrgent, pauseClock, restoreDecisions, startClock, tabOf, uid } from "./state.js";
+import { S, correctedFor, findItem, mostUrgent, pauseClock, restoreDecisions, startClock, tabOf, uid } from "./state.js";
 import { clearBanner, hideToast, initToast, setBanner, showToast } from "./ui.js";
 import { dict, el, isPhone, loadPrefs, savePrefs, ticketId, ticketsText } from "./util.js";
 
@@ -115,6 +115,7 @@ function wire() {
     disarm: () => inbox.disarm({ focus: true }),
     forward: () => inbox.forward(),
     toggleWhy: () => inbox.toggleWhy(),
+    toggleTick: () => inbox.toggleTick(),
     closeWhy: () => inbox.toggleWhy(false),
     whyIsDrawer: () => inbox.whyIsDrawer(),
     undo: () => inbox.undoLast(),
@@ -133,11 +134,15 @@ function wire() {
     target?.focus();
   });
 
-  // An edited draft that was not decided: warn before the page goes. Edits are kept per run, so an
-  // edit on a run that is not on screen counts as undecided.
+  // An edited draft, a correction or picked reasons on a ticket that was not decided: warn before the
+  // page goes (they live in memory only). They are kept per run, so one on a run that is not on screen
+  // counts as undecided.
   addEventListener("beforeunload", (e) => {
     const shown = new Map([...S.live, ...S.agent.items].map((it) => [uid(it), it]));
-    const open = [...S.edits.keys()].some((u) => !shown.has(u) || !S.decisions.has(shown.get(u).key));
+    const undecided = (u) => !shown.has(u) || !S.decisions.has(shown.get(u).key);
+    const open = [...S.edits.keys()].some(undecided)
+      || [...S.corrections.keys()].some((u) => undecided(u) && (!shown.has(u) || Object.keys(correctedFor(shown.get(u))).length > 0))
+      || [...S.reasons].some(([u, set]) => set.size > 0 && undecided(u));
     if (open) { e.preventDefault(); e.returnValue = ""; }
   });
   // The agent's time on a ticket stops while the page is hidden.
@@ -291,6 +296,8 @@ async function loadAgentSource(name) {
   S.agent.error = null;
   S.agent.items = [];
   S.agent.openKey = null;
+  S.agent.urgentTab = null;
+  S.agent.cameFrom = null;
   for (const k of [...S.decisions.keys()]) if (!k.startsWith("live-")) S.decisions.delete(k);
   // Ctrl+Z undoes only decisions on the run on screen (and live tickets).
   S.session = S.session.filter((e) => e.run === "live");

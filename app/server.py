@@ -151,10 +151,12 @@ BLOCKED_AR = {"asks_secret": "الرد يطلب رمز أو كلمة سر من �
 # warnings that do not block, a draft written for another type than the one the agent chose, the
 # pipeline's own points (its flags: account_risk is the customer's identity, confirmed by the
 # institution's own procedure; recheck_used_second the type), a missing field the reply asks for
-# (missing:<field>), and one the agent marks as not needed (missing:<field>:not_needed). An allow-list.
+# (missing:<field>), one the agent marks as not needed (missing:<field>:not_needed), and a second request
+# in a drafted ticket that no team is routed to (second_request: the agent read what the reply says of
+# it). An allow-list.
 _ACK_FIELDS = tuple(drf.FIELD_AR)
 ACK_KINDS = tuple(dict.fromkeys(
-    [k for k in draft_check.KINDS if k not in BLOCKING_CHECKS] + ["draft_for_other_type"]
+    [k for k in draft_check.KINDS if k not in BLOCKING_CHECKS] + ["draft_for_other_type", "second_request"]
     + [f for f in FLAG_AR if not f.startswith("draft:")]
     + [f"missing:{f}" for f in _ACK_FIELDS] + [f"missing:{f}:not_needed" for f in _ACK_FIELDS]))
 

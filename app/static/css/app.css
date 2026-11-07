@@ -394,6 +394,10 @@ body[data-mode="process"] .intro { display: none; }
 .confirm-list { list-style: disc; padding-inline-start: 44px; display: flex; flex-direction: column; gap: 2px; font-size: 15px; }
 .confirm-check { display: inline-flex; gap: 10px; align-items: center; font-weight: 600; cursor: pointer; min-height: 32px; }
 .confirm-check input { width: 20px; height: 20px; accent-color: var(--warn); }
+.confirm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.not-needed[aria-pressed="true"] { font-weight: 600; text-decoration: none; }
+/* «روح لـ…»: a more urgent ticket waits in another tab. Quiet, above the ticket. */
+.urgent-note { font-size: 14px; color: var(--ink-2); margin: 0 0 8px; }
 
 /* the composer: a mirror behind a transparent textarea, with the same box and type */
 .composer { display: flex; flex-direction: column; gap: 8px; }

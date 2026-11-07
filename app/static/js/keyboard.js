@@ -6,7 +6,7 @@ import { dismissTips, openDialog, typingIn } from "./util.js";
 
 /**
  * actions: {next, prev, approve, focusDraft, leave, takeOver, disarm, forward, toggleWhy, closeWhy, whyIsDrawer,
- *   undo, tab(n), save()}
+ *   toggleTick, undo, tab(n), save()}
  */
 export function initKeys(actions) {
   const sheet = document.getElementById("sheet");
@@ -66,6 +66,7 @@ export function initKeys(actions) {
       case "KeyT": e.preventDefault(); actions.takeOver(); break;
       case "KeyF": e.preventDefault(); actions.forward(); break;
       case "KeyW": e.preventDefault(); actions.toggleWhy(); break;
+      case "KeyX": if (actions.toggleTick()) e.preventDefault(); break;
       case "Digit1": case "Digit2": case "Digit3": case "Digit4":
       case "Numpad1": case "Numpad2": case "Numpad3": case "Numpad4":
         e.preventDefault(); actions.tab(Number(e.code.slice(-1)) - 1); break;

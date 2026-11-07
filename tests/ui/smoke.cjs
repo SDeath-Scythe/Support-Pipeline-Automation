@@ -130,6 +130,10 @@ function readDecisions(file) {
   try { return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; }
 }
 
+/** T06 (user tests, 7 Nov): a ticket just on screen can't be decided for a moment (its action bar says
+ *  data-settling meanwhile). Wait until it can. */
+const settled = (p) => waitUntil(() => p.evaluate(() => !document.querySelector("#actionBar[data-settling]")), 4000, "the ticket to settle");
+
 async function waitUntil(fn, ms = 5000, what = "condition") {
   const end = Date.now() + ms;
   for (;;) {
@@ -185,6 +189,7 @@ async function runPass(browser, pass) {
   /** Do something that records one decision; return it once it is in the log AND the page has shown
    *  its toast (so the next key press reaches the page's new state, not the old one). */
   const act = async (fn, what) => {
+    await settled(page);
     const n0 = decisions().length;
     const s0 = await statusN();
     await fn();
@@ -210,6 +215,7 @@ async function runPass(browser, pass) {
     if (!pass.phone) {
       await page.keyboard.press(n);
       await waitUntil(() => page.evaluate((t) => document.getElementById(`tab-${t}`)?.getAttribute("aria-selected") === "true", tab), 3000, `tab ${tab}`);
+      await settled(page);
       return selected();
     }
     if (await page.evaluate(() => document.body.dataset.screen === "ticket")) await page.locator("#agentMain .back-btn").first().click();
@@ -219,6 +225,7 @@ async function runPass(browser, pass) {
     const key = await first.getAttribute("data-key");
     await first.click();
     await waitUntil(() => page.evaluate(() => document.body.dataset.screen === "ticket"), 3000, "the ticket screen");
+    await settled(page);
     return key;
   }
 
@@ -289,6 +296,7 @@ async function runPass(browser, pass) {
     await p.goto(srv.base);
     await p.waitForSelector("#ticketTitle", { state: "attached", timeout: 15000 });
     await sleep(200);
+    await settled(p);
     return p;
   }
   const t = (p, sel) => p.locator(sel).first().textContent({ timeout: 2000 }).catch(() => "");
@@ -301,7 +309,7 @@ async function runPass(browser, pass) {
       await p.keyboard.press(k);
       await sleep(60);
       const row = p.locator(`#queueList [data-key="${key}"]`);
-      if (await row.count()) { await row.click(); await sleep(120); return; }
+      if (await row.count()) { await row.click(); await sleep(120); await settled(p); return; }
     }
     throw new Error(`no row for ${key}`);
   }
@@ -323,6 +331,7 @@ async function runPass(browser, pass) {
   async function reviewFixes() {
     const p = await freshPage("fixes");
     const pAct = async (fn, what) => {   // like act(), on this page
+      await settled(p);
       const n0 = decisions().length;
       await fn();
       await waitUntil(() => decisions().length > n0, 5000, what);
@@ -520,11 +529,17 @@ async function runPass(browser, pass) {
     await checksSettled(p);
     await pAct(() => p.keyboard.press("Control+Enter"), "the edited approve");
     await p.evaluate(() => document.activeElement?.blur());
-    await pAct(() => p.keyboard.press("Control+z"), "the undo");
+    // T29: on the next ticket the first Ctrl+Z asks about the last decision, the second takes it back.
+    await pAct(async () => {
+      await p.keyboard.press("Control+z");
+      await waitUntil(async () => (await t(p, "#status")).includes("تتراجع عنه؟"), 3000, "the question").catch(() => {});
+      await p.keyboard.press("Control+z");
+    }, "the undo");
     await waitUntil(async () => (await t(p, "#ticketTitle")).includes(m1), 3000, "the undone ticket");
     check(`M1: after undo, ${m1} still has the agent's edit`, (await t(p, ".composer-label")).includes("معدّلة منك")
       && (await p.inputValue("#draft")).includes("ونعتذر على التأخير"), await t(p, ".composer-label"));
     const n1 = decisions().length;
+    await settled(p);
     await p.evaluate(() => document.activeElement?.blur());
     await p.keyboard.press("t");
     await sleep(400);
@@ -567,8 +582,11 @@ async function runPass(browser, pass) {
     await sleep(450);
     check("A11Y-2: closing the toast keeps focus in the page", (await active(p)) !== "BODY", await active(p));
 
-    // M3: time adds up over visits (J away and K back), with the number of visits.
-    const m3 = await openFreshDraft(p);
+    // M3: time adds up over visits (J away and K back), with the number of visits. A ready ticket from the
+    // end of the run, never opened here: since T13 the inbox stays in «جاهزة» after a decision there and
+    // opens the next one itself, so the first ones in the run may have had a visit already.
+    const m3 = [...run.tickets].reverse().find((r) => r.result.outcome === "drafted" && !decidedIds().has(r.ticket.id)).ticket.id;
+    await openId(p, m3);
     await p.focus("#ticketTitle");
     await sleep(1300);
     await p.keyboard.press("j");
@@ -682,6 +700,7 @@ async function runPass(browser, pass) {
       && (await t(p, "#status")).includes("خلصت المعالجة"), `${await active(p)} | ${await t(p, "#status")}`);
     check("L2: a ticket with no team: take over is the main action and the summary says nothing read it",
       (await p.getAttribute("#takeBtn", "class")).includes("btn-primary") && (await t(p, "#sumBox")).includes("ما نعرف"), await t(p, "#sumBox"));
+    await settled(p);   // the result just came on screen (T06)
     await p.keyboard.press("f");
     await sleep(200);
     check("L2: forwarding a ticket with no team asks for the team first", (await active(p)) === "fixTeam", await active(p));
@@ -730,6 +749,131 @@ async function runPass(browser, pass) {
       && (await t(p2, ".customer")).includes("اتجاه"), JSON.stringify(ct));
     check("SEC-4: a flag named «constructor» does not break the inbox", (await p2.locator("#queueList [role=option]").count()) > 0);
     await p2.close();
+  }
+
+  /** User tests, 7 Nov: the inbox's flow and corrections (T06, T07, T12, T24, T25, T29, T35, T38, T42). */
+  async function flowFixes() {
+    const p = await freshPage("flow");
+    const pAct = async (fn, what) => {
+      await settled(p);
+      const n0 = decisions().length;
+      await fn();
+      await waitUntil(() => decisions().length > n0, 5000, what);
+      await sleep(150);
+      return decisions().at(-1);
+    };
+    const shown = () => p.evaluate(() => document.querySelector("#queueList [aria-selected=true]")?.dataset.key || null);
+    const row = (id) => run.tickets.find((r) => r.ticket.id === id);
+    const other = (team) => Object.keys(meta.teams).find((k) => k !== team && k !== "general");
+
+    // T06: two quick taps where approve is (a thumb's bounce) approve one ticket, never the next.
+    {
+      const a = await openFreshDraft(p);
+      const box = await p.locator("#approveBtn").boundingBox();
+      const n0 = decisions().length;
+      await p.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await sleep(180);
+      await p.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await sleep(1200);
+      const made = decisions().slice(n0);
+      const next = await shown();
+      check(`T06: two taps 180 ms apart on approve (${a}) approve exactly one ticket; the next one waits, undecided`,
+        made.length === 1 && made[0].ticket_id === a && next && next !== a && !decidedIds().has(next), JSON.stringify({ made: made.map((d) => d.ticket_id), next }));
+    }
+
+    // T12: on an escalation, a team correction is what «حوّلها» names, and the team note is marked as the system's.
+    {
+      const e = run.tickets.find((r) => r.result.outcome === "escalated" && !decidedIds().has(r.ticket.id)).ticket.id;
+      await openId(p, e);
+      const to = other(row(e).result.team);
+      await p.click("#fixToggle");
+      await p.selectOption("#fixTeam", to);
+      await sleep(200);
+      const fwd = await t(p, "#forwardBtn");
+      const note = await t(p, "#handoffBox");
+      check(`T12: correcting ${e}'s team to «${meta.teams[to].label_ar}»: «حوّلها» names it, and the note says what was corrected and whose it is`,
+        fwd.includes(meta.teams[to].label_ar.replace(/^ال/, "")) && note.includes(`صحّحتها: القسم: ${meta.teams[to].label_ar}`) && note.includes("كتبها النظام قبل تصحيحك"),
+        `${fwd} | ${note.slice(0, 160)}`);
+      const label = meta.teams[to].label_ar.replace(/^ال/, "");
+      const d = await pAct(() => p.click("#forwardBtn"), "the forward to the corrected team");
+      const toast = await t(p, "#status");
+      await openId(p, e);
+      const card = await t(p, "#decidedTitle");
+      check(`T12: ${e} forwarded to the corrected team: the log, the toast and the done card name it`,
+        d.action === "forwarded" && d.corrected?.team === to && toast.includes(label) && card.includes(label), `${JSON.stringify(d.corrected)} | ${toast} | ${card}`);
+    }
+
+    // T07 (page part) and T42: a flagged ticket with a missing amount and a second request.
+    {
+      const f = run.tickets.find((r) => r.result.extraction?.secondary_subcategory && r.result.outcome === "flagged"
+        && (r.result.flags || []).some((x) => x.startsWith("missing:")) && !decidedIds().has(r.ticket.id))?.ticket.id;
+      if (f) {
+        await openId(p, f);
+        const sec = row(f).result.extraction.secondary_subcategory;
+        const field = row(f).result.flags.find((x) => x.startsWith("missing:")).slice(8);
+        const line = await t(p, "#sumBox");
+        const box0 = await t(p, "#confirmBox");
+        await p.click(`#notNeeded-${field}`);
+        await sleep(150);
+        const box1 = await t(p, "#confirmBox");
+        const pressed = await p.getAttribute(`#notNeeded-${field}`, "aria-pressed");
+        await p.check("#ackBox");
+        const d = await pAct(() => p.click("#approveBtn"), "the approve with a second request");
+        check(`T07: ${f} says «طلب ثاني: ${meta.subcategories[sec].label} · …» and asks what the reply says of it; T42: «ما يحتاج بهالتذكرة» on the missing field`,
+          line.includes(`طلب ثاني: ${meta.subcategories[sec].label} · ${meta.teams[meta.subcategories[sec].team].label_ar}`)
+          && box0.includes("طلب ثاني محد مستلمه") && box1.includes(`: ما يحتاج بهالتذكرة`) && pressed === "true",
+          `${line.slice(0, 120)} | ${box0} | ${box1}`);
+        check(`T07 / T42: the decision on ${f} logs second_request and missing:${field}:not_needed (not missing:${field})`,
+          d.ticket_id === f && d.warnings_acknowledged.includes("second_request") && d.warnings_acknowledged.includes(`missing:${field}:not_needed`)
+          && !d.warnings_acknowledged.includes(`missing:${field}`), JSON.stringify(d.warnings_acknowledged));
+      } else {
+        check("T07 / T42: the run has an undecided flagged ticket with a second request and a missing field", false);
+      }
+    }
+
+    // T35, T38, T24 and T25 on the last ready P3 (the bottom of «جاهزة»).
+    let c;
+    {
+      c = [...run.tickets].reverse().find((r) => r.result.outcome === "drafted" && r.result.priority === "P3"
+        && !(r.result.flags || []).length && !r.result.extraction?.secondary_subcategory && !decidedIds().has(r.ticket.id)).ticket.id;
+      await openId(p, c);
+      const unloadStops = () => p.evaluate(() => { const ev = new Event("beforeunload", { cancelable: true }); dispatchEvent(ev); return ev.defaultPrevented; });
+      const before = await unloadStops();
+      await p.click("#fixToggle");
+      await p.selectOption("#fixPrio", "P1");
+      await sleep(200);
+      const inView = await p.evaluate((k) => {
+        const r = document.getElementById(`opt-${k}`).getBoundingClientRect(), n = document.getElementById("nav").getBoundingClientRect();
+        return r.top >= n.top - 1 && r.bottom <= n.bottom + 1;
+      }, c);
+      const warns = await unloadStops();
+      await p.selectOption("#fixTeam", other(row(c).result.team));
+      await sleep(200);
+      const box = await t(p, "#confirmBox");
+      check(`T35 / T24 / T38: ${c} corrected to P1 stays in view in the queue; leaving the page now warns; a team-only change asks about the team`,
+        inView && !before && warns && box.includes("انكتبت لقسم ثاني") && !box.includes("النوع"), JSON.stringify({ inView, before, warns, box }));
+      await p.selectOption("#fixTeam", row(c).result.team);
+      await sleep(150);
+      const d = await pAct(() => p.click("#approveBtn"), "the approve with a priority correction");
+      check(`T25: ${c} approved with its priority corrected to P1`, d.ticket_id === c && d.corrected?.priority === "P1", JSON.stringify(d.corrected));
+    }
+
+    // T25 and T29 after a reload: the done ticket shows the decided correction, and Ctrl+Z on it takes it back.
+    {
+      await p.reload();
+      await p.waitForSelector("#ticketTitle", { state: "attached", timeout: 15000 });
+      await openId(p, c);
+      const chips = await t(p, "#titleChips");
+      const kb = await t(p, "#undoBtn kbd");
+      const decided = decisions().filter((x) => x.ticket_id === c).at(-1);
+      await p.evaluate(() => document.activeElement?.blur());
+      const u = await pAct(() => p.keyboard.press("Control+z"), "the undo after a reload");
+      check(`T25 / T29: after a reload ${c}'s header shows P1 «صحّحتها»; its «تراجع» names Ctrl+Z, which takes back its decision`,
+        chips.includes("P1") && chips.includes("صحّحتها") && /Z/.test(kb) && u.action === "undone" && u.undoes === decided.id && u.ticket_id === c,
+        `${chips} | ${kb} | ${JSON.stringify(u)}`);
+    }
+    await cspOf(p, "flow");
+    await p.close();
   }
 
   async function phoneFixes() {
@@ -884,7 +1028,21 @@ async function runPass(browser, pass) {
         check("phone: the toast's «تراجع» has no Ctrl+Z hint (J9)", kd === "none", kd);
       }
       const approvedId = decisions().at(-1).id;
-      const d = await act(() => (pass.phone ? page.click("#toastUndo") : page.keyboard.press("Control+z")), "the undo");
+      // T29 (user tests, 7 Nov): on another ticket, Ctrl+Z first names the last decision and asks; a second
+      // Ctrl+Z (or the toast's «تراجع») takes it back.
+      let asked = "";
+      const d = await act(async () => {
+        if (pass.phone) return page.click("#toastUndo");
+        const n0 = decisions().length;
+        await page.keyboard.press("Control+z");
+        await waitUntil(async () => (await text("#status")).includes("تتراجع عنه؟"), 3000, "the question").catch(() => {});
+        asked = decisions().length === n0 ? await text("#status") : "undone at once";
+        await page.keyboard.press("Control+z");
+      }, "the undo");
+      if (!pass.phone) {
+        check("T29: Ctrl+Z on another ticket names the last decision and asks first; the second Ctrl+Z takes it back",
+          asked.includes(k1) && asked.includes("تتراجع عنه؟"), asked);
+      }
       check("undo logs «undone» with undoes = the approve's id", d.action === "undone" && d.undoes === approvedId && d.ticket_id === k1, JSON.stringify(d));
       await waitUntil(async () => (await selected()) === k1, 3000, "the undone ticket to reopen");
       check(`the undone ticket is back in «جاهزة» (${EXPECT.drafted})`, (await text("#tab-drafted .tab-count")).replace(/\D/g, "") === String(EXPECT.drafted), await text("#tab-drafted .tab-count"));
@@ -925,7 +1083,21 @@ async function runPass(browser, pass) {
       const toastOn = () => page.evaluate(() => document.getElementById("toast").classList.contains("is-shown"));
       check("flagged: the refusal says what to tick", (await toastOn()) && (await text("#status")).includes("أشّر على"), await text("#status"));
       await shot(page, "flagged");
-      await page.check("#ackBox");
+      if (pass.phone) {
+        await page.check("#ackBox");
+      } else {
+        // T21 (user tests, 7 Nov): the refusal puts the focus on the box itself, so Space ticks it; X ticks
+        // and unticks it from outside a text field.
+        const focused = await page.evaluate(() => document.activeElement?.id);
+        const ticked = () => page.evaluate(() => document.getElementById("ackBox").checked);
+        await page.keyboard.press("x");
+        const byX = await ticked();
+        await page.keyboard.press("x");
+        const unX = !(await ticked());
+        await page.keyboard.press("Space");
+        check("T21: after a refused Ctrl+Enter the focus is on the tick, X ticks and unticks it, Space ticks it",
+          focused === "ackBox" && byX && unX && (await ticked()), JSON.stringify({ focused, byX, unX }));
+      }
       check("flagged: approve is enabled after the tick", (await page.getAttribute("#approveBtn", "aria-disabled")) === null);
       // J8, then 5 Nov calm: the row's name says «تحتاج تأكيد», like its tab; the word is not on screen.
       const rowNamed = await page.getByRole("option", { name: /^تحتاج تأكيد\s*،/, includeHidden: true }).and(page.locator(`#opt-${k2}`)).count();
@@ -933,17 +1105,26 @@ async function runPass(browser, pass) {
       check("a flagged row's name starts with «تحتاج تأكيد», like its tab (J8; 5 Nov calm: not on screen)", rowNamed === 1 && nameOnly, `${rowNamed} ${nameOnly}`);
       check("flagged: the refusal goes as soon as the box is ticked (polish 5)", !(await toastOn()) && !(await page.locator("#approveWhy").count()),
         await text("#status"));
-      const d = await act(() => page.click("#approveBtn"), "the flagged approve");
-      check(`flagged approve logs «approved» for ${k2}`, d.action === "approved" && d.ticket_id === k2 && d.pipeline_outcome === "flagged", JSON.stringify(d));
+      const d = await act(() => (pass.phone ? page.click("#approveBtn") : page.keyboard.press("Control+Enter")), "the flagged approve");
+      check(`flagged approve logs «approved» for ${k2}${pass.phone ? "" : " (T21: Ctrl+Enter, Space, Ctrl+Enter; the draft as it was)"}`,
+        d.action === "approved" && d.ticket_id === k2 && d.pipeline_outcome === "flagged" && d.final_sha256 === d.draft_sha256, JSON.stringify(d));
       // 5 Nov review: the first flagged ticket is a SIM change (account_risk); the log keeps the identity tick.
       const k2Flags = run.tickets.find((r) => r.ticket.id === k2)?.result.flags || [];
       check(`flagged ${k2} [${k2Flags.join(", ")}]: the log line keeps the identity tick (warnings_acknowledged «account_risk»)`,
         k2Flags.includes("account_risk") && JSON.stringify(d.flags) === '["account_risk"]'
         && JSON.stringify(d.warnings_acknowledged) === '["account_risk"]', JSON.stringify(d));
-      // A P1 escalation waits, more urgent than every flagged P2: the inbox moves there and says why.
-      check("after the flagged approve the toast says the inbox moved to «متصعّدة» for an urgent ticket (polish 3)",
-        (await text("#status")).includes("انتقلنا لـ«متصعّدة»: فيها تذكرة عاجلة")
-        && (await page.getAttribute("#tab-escalated", "aria-selected")) === "true", await text("#status"));
+      // T13 (user tests, 7 Nov): a P1 escalation waits, more urgent than every flagged P2. The inbox stays
+      // in «تحتاج تأكيد» and says so in one quiet line above the ticket; «روح لـ…» goes there.
+      const note = await text("#urgentNote");
+      check("T13: after the flagged approve the inbox stays in «تحتاج تأكيد»; a quiet line says an urgent ticket waits in «متصعّدة»",
+        (await page.getAttribute("#tab-flagged", "aria-selected")) === "true" && !(await text("#status")).includes("انتقلنا")
+        && (await page.isVisible("#urgentNote")) && note.includes("تذكرة عاجلة بـ«متصعّدة»") && note.includes("روح لـ«متصعّدة»"), `${note} | ${await text("#status")}`);
+      await settled(page);
+      await page.click("#urgentGo");
+      await waitUntil(() => page.evaluate(() => document.getElementById("tab-escalated")?.getAttribute("aria-selected") === "true"), 3000, "the escalated tab").catch(() => {});
+      const opened = await selected();
+      check("T13: «روح لـ«متصعّدة»» opens its most urgent ticket (a P1) and the line goes",
+        run.tickets.find((r) => r.ticket.id === opened)?.result.priority === "P1" && !(await page.isVisible("#urgentNote")), opened);
       // J9: the decision's toast (and its undo) stays with the inbox: «كيف يشتغل» opens without it.
       await toProcess();
       await page.waitForSelector("#ovTitle", { timeout: 10000 });
@@ -1216,7 +1397,7 @@ async function runPass(browser, pass) {
 
     // 14. The fixes from the 1 Nov review, on a fresh page of the same server (desktop passes); the
     // phone passes check the phone-only ones.
-    if (pass.phone) await phoneFixes(); else await reviewFixes();
+    if (pass.phone) await phoneFixes(); else { await reviewFixes(); await flowFixes(); }
   } catch (e) {
     check("the pass ran to its end", false, e.stack || e.message);
   } finally {
@@ -1278,6 +1459,7 @@ async function runFresh(browser, pass) {
       if (await row.count()) {
         await row.click();
         await sleep(150);
+        await settled(p);
         await p.evaluate(() => { document.getElementById("main").scrollTop = 0; });
         return;
       }
@@ -1645,9 +1827,22 @@ async function runFresh(browser, pass) {
     await p.click("#modeAgent");   // back from «كيف يشتغل» only now: the clock was paused meanwhile
     await p.waitForSelector("#ticketTitle", { state: "attached" });
     await p.evaluate(() => document.getElementById("main").focus());
-    let edits = 0, took = 0, fixed = 0, moved = 0, ranOut = 0;
+    // Start in «تحتاج تأكيد» (P2s, while P1s wait elsewhere): the first decision there brings «روح لـ…».
+    await p.keyboard.press("1");
+    let edits = 0, took = 0, fixed = 0, moved = 0, ranOut = 0, cameFrom = null, returned = null, noteSeen = 0;
     for (let guard = 0; guard < 200; guard++) {
       if (await p.locator("#doneTitle").count()) break;
+      // T13: the inbox stays in its tab; «روح لـ…» says when a more urgent ticket waits elsewhere. Followed
+      // once: when that tab is empty, the inbox comes back to the tab it was followed from.
+      if (await p.isVisible("#urgentNote")) {
+        noteSeen++;
+        if (!cameFrom) {
+          cameFrom = await p.evaluate(() => document.querySelector("[role=tab][aria-selected=true]")?.dataset.tab);
+          await p.click("#urgentGo");
+          await sleep(100);
+          continue;
+        }
+      }
       const st = await p.evaluate(() => ({ fwd: !!document.getElementById("forwardBtn"), ack: !!document.getElementById("ackBox"),
         draft: !!document.getElementById("draft"), key: document.querySelector("#queueList [aria-selected=true]")?.dataset.key }));
       const n0 = decisions().length;
@@ -1683,6 +1878,7 @@ async function runFresh(browser, pass) {
       await waitUntil(async () => (await t(p, "#status")).includes(st.key), 3000, "its toast");
       if ((await t(p, "#status")).includes("انتقلنا")) moved++;
       if ((await t(p, "#status")).includes("ماكو بعد تذاكر «")) ranOut++;
+      if ((await t(p, "#status")).includes("فرجعنا")) returned = await p.evaluate(() => document.querySelector("[role=tab][aria-selected=true]")?.dataset.tab);
     }
     await p.waitForSelector("#doneTitle", { timeout: 5000 });
     await p.click("#toastClose").catch(() => {});
@@ -1691,7 +1887,9 @@ async function runFresh(browser, pass) {
     check("all 80 decided through the page: the session summary counts them", decisions().length === 80
       && (await t(p, "#queueTitle")).replace(/\s+/g, " ").includes("خلصت 80 من 80") && sum.includes("قررت على 80 تذكرة")
       && sum.includes("انحسمت بأقل من 3 ثواني"), `${decisions().length} | ${sum.slice(0, 160)}`);
-    check(`each move to another tab was said in the toast (${moved} times)`, moved >= 2, String(moved));
+    check(`each move to another tab was said in the toast (${moved} times)`, moved >= 1, String(moved));
+    check(`T13: «روح لـ…» showed (${noteSeen} times), was followed from «${cameFrom}», and the inbox came back there when that tab was empty`,
+      noteSeen > 0 && cameFrom && returned === cameFrom, JSON.stringify({ noteSeen, cameFrom, returned }));
     // T28 (user tests, 7 Nov): each approved flagged ticket logs the points ticked for it, the missing
     // field and the type after a disagreement included, as kinds.
     const points = decisions().filter((d) => ["approved", "edited"].includes(d.action) && d.pipeline_outcome === "flagged");
@@ -1730,7 +1928,7 @@ async function runFresh(browser, pass) {
 // --- main ---
 
 (async () => {
-  const guard = setTimeout(() => { console.error("smoke: gave up after 6 minutes"); process.exit(2); }, 6 * 60 * 1000);
+  const guard = setTimeout(() => { console.error("smoke: gave up after 9 minutes"); process.exit(2); }, 9 * 60 * 1000);
   let browser;
   try {
     browser = await chromium.launch();

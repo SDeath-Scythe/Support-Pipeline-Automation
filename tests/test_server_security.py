@@ -866,7 +866,7 @@ def test_every_confirm_kind_the_page_ticks_is_accepted_and_nothing_free_form(srv
     kinds = json.loads(call(srv, "GET", "/api/meta")[2])["ack_kinds"]
     assert kinds == list(server.ACK_KINDS)
     for k in ("missing:reference", "missing:amount", "missing:date", "missing:reference:not_needed", "recheck_used_second",
-              "invalid_category", "ref_not_in_text", "account_risk", "promise", "draft_for_other_type"):
+              "invalid_category", "ref_not_in_text", "account_risk", "promise", "draft_for_other_type", "second_request"):
         assert k in kinds, k
     for k in ("asks_secret", "hold_reason", "sensitive_number", "draft:promise", "missing:anything", "missing:reference:x"):
         assert k not in kinds, k
@@ -875,6 +875,17 @@ def test_every_confirm_kind_the_page_ticks_is_accepted_and_nothing_free_form(srv
     assert server.read_decisions("live")[-1]["warnings_acknowledged"] == acked
     status, _, raw = call(srv, "POST", "/api/decision", _decision(ticket_id=live(), warnings_acknowledged=["missing:pin"]))
     assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged"
+
+
+def test_a_second_request_the_page_asks_about_is_logged_as_a_kind(srv, live):
+    """User tests, 7 Nov (T07, page part): a drafted ticket with a second request asks the agent to read
+    what the reply says of it; the tick is logged as second_request, never as text."""
+    acked = ["second_request", "missing:reference:not_needed"]
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=live(), warnings_acknowledged=acked))[0] == 200
+    assert server.read_decisions("live")[-1]["warnings_acknowledged"] == acked
+    for bad in ("second_request:x", "second_request_note"):
+        status, _, raw = call(srv, "POST", "/api/decision", _decision(ticket_id=live(), warnings_acknowledged=[bad]))
+        assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged"
 
 
 def test_reason_codes_include_the_ones_user_tests_asked_for(srv, live):
