@@ -96,6 +96,14 @@ CREDENTIAL = re.compile(
     r"|كلم[ةه]\s+(?:ال)?(?:سر|مرور)"
     r"|OTP|PIN|CVV2?|CVC|[بپ]اسو+رد(?:ي|ك|ج|كم|نا)?|password|passcode"
     r")(?![^\W\d_])", re.IGNORECASE)
+# Second round of role-played test sessions (secret_forms, adopted 7 Nov): the card's security code said in words, «الرقم اللي ورا البطاقة 731»,
+# «الرمز اللي بظهر البطاقة».
+_BACK_OF_CARD = re.compile(
+    rf"(?<!\w)(?P<pfx>{_PFX})(?:رقم|رمز|كود|[اأ]رقام)\s+(?:اللي|الي|الموجود|المكتوب)?\s*(?:\S+\s+)?"
+    r"(?:ورا|وره|خلف|بظهر|ظهر|على\s+ظهر|بالظهر|بالخلف)(?:\s+(?:ال)?(?:بطاق[ةه]|كارت)\w*)?(?![^\W\d_])")
+# What a code after a credential word is, for the advice: a PIN or password, the card's security code, or a one-time code.
+_PIN_WORD = re.compile(r"سري|PIN|كلم[ةه]|[بپ]اسو+رد|password|passcode", re.IGNORECASE)
+_CVV_WORD = re.compile(r"CVV|CVC|ورا|وره|خلف|ظهر", re.IGNORECASE)
 
 _CLAUSE_BREAK = re.compile(r"[.،,!?؟؛;\n]")
 _LETTER = re.compile(r"[^\W\d_]")
@@ -132,18 +140,22 @@ _UNIT_AFTER = re.compile(r"\s*(?:دينار|د\.ع|[أا]لف|آلاف|الاف|
                          re.IGNORECASE)
 
 
-def _after_credential(text: str, start: int, ends: list[int]) -> bool:
-    """A credential word ends at most five words before `start`, in the same clause
+# «..» or «…» is a pause in a chat line, not the end of a clause: «كود التفعيل.. لا لحظه وصل هسه 482915».
+_PAUSE = re.compile(r"\.{2,}|…")
+
+
+def _after_credential(text: str, start: int, ends: list[int]) -> int | None:
+    """The end of a credential word at most five words before `start`, in the same clause
     ("PIN: 1234", "رمز التحقق اللي وصلني على الموبايل 482913"), with no other number or
-    "رقم/مبلغ/حوالة" in between."""
+    "رقم/مبلغ/حوالة" in between; None if there is none. «..» or «…» doesn't end the clause."""
     for end in ends:
-        between = text[end:start]
+        between = _PAUSE.sub(" ", text[end:start])
         if end > start or _CLAUSE_BREAK.search(between) or re.search(r"\d", between):
             continue
         words = [w for w in between.split() if _LETTER.search(w)]
         if len(words) <= 5 and not any(_OWN_NUMBER.fullmatch(w) for w in words):
-            return True
-    return False
+            return end
+    return None
 
 
 def _card(digits: str) -> bool:
@@ -153,19 +165,60 @@ def _card(digits: str) -> bool:
             and (digits[0] in "3456" or "2221" <= digits[:4] <= "2720"))
 
 
-def _spans(raw: str) -> list[tuple[int, int, str]]:
+# A card number written in groups of four with mixed separators («5204-7311 8826 - 4413»), and a
+# 13-19 digit number that the customer says is their card («رقم البطاقة 5213904477162280», «البطاقة اللي عندي رقمها
+# 4211 7781 0093 5526») even when it fails the Luhn check (a typo, or a made-up number: it is still meant as one).
+_GAP = r"[ \u00a0\u2009\u202f]{0,2}[-.]?[ \u00a0\u2009\u202f]{0,2}"
+_CARD_GROUPS = re.compile(rf"(?<![\d,٬])\d{{4}}(?:{_GAP}\d{{4}}){{2}}{_GAP}\d{{1,7}}(?![\d,٬])")
+_CARD_WORD = re.compile(r"(?<!\w)[وفبل]?(?:ال)?(?:بطاق(?:ت|[ةه])\w*|كارت\w*|card)(?!\w)(?!\s+(?:ال)?(?:وطني|موحد|ذكي|تموين|سكن|هوي)\w*)",
+                        re.IGNORECASE)
+_NOT_CARD_NUMBER = re.compile(r"[وفبل]?(?:ال)?(?:مبلغ\w*|حوال\w*|تحويل\w*|عملي\w*|هاتف\w*|تلفون\w*|موبايل\w*)")
+
+
+def _card_said(text: str, start: int) -> bool:
+    """A card word («بطاقتي», «رقم البطاقة», «الكارت») at most six words before `start`, in the same clause, with no
+    other number and no amount, transfer or phone word in between."""
+    for m in _CARD_WORD.finditer(text, max(0, start - 80), start):
+        between = _PAUSE.sub(" ", text[m.end():start])
+        if _CLAUSE_BREAK.search(between) or re.search(r"\d", between):
+            continue
+        words = [w for w in between.split() if _LETTER.search(w)]
+        if len(words) <= 6 and not any(_NOT_CARD_NUMBER.fullmatch(w) for w in words):
+            return True
+    return False
+
+
+def _secret_kind(text: str, cred: tuple[int, int]) -> str:
+    """What a code after a credential word is: "pin" (a PIN or password), "cvv" (the card's security code) or
+    "otp" (a one-time or login code), from the word and the two words after it."""
+    s, e = cred
+    near = text[s:e] + " " + " ".join(text[e:e + 40].split()[:2])
+    return "cvv" if _CVV_WORD.search(near) else "pin" if _PIN_WORD.search(near) else "otp"
+
+
+def _spans(raw: str, detail: bool = False) -> list[tuple[int, int, str]]:
     """(start, end, kind) of every number worth hiding in `raw`, in text order. kind is "code" (3-8
     digits after a credential word), "card" (a card number, see _card) or "long" (any other run of 7+
     digits). Dates, comma amounts, "1.000.000", decimals like 3.5 and "5000-10000 دينار" are not runs.
-    The rules read the folded text (so «الرقم السرّي» and «الکود» count), and the spans point into `raw`."""
+    The rules read the folded text (so «الرقم السرّي» and «الکود» count), and the spans point into `raw`.
+    With `detail`, a code's kind says what it is: "pin", "cvv" or "otp" (_secret_kind)."""
     text, pos = fold(raw)
-    creds = [m.span() for m in CREDENTIAL.finditer(text)]
+    creds = sorted([m.span() for m in CREDENTIAL.finditer(text)] + [m.span() for m in _BACK_OF_CARD.finditer(text)])
     ends = [e for _, e in creds]
     out = []
+    cards = [m.span() for m in _CARD_GROUPS.finditer(text)]
+    for s0, e0 in cards:
+        digits = re.sub(r"\D", "", text[s0:e0])
+        if 13 <= len(digits) <= 19 and (_card(digits) or _card_said(text, s0)):
+            out.append((s0, e0, "card"))
     for m in _NUMBERS.finditer(text):
         if m.group("amount") or (m.group("date") and _plausible_date(m.group("date"))):
             continue
         start, end = m.span()
+        if any(s0 < end and start < e0 for s0, e0, _ in out):
+            continue                                       # part of a card number found above
+        if start >= 2 and text[start - 1] == "-" and re.match(r"[A-Za-z]", text[start - 2]):
+            continue                                       # an id such as «AG-2290» or «TX-88213»: not a secret
         inside = next((e for s, e in creds if s <= start < e), None)   # "CVV2 123": the 2 is the word's
         if inside is not None:
             start = inside
@@ -176,11 +229,13 @@ def _spans(raw: str) -> list[tuple[int, int, str]]:
         run = text[start:end]
         digits = "".join(c for c in run if c.isdigit())
         seps = re.findall(_SEP, run)
-        if _card(digits):
+        owner = None
+        if _card(digits) or (13 <= len(digits) <= 19 and _card_said(text, start)):
             kind = "card"
         elif seps == ["-"] and _UNIT_AFTER.match(text, end):
             continue                                       # "بين 5000-10000 دينار": a range of amounts
-        elif 3 <= len(digits) <= 8 and _after_credential(text, start, ends) and not _UNIT_AFTER.match(text, end):
+        elif 3 <= len(digits) <= 8 and not _UNIT_AFTER.match(text, end) and (
+                owner := _after_credential(text, start, ends)) is not None:
             kind = "code"
         elif re.fullmatch(r"\d{1,3}(?:\.\d{3}){2,}", run):
             continue                                       # "1.500.000": an amount
@@ -193,14 +248,22 @@ def _spans(raw: str) -> list[tuple[int, int, str]]:
             kind = "long"
         else:
             continue
-        out.append((pos[start], pos[end - 1] + 1, kind))
-    return out
+        if detail and kind == "code":
+            kind = _secret_kind(text, next(c for c in creds if c[1] == owner))
+        out.append((start, end, kind))
+    return sorted((pos[s], pos[e - 1] + 1, k) for s, e, k in out)
 
 
 def sensitive_numbers(text: str) -> list[tuple[int, int, str]]:
     """(start, end, kind) of each card number ("card") or code after a credential word ("code") in
     `text`. A draft must never repeat these, even when the customer wrote them."""
     return [s for s in _spans(text) if s[2] != "long"]
+
+
+def secret_kinds(text: str) -> list[str]:
+    """What the customer wrote, by kind, in text order and once each: "card" (a card number), "cvv" (its
+    security code), "pin" (a PIN or password) or "otp" (a one-time or login code), so the advice can name it."""
+    return list(dict.fromkeys(k for _, _, k in _spans(text, detail=True) if k != "long"))
 
 
 def _hide(s: str) -> str:

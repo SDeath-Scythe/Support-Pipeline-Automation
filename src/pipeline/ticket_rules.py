@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from . import clean
 from .clean import _TICKET_TAG, fold, sensitive_numbers
 
 # --- secret_in_ticket: a card number or a code the customer wrote ---
@@ -36,6 +37,17 @@ def secret_spans(raw: str) -> list[list[int]]:
     return [[_utf16(shown, s), _utf16(shown, e)] for s, e, _ in sensitive_numbers(shown)]
 
 
+def secret_kinds(raw: str) -> list[str]:
+    """What the customer wrote (clean.secret_kinds: "card", "cvv", "pin", "otp"), so the advice can name it."""
+    return clean.secret_kinds(shown_text(raw))
+
+
+def secret_digits(raw: str) -> list[str]:
+    """The digits of each card number or code in the ticket, so a note that writes one again can hide it."""
+    shown = shown_text(raw)
+    return list(dict.fromkeys(re.sub(r"\D", "", fold(shown[s:e])[0]) for s, e, _ in sensitive_numbers(shown)))
+
+
 # --- device_lost: a lost or stolen phone with the wallet open on it; other_phone ---
 
 _PHONE = r"(?:[وب]?(?:ال)?(?:موبايل|مبايل|تلفون|تليفون|جوال|هاتف|ايفون|آيفون)(?:ي|ه|ها)?)"
@@ -54,9 +66,22 @@ _OTHER_PHONE = re.compile(
     rf"(?:{_PHONE}|رقم|خط)\s+{_RELATIVE}")
 
 
+# Second round of role-played test sessions (device_lost_negation, adopted 7 Nov): «المحفظة مو مفتوحة عليه», «الحساب ما مفتوح عليه» say it is not open.
+_NOT_OPEN = re.compile(r"(?<!\w)(?:مو|ما|مش|مب|غير|بدون|ليس|ليست)\s+$")
+
+
+def _wallet_open(text: str) -> bool:
+    for m in _OPEN.finditer(text):
+        word = re.search(_OPEN_WORD, m.group())
+        if word and _NOT_OPEN.search(text[:m.start() + word.start()]):
+            continue
+        return True
+    return False
+
+
 def device_lost(raw: str) -> bool:
     text = fold(raw)[0]
-    return bool(_LOST_PHONE.search(text) and _OPEN.search(text))
+    return bool(_LOST_PHONE.search(text) and _wallet_open(text))
 
 
 def other_phone(raw: str) -> bool:
@@ -66,22 +91,46 @@ def other_phone(raw: str) -> bool:
 
 # --- complaint_risk: a regulator threat or a repeat contact (no priority change) ---
 
-_PFX = r"(?<!\w)[وفبل]{0,2}(?:ال)?"
-_COMPLAINT = re.compile(
-    rf"{_PFX}(?:بنك|مصرف)\s+(?:ال)?مركزي"
-    rf"|{_PFX}جه(?:ات|[ةه])\s+(?:ال)?رقابي[ةه]?"
-    r"|(?<!\w)[ولف]{0,2}[اأ]شتكي\s+(?:عليكم|عليك|ضدكم)"
-    r"|(?<!\w)(?:[اأ]قدم|[اأ]رفع|اسجل|اسوي)\s+(?:عليكم\s+|ضدكم\s+)?(?:شكو[ىاه]|دعو[ىاه]|قضي[ةه])\s+(?:عليكم|ضدكم)"
-    r"|(?<!\w)(?:[اأ]رفع|اسوي)\s+(?:عليكم|ضدكم)\s+(?:شكو[ىاه]|دعو[ىاه]|قضي[ةه])"
-    r"|(?<!\w)(?:ثالث|رابع|خامس|عاشر)[ةه]?\s+مر[ةه](?!\w)"
+# Second round of role-played test sessions (complaint_reasons, adopted 7 Nov): the regulator words count only near a threat or complaint verb
+# («حسب تعليمات البنك المركزي» is a mention, not a threat), and a repeat contact said other ways counts: «صارت ساعة من
+# كتبتلكم», «راسلتكم قبل وكالولي ننتظر», «ثلث ايام وماحد يرد».
+_REGULATOR = r"(?:(?:ال|لل|بال|ل|ب)?(?:بنك|مصرف)\s+(?:ال)?مركزي|(?:ال|لل|بال|ل|ب)?جه(?:ات|[ةه])\s+(?:ال)?رقابي[ةه]?)"
+_THREAT_VERB = (r"(?:[اأ]شتكي|[اأ]شكي|نشتكي|شكو[ىاه]|[اأ]قدم|[اأ]رفع|[اأ]بلغ|[اأ]روح|[اأ]راجع|[اأ]كتب|[اأ]راسل"
+                r"|[اأ]وصل|[اأ]حجي|[اأ]تصل|بلاغ|دعو[ىاه])\w*")
+_THREAT_NEAR = re.compile(rf"(?<!\w)[وف]?{_THREAT_VERB}(?:\s+\S+){{0,4}}?\s+{_REGULATOR}(?!\w)"
+                          rf"|(?<!\w){_REGULATOR}(?:\s+\S+){{0,2}}?\s+[وف]?(?:{_THREAT_VERB})(?!\w)")
+_WROTE = r"(?:كتبت|راسلت|اتصلت|حجيت|حاجيت|كلمت|دزيت)(?:لكم|كم|بيكم|وياكم|عليكم)?"
+_REPEAT = re.compile(
+    rf"(?<!\w)(?:صار(?:ت|لي)?|[إا]لي|لي)\s+(?:\S+\s+)?(?:ساع[ةه]|ساعتين|ساعات|يوم|يومين|[اأ]يام|[اأ]سبوع|[اأ]سبوعين|شهر)"
+    rf"\s+(?:\S+\s+)?(?:من\s+)?(?:ما\s+)?{_WROTE}(?!\w)"
+    rf"|(?<!\w)[و]?{_WROTE}\s+(?:\S+\s+)?(?:قبل|من\s+قبل|سابقا|سابقاً|البارح[ةه]|امس|[أا]مس)(?!\w)"
+    r"|(?<!\w)(?:ساع[ةه]|ساعتين|ساعات|يوم|يومين|[اأ]يام|[اأ]سبوع)\s+(?:\S+\s+)?و?(?:ماحد|محد|ما\s+احد|ما\s+أحد)\s+(?:يرد|رد|جاوب|يجاوب)")
+_REPEAT_OLD = re.compile(
+    r"(?<!\w)(?:ثالث|رابع|خامس|عاشر)[ةه]?\s+مر[ةه](?!\w)"
     r"|(?<!\w)(?:لل|ال)مر[ةه]\s+(?:ال)?(?:ثالث|رابع|خامس|عاشر)[ةه]?(?!\w)"
     r"|(?<!\w)[و]?(?:اتصل|راسل|اراسل|كتب|اكتب|حجي|احجي)\w*(?:\s+\S+){0,2}?\s+"
     r"(?:ثلث|ثلاث|اربع|خمس|ست|سبع|عشر|هواي|هوايه|هواية|عدة|[3-9]|\d\d)\s*مرات"
     r"|(?<!\w)صارلي\s+(?:[^\s.،,!?؟]+\s+){1,2}?(?:اكتبلكم|اراسلكم|اتصل\w*|اراجع\w*|احاكي\w*)")
+_THREAT_OLD = re.compile(
+    r"(?<!\w)[ولف]{0,2}[اأ]شتكي\s+(?:عليكم|عليك|ضدكم)"
+    r"|(?<!\w)(?:[اأ]قدم|[اأ]رفع|اسجل|اسوي)\s+(?:عليكم\s+|ضدكم\s+)?(?:شكو[ىاه]|دعو[ىاه]|قضي[ةه])\s+(?:عليكم|ضدكم)"
+    r"|(?<!\w)(?:[اأ]رفع|اسوي)\s+(?:عليكم|ضدكم)\s+(?:شكو[ىاه]|دعو[ىاه]|قضي[ةه])")
+
+
+def complaint_reasons(raw: str) -> list[str]:
+    """Why complaint_risk fires: "threat" (a complaint against us, or to the regulator with a verb that threatens
+    it), "repeat" (the customer wrote or called before)."""
+    text = fold(raw)[0]
+    out = []
+    if _THREAT_OLD.search(text) or _THREAT_NEAR.search(text):
+        out.append("threat")
+    if _REPEAT_OLD.search(text) or _REPEAT.search(text):
+        out.append("repeat")
+    return out
 
 
 def complaint_risk(raw: str) -> bool:
-    return bool(_COMPLAINT.search(fold(raw)[0]))
+    return bool(complaint_reasons(raw))
 
 
 # --- instructions_in_ticket: text aimed at the system, not at a person (a quiet flag) ---

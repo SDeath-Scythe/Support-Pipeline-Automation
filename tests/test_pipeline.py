@@ -272,7 +272,7 @@ def test_fix_flags_off_by_default_and_reject_unknown(monkeypatch):
         "hold_reason", "sensitive_number", "escalate_account_risk",
         "claims_done", "repeated_text", "ask_missing", "dialect_words", "fraud_secondary", "secret_in_ticket",
         "strip_format_chars", "device_lost", "complaint_risk", "instructions_in_ticket", "draft_rules_ut",
-        "amount_own_words"}
+        "amount_own_words", "secret_forms", "complaint_reasons", "device_lost_negation", "second_request_flag"}
     assert all("7 Nov 2026" in fixes.ADOPTED[n] for n in fixes.ADOPTED if n not in
                {"hold_reason", "sensitive_number", "escalate_account_risk"})
     monkeypatch.setenv("PIPELINE_FIXES", "draft_check")                    # adopted, so no longer a flag
@@ -389,7 +389,7 @@ def test_draft_check_latin_word_next_to_arabic_punctuation_is_fine():
     from pipeline.draft_check import problems
 
     ticket = "طلعلي declined، بس الـbalance انقص. دفعت بالـcard"
-    assert problems("فهمت إن العملية طلعت declined، والرصيد انخصم.", ticket) == []
+    assert problems("فهمنا إن العملية طلعت declined، والرصيد انخصم.", ticket) == []
     assert problems("الدفع بالـcard ما مشى؟", ticket) == []
     assert problems("هلا declinedبيك", ticket) == ["stray_latin"]      # glued to a letter: still caught
 
@@ -769,7 +769,8 @@ def test_handoff_fraud_note(monkeypatch):
     note = run.process("واحد اتصل وطلب الرمز وانطيته، وراحت ربع مليون، وهسه ما اكدر افوت")["handoff_ar"]
     assert "الاحتيال والأمان › احتيال أو مشاركة الرمز" in note
     assert "أثر على الحساب: الدخول ورمز التحقق" in note      # the lock-out is kept as context
-    assert "المبلغ 250,000 دينار" in note
+    # «ربع مليون» is not written as a number: the customer's words come first, the model's reading after (R33)
+    assert "المبلغ «ربع مليون» (قراه النموذج 250,000 دينار)" in note
     assert "سبب التصعيد: احتمال احتيال" in note
     assert "ناقص" not in note                                # fraud asks the customer for nothing
 
@@ -1069,7 +1070,8 @@ def test_draft_check_secret_warning_with_wa_or_three_words_back():
 
     assert problems("وما تحتاج تكتب أو ترسل لنا الرمز السري بأي شكل.", "…") == []
     assert problems("ما نطلب منك ترسل الرمز أبداً.", "…") == []
-    assert problems("رجاءً دزلنا الرمز اللي وصلك.", "…") == ["asks_secret"]
+    # «رجاءً» is stiff standard Arabic since the second round of role-played test sessions (dialect_words)
+    assert problems("رجاءً دزلنا الرمز اللي وصلك.", "…") == ["asks_secret", "dialect_words"]
     assert problems("لا تقلق، دزلنا الرمز اللي وصلك.", "…") == ["asks_secret"]   # negation in another clause
 
 

@@ -56,7 +56,7 @@ from pipeline.config import CONFIG_DIR, limits, models, pipeline_mode, taxonomy 
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.llm import (BackendError, api_key, assert_real_data_safe, backend, budget_usd, cache_only,  # noqa: E402
                           model_for, real_data)
-from pipeline.run import ACCOUNT_RISK, FLAG_AR, QUIET_FLAGS, process, text_flags  # noqa: E402
+from pipeline.run import ACCOUNT_RISK, FLAG_AR, QUIET_FLAGS, SECURITY_TEAM, flag_note, process, text_flags  # noqa: E402
 
 STATIC = Path(__file__).parent / "static"
 PROBES = ROOT / "data" / "probes"
@@ -115,6 +115,8 @@ ERR_AR = {
     "undo_stale": "هالقرار مو آخر قرار على التذكرة، فما ينلغى. حدّث القائمة",
     "blocked": "{why}، فما ينعتمد. صلّح الرد أول",
     "identity": "ما أشّرت على «تأكدت من هوية الزبون»، فما ينعتمد",
+    "unticked": "ما أشّرت على كل النقاط اللي تحت المسودة ({why})، فما ينعتمد",
+    "fraud_team": "هاي تذكرة احتيال: أشّر إنك متأكد قبل لا تحوّلها لقسم ثاني",
     "escalated": "هالتذكرة متصعّدة، فما ينعتمد إلها رد: حوّلها أو استلمها",
 }
 
@@ -123,12 +125,16 @@ DECISION_ACTIONS = ("approved", "edited", "took_over", "forwarded", "undone")
 DECISION_ACTIONS_AR = {"approved": "اعتمد الرد", "edited": "عدّل الرد واعتمده", "took_over": "استلمها بنفسه",
                        "forwarded": "حوّلها لقسم ثاني", "undone": "تراجع عن القرار"}
 REASON_CODES = ("wrong_type", "wrong_team", "wrong_priority", "tone", "dialect", "asks_unneeded", "promise",
-                "false_claim", "wrong_number", "missing_question", "shop_or_agent_name", "duplicate",
-                "instructions", "other")
+                "false_claim", "wrong_number", "missing_question", "shop_or_agent_name", "typo", "wrong_gender",
+                "wrong_language", "duplicate", "instructions", "other")
 REASON_CODES_AR = {"wrong_type": "نوع المشكلة غلط", "wrong_team": "القسم غلط", "wrong_priority": "الأولوية غلط",
                    "tone": "الأسلوب ما يناسب", "dialect": "اللهجة مو مضبوطة", "asks_unneeded": "يطلب شي ما نحتاجه",
                    "promise": "يوعد بشي ما نكدر نضمنه", "false_claim": "يقول شي ما صار", "wrong_number": "بيه رقم غلط",
                    "missing_question": "ناقصة سؤال للزبون", "shop_or_agent_name": "ما سأل عن اسم المحل أو الوكيل",
+                   # From the second round of role-played test sessions (7 Nov): a reply's spelling, the customer's
+                   # gender and the reply's language had no chip («شي ثاني» was the only way to say them).
+                   "typo": "بيه غلط إملائي أو حروف زايدة", "wrong_gender": "يخاطب الزبون بغير جنسه",
+                   "wrong_language": "مو بلغة الزبون",
                    "duplicate": "تذكرة مكررة", "instructions": "التذكرة بيها أوامر للنظام",
                    "other": "شي ثاني"}
 OUTCOMES = ("drafted", "flagged", "escalated")
@@ -153,13 +159,15 @@ BLOCKED_AR = {"asks_secret": "الرد يطلب رمز أو كلمة سر من �
 # institution's own procedure; recheck_used_second the type), a missing field the reply asks for
 # (missing:<field>), one the agent marks as not needed (missing:<field>:not_needed), and a second request
 # in a drafted ticket that no team is routed to (second_request: the agent read what the reply says of
-# it). An allow-list. A draft warning behind a flag (draft_check.FLAG_KINDS; none since the 7 Nov ones
+# it), and a fraud escalation forwarded to another team than fraud (fraud_team_changed: the agent confirmed it is
+# not fraud). An allow-list, and each decision may only tick the points its ticket had (allowed_acks). A draft
+# warning behind a flag (draft_check.FLAG_KINDS; none since the 7 Nov ones
 # were adopted) is in it whether or not its flag is on now: a run saved with the flag on still has it. A
 # quiet flag (run.QUIET_FLAGS) is shown, never ticked, so it is not.
 _ACK_FIELDS = tuple(drf.FIELD_AR)
 ACK_KINDS = tuple(dict.fromkeys(
     [k for k in draft_check.KINDS + draft_check.FLAG_KINDS if k not in BLOCKING_CHECKS]
-    + ["draft_for_other_type", "second_request"]
+    + ["draft_for_other_type", "second_request", "fraud_team_changed"]
     + [f for f in FLAG_AR if not f.startswith("draft:") and f not in QUIET_FLAGS]
     + [f"missing:{f}" for f in _ACK_FIELDS] + [f"missing:{f}:not_needed" for f in _ACK_FIELDS]))
 
@@ -311,10 +319,17 @@ def _draft_subcategory(result: dict) -> str | None:
     return sub if isinstance(sub, str) and sub in taxonomy().subcategories else None
 
 
+def _stale(data: dict) -> bool:
+    """A draft "done" event whose spans are missing (runs made before 1 Nov) or were computed with other kinds
+    than today's (check_kinds, saved since the second round of role-played test sessions; a run saved 1-7 Nov
+    has spans but no check_kinds, so it never got the warnings added after it)."""
+    return "check_spans" not in data or data.get("check_kinds") != list(draft_check.kinds_on())
+
+
 def recompute_checks(tickets: list) -> dict[int, dict]:
-    """For runs made before 1 Nov, which saved no spans: per ticket (by its index in the file), the
-    draft "done" events that have no check_spans ({event index: findings}) and, when result.draft_checks
-    is missing or null, the result's (key "result"). Computed exactly as run.py does now:
+    """For runs whose spans are missing or stale (_stale): per ticket (by its index in the file), the
+    draft "done" events to recompute ({event index: findings}) and, when result.draft_checks is missing or
+    null or the last draft's spans were stale, the result's (key "result"). Computed exactly as run.py does now:
     draft_check.findings(reply, user_prompt, facts) with the policy facts for the draft's issue type.
     A ticket with no draft, or no drafter prompt to check against, gets nothing."""
     out: dict[int, dict] = {}
@@ -329,7 +344,7 @@ def recompute_checks(tickets: list) -> dict[int, dict]:
             facts_by_sub[sub] = drf.facts_text(sub)
         facts = facts_by_sub[sub]
         patch: dict = {}
-        prompt = None
+        prompt, last_stale = None, False
         for j, ev in enumerate(events):
             data = ev.get("data") if isinstance(ev, dict) else None
             if not (isinstance(data, dict) and ev.get("stage") == "draft" and ev.get("status") == "done"):
@@ -337,10 +352,11 @@ def recompute_checks(tickets: list) -> dict[int, dict]:
             reply, user = data.get("reply"), data.get("user_prompt")
             if not (isinstance(reply, str) and isinstance(user, str)):
                 continue
-            prompt = user
-            if "check_spans" not in data:
+            prompt, last_stale = user, _stale(data)
+            if last_stale:
                 patch[j] = draft_check.findings(reply, user, facts)
-        if result.get("draft_checks") is None and isinstance(result.get("draft_ar"), str) and prompt is not None:
+        if ((result.get("draft_checks") is None or last_stale) and isinstance(result.get("draft_ar"), str)
+                and prompt is not None):
             patch["result"] = draft_check.findings(result["draft_ar"], prompt, facts)
         if patch:
             out[i] = patch
@@ -376,7 +392,8 @@ def _with_checks(f: Path, run: dict, stamp: tuple | None) -> None:
                 row["result"] = {**row["result"], "draft_checks": spans, "draft_checks_recomputed": True}
             else:
                 ev = row["events"][j]
-                ev["data"] = {**ev["data"], "check_spans": spans, "check_spans_recomputed": True}
+                ev["data"] = {**ev["data"], "check_spans": spans, "check_kinds": list(draft_check.kinds_on()),
+                              "check_spans_recomputed": True}
 
 
 def _gets_account_risk(result) -> bool:
@@ -472,20 +489,33 @@ def _shown_findings(row: dict) -> list:
     return spans if isinstance(spans, list) else []
 
 
-def current_rules(row: dict) -> dict:
+def current_rules(row: dict, gold_text: bool = False) -> dict:
     """What today's rules that need no model call find in a saved ticket, as run.py would flag it now:
     "draft", a flag draft:<kind> for each draft-check finding the page shows (recompute_checks gives an old
-    run today's findings); "rules", the code rules on the customer's text (run.text_flags) and
+    run today's findings), and second_request for a drafted ticket with a second type; "rules", the code rules on the customer's text (run.text_flags) and
     amount_disagreed from the two saved answers; "spans", where a card number or a code is
-    (ticket_rules.secret_spans). Nothing that needs a model: no type, team, priority or draft changes."""
-    raw = _received_text(row)
+    (ticket_rules.secret_spans), with "kinds" and "digits" for the advice and the team note. Nothing that needs
+    a model: no type, team, priority or draft changes. `gold_text`: the row's ticket is the set file's text
+    (with_current_gold), which the page shows; the rules read it, not a received text that a run may have
+    saved masked."""
+    raw = row["ticket"].get("text") if gold_text and isinstance(row.get("ticket"), dict) else None
+    raw = raw if isinstance(raw, str) else _received_text(row)
     events = row.get("events") if isinstance(row.get("events"), list) else []
     kinds = [f.get("kind") for f in _shown_findings(row) if isinstance(f, dict)]
     draft = [f"draft:{k}" for k in draft_check.KINDS + draft_check.FLAG_KINDS if k in kinds]
     rules = text_flags(raw, clean(raw)) if raw is not None else []
     rules += ["amount_disagreed"] if _saved_amounts_differ(events) else []
-    return {"draft": draft, "rules": [f for f in RULE_FLAGS if f in rules],
-            "spans": ticket_rules.secret_spans(raw) if raw is not None else []}
+    # A drafted ticket's second type (run.py, second round of role-played test sessions): from the saved answer.
+    result = row.get("result") if isinstance(row.get("result"), dict) else {}
+    ex = result.get("extraction") if isinstance(result.get("extraction"), dict) else {}
+    sec = ex.get("secondary_subcategory")
+    second = (["second_request"] if isinstance(result.get("draft_ar"), str) and isinstance(sec, str)
+              and sec in taxonomy().subcategories and sec != ex.get("subcategory") else [])
+    return {"draft": draft + second, "rules": [f for f in RULE_FLAGS if f in rules],
+            "spans": ticket_rules.secret_spans(raw) if raw is not None else [],
+            "kinds": ticket_rules.secret_kinds(raw) if raw is not None else [],
+            "digits": ticket_rules.secret_digits(raw) if raw is not None else [],
+            "reasons": ticket_rules.complaint_reasons(raw) if raw is not None else []}
 
 
 def _with_current_rules(result, found: dict) -> dict | None:
@@ -516,28 +546,39 @@ def _with_current_rules(result, found: dict) -> dict | None:
         out["outcome"], out["outcome_recomputed"] = "flagged", True
     if spans:
         out["secret_spans"] = spans
+    if found.get("kinds") and "secret_in_ticket" in new_rules:
+        out["secret_kinds"] = found["kinds"]
+    if found.get("reasons") and "complaint_risk" in new_rules:
+        out["complaint_reasons"] = found["reasons"]
+    if "notes_ar" in out and len(out["notes_ar"]) == len(out["flags"]):
+        out["notes_ar"] = [flag_note(f, found.get("kinds"), found.get("reasons")) if f in new_rules else n
+                           for f, n in zip(out["flags"], out["notes_ar"])]
     note = result.get("handoff_ar")
-    lines = [handoff.NOTE_AR[f] for f in new_rules]
+    lines = [handoff.secret_note(found.get("kinds")) if f == "secret_in_ticket"
+             else handoff.complaint_note(found.get("reasons")) if f == "complaint_risk" else handoff.NOTE_AR[f]
+             for f in new_rules]
     if result.get("outcome") == "escalated" and isinstance(note, str) and lines:
         parts = note.split("\n")
         end = len(parts) - 1 if parts[-1] == handoff.IDENTITY_AR else len(parts)
         out["handoff_ar"] = "\n".join(parts[:end] + lines + parts[end:])
+    if spans and isinstance(out.get("handoff_ar"), str):   # the note never writes a hidden number again
+        out["handoff_ar"] = "\n".join(handoff.hide_secrets(x, found.get("digits")) for x in out["handoff_ar"].split("\n"))
     return out
 
 
-def apply_current_rules(tickets: list) -> int:
+def apply_current_rules(tickets: list, gold_text: bool = False) -> int:
     """A saved run served as today's code would decide it, for the rules that need no model call (the
     author's decision, 7 Nov): a ready ticket whose draft has a draft-check finding today is flagged with
     draft:<kind>, as run.py flags a live one, and the code rules on the customer's text add their flags,
     notes and secret_spans (see _with_current_rules), in its result and in its "result" event, the way
     apply_account_risk does. Nothing is re-routed, re-prioritised, re-typed or re-drafted, and the file is
     never written. A decision is checked against this copy (served_ticket). Returns how many tickets it
-    changed."""
+    changed. `gold_text`: see current_rules."""
     n = 0
     for row in tickets:
         if not isinstance(row, dict):
             continue
-        found = current_rules(row)
+        found = current_rules(row, gold_text)
         changed = _with_current_rules(row.get("result"), found)
         if changed is None:
             continue
@@ -557,9 +598,9 @@ def apply_current_rules(tickets: list) -> int:
 def with_current_gold(f: Path) -> dict:
     """A saved run with each ticket's gold label taken from its set file as it is now, so a label
     corrected after the run (e.g. the author's t2-0033) is scored the same way as in the reports.
-    A sealed set's file is never read. Drafts from runs made before 1 Nov get their check spans
-    (recompute_checks), runs made before 5 Nov the account_risk flag (apply_account_risk), and every run
-    today's rules that need no model call (apply_current_rules)."""
+    A sealed set's file is never read. Drafts whose check spans are missing or were computed with older
+    kinds get today's (recompute_checks), runs made before 5 Nov the account_risk flag (apply_account_risk),
+    and every run today's rules that need no model call (apply_current_rules), read on the set file's text."""
     before = f.stat()
     raw = f.read_text(encoding="utf-8")
     after = f.stat()
@@ -567,9 +608,7 @@ def with_current_gold(f: Path) -> dict:
     stamp = (after.st_mtime_ns, after.st_size)
     if isinstance(run, dict):   # a file rewritten while it was read is checked but not kept
         _with_checks(f, run, stamp if stamp == (before.st_mtime_ns, before.st_size) else None)
-        if isinstance(run.get("tickets"), list):
-            apply_account_risk(run["tickets"])
-            apply_current_rules(run["tickets"])
+    gold_text = False
     if f.parent.parent in (RUNS / "exp", SAVED):
         name = f.parent.name
         run["meta"] = {**run.get("meta", {}), "set": name}
@@ -579,6 +618,11 @@ def with_current_gold(f: Path) -> dict:
                                          if line.strip())}
             run["tickets"] = [{**row, "ticket": gold[row["ticket"]["id"]]} for row in run["tickets"]
                               if row["ticket"].get("id") in gold]
+            gold_text = True
+    # After the gold swap: a run saved masked still has the customer's numbers in the set file, which the page shows.
+    if isinstance(run, dict) and isinstance(run.get("tickets"), list):
+        apply_account_risk(run["tickets"])
+        apply_current_rules(run["tickets"], gold_text)
     return run
 
 
@@ -788,8 +832,8 @@ def _corrected(raw) -> dict:
 
 def served_facts(result, events=None) -> dict:
     """What the page was served for one ticket, the way it reads it: outcome (escalated when there is no
-    result), flags, the type the draft was written for, team, priority, and a keyed hash of the draft
-    (result.draft_ar, else the last finished draft's reply). Never the text."""
+    result), flags, the type the draft was written for (and its second request, if any), team, priority, and
+    a keyed hash of the draft (result.draft_ar, else the last finished draft's reply). Never the text."""
     res = result if isinstance(result, dict) else {}
     draft = res.get("draft_ar")
     if not isinstance(draft, str):
@@ -798,9 +842,11 @@ def served_facts(result, events=None) -> dict:
         draft = done[-1].get("reply") if done else None
     ex = res.get("extraction")
     flags = res.get("flags") if isinstance(res.get("flags"), list) else []
+    sec = ex.get("secondary_subcategory") if isinstance(ex, dict) else None
     return {"outcome": res.get("outcome") if res.get("outcome") in OUTCOMES else "escalated",
             "flags": [f for f in flags if isinstance(f, str) and _FLAG.fullmatch(f)][:32],
             "subcategory": ex.get("subcategory") if isinstance(ex, dict) else None,
+            "secondary_subcategory": sec if isinstance(sec, str) and sec in taxonomy().subcategories else None,
             "team": res.get("team"), "priority": res.get("priority"),
             "draft_sha256": _sha256(draft) if isinstance(draft, str) else None}
 
@@ -825,6 +871,49 @@ def served_ticket(run: str, ticket_id: str) -> dict | None:
 def _never_drafted(sub) -> bool:
     s = taxonomy().subcategories.get(sub) if isinstance(sub, str) else None
     return bool(s and s.always_escalate)
+
+
+# The draft warnings that read the drafter's prompt (its ticket, its ask lines): on an edited reply the server,
+# which keeps no prompt for a live run, can't run them, so their tick is taken as the page sends it.
+PROMPT_CHECKS = ("stray_latin", "unknown_number", "ask_missing", "amount_not_in_ticket")
+
+
+def required_acks(served: dict, corrected: dict) -> list[str]:
+    """The points an approval of this ticket must tick (second round of role-played test sessions, 7 Nov: the
+    server enforced only the identity tick). As the page lists them (inbox.js confirmTargets): each flag the
+    ticket was served with that is not a draft warning or a quiet note (account_risk is checked apart, see
+    needs_identity); second_request when a drafted ticket has a second type; draft_for_other_type when the agent
+    corrected the type or the team of a drafted ticket. A missing:<field> point is also met by
+    missing:<field>:not_needed."""
+    out = [f for f in served["flags"] if not f.startswith("draft:") and f not in QUIET_FLAGS and f != "account_risk"
+           and f in ACK_KINDS]
+    if served["outcome"] in ("drafted", "flagged") and served.get("secondary_subcategory"):
+        out.append("second_request")
+    if served.get("draft_sha256") and (
+            corrected.get("subcategory") not in (None, served.get("subcategory"))
+            or corrected.get("team") not in (None, served.get("team"))):
+        out.append("draft_for_other_type")
+    return list(dict.fromkeys(out))
+
+
+def fraud_forward(served: dict, corrected: dict) -> bool:
+    """A forward of a ticket served as fraud (the fraud flag, or a type that is never drafted) to a team the
+    agent corrected away from fraud: it needs the fraud_team_changed tick."""
+    fraud = "fraud" in served["flags"] or _never_drafted(served.get("subcategory"))
+    team = corrected.get("team")
+    return fraud and team is not None and team != SECURITY_TEAM
+
+
+def allowed_acks(served: dict, corrected: dict, final: str | None) -> set[str]:
+    """Every kind this decision may tick: the required points (and missing:<field>:not_needed for each missing
+    field), the identity tick, fraud_team_changed, a draft warning the ticket was served with, and on an edited
+    reply a warning the prompt-free checks find in it (or one that needs the prompt)."""
+    out = set(required_acks(served, corrected)) | {"account_risk", "fraud_team_changed"}
+    out |= {f"{f}:not_needed" for f in out if f.startswith("missing:")}
+    out |= {f[len("draft:"):] for f in served["flags"] if f.startswith("draft:")}
+    if final is not None and _sha256(final) != served.get("draft_sha256"):
+        out |= set(PROMPT_CHECKS) | {f["kind"] for f in draft_check.findings(final, "", "")}
+    return out
 
 
 def decision_record(body: dict) -> dict:
@@ -882,12 +971,17 @@ def decision_record(body: dict) -> dict:
         raise BadField("draft_text")
     if action == "approved" and served["draft_sha256"] and _sha256(final) != served["draft_sha256"]:
         raise BadField("final_text")   # (with no draft served, append_decision refuses it: 409 escalated)
+    if action != "undone" and set(acked) - allowed_acks(served, corrected, final if action == "edited" else None):
+        raise BadField("warnings_acknowledged")   # a point the ticket never had
     return {
         "id": uuid.uuid4().hex,
         "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "reviewer": reviewer(),
         "run": run, "ticket_id": ticket_id, "action": action, "pipeline_outcome": served["outcome"],
-        "flags": served["flags"], "reason_codes": list(dict.fromkeys(codes)), "seconds": seconds,
+        "flags": served["flags"],
+        # What the ticket was served as (no text), so edit and override rates can be counted per type from the log.
+        "served": {k: served.get(k) for k in ("subcategory", "team", "priority")},
+        "reason_codes": list(dict.fromkeys(codes)), "seconds": seconds,
         "corrected": corrected, "undoes": undoes, "visits": visits,
         "warnings_acknowledged": list(dict.fromkeys(acked)),
         "models": {role: model_for(role) for role in models()},
@@ -898,6 +992,8 @@ def decision_record(body: dict) -> dict:
         "ticket_sha256": served["ticket_sha256"],   # live runs: the cleaned ticket text, keyed
         # Kept for the checks in append_decision; never written to the log.
         "_final": final,
+        "_required": required_acks(served, corrected),
+        "_fraud_forward": fraud_forward(served, corrected),
         "_never_drafted": _never_drafted(served["subcategory"]) or _never_drafted(corrected.get("subcategory")),
     }
 
@@ -944,19 +1040,29 @@ def append_decision(record: dict) -> None:
       served or as the agent corrected it: it can only be forwarded or taken over;
     - an approval whose reply still asks for a code, names an investigation or repeats a card number
       (the page blocks it first; this stops a stale check or a hand-made request);
-    - an approval of a blocked account or a SIM change without the identity tick (needs_identity);
+    - an approval of a blocked account or a SIM change without the identity tick (needs_identity), or without
+      a tick on each point its ticket had (required_acks: the 409 names the first one missing);
+    - a forward of a fraud escalation to another team without fraud_team_changed (fraud_forward);
     - a second decision on a ticket that already has one standing (another tab decided it), or an undo
       of a decision that no longer stands. Live tickets too: each live run has its own id."""
     final = record.pop("_final", None)
     never_drafted = record.pop("_never_drafted", False)
+    required = record.pop("_required", [])
+    fraud_fwd = record.pop("_fraud_forward", False)
+    acked = record["warnings_acknowledged"]
     if record["action"] in ("approved", "edited"):
         if record["pipeline_outcome"] == "escalated" or never_drafted:
             raise Conflict("escalated")
         found = blocking_in(final)
         if found:
             raise Conflict("blocked", BLOCKED_AR[found[0]])
-        if "account_risk" not in record["warnings_acknowledged"] and needs_identity(record):
+        if "account_risk" not in acked and needs_identity(record):
             raise Conflict("identity")
+        missing = [k for k in required if k not in acked and f"{k}:not_needed" not in acked]
+        if missing:
+            raise Conflict("unticked", missing[0])
+    if record["action"] == "forwarded" and fraud_fwd and "fraud_team_changed" not in acked:
+        raise Conflict("fraud_team")
     line = json.dumps(record, ensure_ascii=False) + "\n"
     path = decisions_file()
     with _decisions_lock:
@@ -1265,7 +1371,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         text = body.get("text")
         text = text.strip() if isinstance(text, str) else ""
-        if not text:
+        # Only invisible characters (zero-width spaces, direction controls, a BOM) is empty too: the clean step
+        # would send the model an empty ticket.
+        if not text or not clean(text):
             return self._error("empty", 400)
         try:
             text.encode("utf-8")       # JSON allows a lone surrogate ("\\ud83d"); it can't be streamed or saved

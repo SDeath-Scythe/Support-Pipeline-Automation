@@ -14,9 +14,10 @@ def no_fixes(monkeypatch):
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
 
 
-# The warnings adopted on 7 Nov read the wording («يرجى» is dialect_words) and amounts; a test of one of the
-# earlier rules checks those rules' kinds only.
-NEW_WARNINGS = {"claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket"}
+# The warnings adopted on 7 Nov read the wording («يرجى» is dialect_words, «فهمت» persona_slip) and amounts; a test
+# of one of the earlier rules checks those rules' kinds only.
+NEW_WARNINGS = {"claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket", "persona_slip",
+                "asks_given"}
 
 
 def rule_problems(text: str, allowed: str, facts: str = "") -> list[str]:
@@ -1279,7 +1280,10 @@ def test_the_new_warnings_run_with_no_flag():
     test_server_security's)."""
     text = "هلا بيك، تم إرجاع المبلغ عشان. هلا بيك، تم إرجاع المبلغ عشان. حولت 1000 دولار."
     found = problems(text, _prompt("دفعت فاتورة عشر ورقات", "", "نوع الفاتورة"))
-    assert set(found) == NEW_WARNINGS | {"unknown_number"}                  # 1000 is in neither the ticket nor a line
+    second_round = {"persona_slip", "asks_given"}
+    assert set(found) == (NEW_WARNINGS - second_round) | {"unknown_number"}  # 1000 is in neither the ticket nor a line
+    assert problems("آني فهمت إنك دفعت. ممكن تكتبلنا نوع الفاتورة؟", _prompt("دفعت فاتورة الماي", "", "")) == \
+        ["persona_slip", "asks_given"]
     assert NEW_WARNINGS <= set(draft_check.KINDS) and draft_check.FLAG_KINDS == ()
 
 
@@ -1421,3 +1425,197 @@ def test_drafter_gets_the_customers_words_for_an_amount_not_written_as_a_number(
 ])
 def test_own_words_finds_number_words_that_name_money(text, words):
     assert draft.own_words(text) == words
+
+
+# --- the second round of role-played test sessions (7 Nov) ---
+
+from pipeline import clean as clean_mod  # noqa: E402
+from pipeline import ticket_rules  # noqa: E402
+
+
+def _kinds(text):
+    return [(text[a:b], k) for a, b, k in clean_mod._spans(text, detail=True) if k != "long"]
+
+
+@pytest.mark.parametrize("text, want", [
+    # R02: «..» is a pause, not the end of the clause (new-agent N6)
+    ("مادا يوصلني كود التفعيل.. لا لحظه وصل هسه 482915 بس التطبيق يكول الكود منتهي", [("482915", "otp")]),
+    ("وصلني رمز التحقق… هسه 551203", [("551203", "otp")]),
+    # a card in groups of four with mixed separators, and its security code in words (compliance L04)
+    ("بطاقتي 5204-7311 8826 - 4413 انسحب منها 45,000 دينار. الرقم اللي ورا البطاقة 731",
+     [("5204-7311 8826 - 4413", "card"), ("731", "cvv")]),
+    # a number the customer calls their card, Luhn or not (cx N06, X01)
+    ("البطاقة اللي عندي رقمها 4211 7781 0093 5526 والرقم السري مالها 1958", [("4211 7781 0093 5526", "card"), ("1958", "pin")]),
+    ("رقم البطاقة 5213904477162280 وتنتهي 09/28 والرمز اللي ورا 371", [("5213904477162280", "card"), ("371", "cvv")]),
+    ("هسه وصلني كود 552918 برسالة", [("552918", "otp")]),
+    # R07: an id after «كود» is not a code (mobile-agent L5); «كود الوكيل» never was
+    ("آني صاحب محل وكيل بالبياع كود AG-2290", []),
+    ("كود الوكيل AG-7316", []),
+    # not a card: a national id, the last four digits, a reference, an amount
+    ("رقم البطاقة الوطنية الجديدة 199845670312 وبطاقتي تنتهي بـ 7720", []),
+    ("بطاقتي انخصم منها 1,250,000 دينار ورقم العملية 7730195", []),
+    ("دفعت بالبطاقة رقم العملية 4532881027640013", []),   # 16 digits, no Luhn: a reference after «رقم العملية»
+])
+def test_secret_forms_find_these_and_name_their_kind(text, want):
+    assert _kinds(text) == want
+    assert ticket_rules.secret_kinds(text) == list(dict.fromkeys(k for _, k in want))
+
+
+@pytest.mark.parametrize("text, want", [
+    ("مرحبا، صارت ساعة من كتبتلكم وماكو أي رد", ["repeat"]),       # team-lead L5
+    ("راسلتكم قبل وكالولي ننتظر وما صار شي", ["repeat"]),           # t2-0048
+    ("ثلث ايام وماحد يرد علي", ["repeat"]),
+    ("هاي ثالث مرة أكتبلكم ومحد يرد!", ["repeat"]),
+    ("راح اشتكي عليكم للبنك المركزي", ["threat"]),
+    ("اذا ما ترجعولي فلوسي اروح للبنك المركزي", ["threat"]),
+    ("حسب تعليمات البنك المركزي اريد قائمة الحسابات", []),          # compliance L06: a mention, no threat
+    ("البنك المركزي يقول التحويل مسموح", []),
+    ("حولت فلوس وما وصلت", []),
+])
+def test_complaint_reasons(text, want):
+    assert ticket_rules.complaint_reasons(text) == want and ticket_rules.complaint_risk(text) == bool(want)
+
+
+@pytest.mark.parametrize("text, want", [
+    ("ضاع موبايلي والمحفظة مو مفتوحة عليه، بس اريد اطلع شريحة جديدة", False),   # the review's two texts
+    ("انسرق تلفوني بس الحساب ما مفتوح عليه الحمدلله", False),
+    ("انسرق تلفوني والمحفظة مفتوحة عليه", True),
+])
+def test_device_lost_skips_a_wallet_said_not_to_be_open(text, want):
+    assert ticket_rules.device_lost(text) is want
+
+
+T2 = "<ticket>\nحولت فلوس لاخوي وما وصلت، شسوي؟\n</ticket>"
+
+
+@pytest.mark.parametrize("draft", [
+    # R03: roundabout requests for the code or the PIN (compliance's probe)
+    "الرسالة اللي وصلتك بيها ستة أرقام، اكتبهن بالرد حتى نكمل.",
+    "اقرالنا الرقم اللي مكتوب بالرسالة الأخيرة.",
+    "دزلنا صورة للرسالة اللي وصلتك وبيها الأرقام.",
+    "شنو الأربع أرقام اللي تستعملها بالصراف؟",
+])
+def test_a_roundabout_code_request_is_caught(draft):
+    assert "asks_secret" in problems(draft, T2)
+
+
+@pytest.mark.parametrize("draft", [
+    # R08: the draft's own advice is not a request
+    "وبلاش ترسل رقم البطاقة أو الرمز اللي ورا البطاقة مرة ثانية.",
+    "وبلاش تدز الرمز لأي أحد.",
+    "لا تكتب الأرقام اللي بالرسالة لأي أحد.",
+    "لا تدز صورة للرسالة اللي بيها الأرقام لأي أحد.",
+])
+def test_advice_not_to_send_the_code_is_not_a_request(draft):
+    assert "asks_secret" not in problems(draft, T2)
+
+
+@pytest.mark.parametrize("draft, hit", [
+    # R04: tipping off about the source of funds, a report, an official body
+    ("وللعلم نتحقق هسه من مصدر الأموال اللي وصلتك.", "مصدر الأموال"),
+    ("انرفع عليك بلاغ من جهة ثانية.", "انرفع عليك بلاغ"),
+    ("جهة رسمية طلبت إيقاف حسابك.", "جهة رسمية طلبت"),
+])
+def test_tipping_off_lines_are_caught(draft, hit):
+    f = [x for x in findings(draft, T2) if x["kind"] == "hold_reason"]
+    assert f and f[0]["text"] == hit
+
+
+@pytest.mark.parametrize("draft", ["راح نتحقق من العملية ونرجعلك.", "راح نتأكد من مصدر الخصم اللي ما تعرفه.",
+                                   "إذا شفت أي رسالة مشبوهة لا تفتحها."])
+def test_checking_a_transaction_is_not_tipping_off(draft):
+    assert "hold_reason" not in problems(draft, T2)
+
+
+@pytest.mark.parametrize("draft, hit", [
+    # R12: done, said other ways (cx-quality)
+    ("صلّحنا المشكلة والدفعة هسه واصلة للدائرة.", "صلّحنا"),
+    ("والموضوع انحل وما راح يگطعون الماي.", "انحل"),
+    ("كلمنا الدائرة.", "كلمنا الدائرة"),
+    ("شكواك على الموظفة انرفعت للإدارة وراح تتحاسب.", "وراح تتحاسب"),
+    ("والحد اليومي مالتك صار مليون دينار.", "والحد اليومي مالتك صار"),
+])
+def test_claims_done_said_other_ways(draft, hit):
+    f = [x for x in findings(draft, T2) if x["kind"] == "claims_done"]
+    assert f and f[0]["text"] == hit
+
+
+@pytest.mark.parametrize("draft", ["إذا ما انحلت المشكلة، كلمنا مرة ثانية.", "انحلت المشكلة؟", "تكدر تكلمنا على الرقم.",
+                                   "راح نكلم الدائرة ونرجعلك."])
+def test_not_a_claim_of_done(draft):
+    assert "claims_done" not in problems(draft, T2)
+
+
+@pytest.mark.parametrize("draft, words", [
+    # R21: stiff or other-dialect words, every one of them
+    ("هلا وغلا، وصلتنا رسالتك.", ["هلا وغلا"]),
+    ("وبما أن الموضوع مستعجل، راح نتابعه.", ["وبما أن"]),
+    ("صار التحويل بالأمس، ونرجو تكتبلنا رقم العملية، وكذلك التاريخ.", ["بالأمس", "ونرجو", "وكذلك"]),
+    ("وحفاظاً على أمان حسابك، رجاءً لا تشارك الرمز.", ["وحفاظا", "رجاء"]),
+    ("وهم الأجدر يوضحون.", ["الأجدر"]),
+])
+def test_dialect_words_finds_every_word(draft, words):
+    f = next(x for x in findings(draft, T2) if x["kind"] == "dialect_words")
+    assert (f.get("words") or [f["text"]]) == words and f["text"] == words[0]
+    if len(words) > 1:
+        assert [draft[a:b] for a, b in f["spans"]] == words
+
+
+@pytest.mark.parametrize("draft, want", [
+    # R22: the draft speaks as one person
+    ("فهمنا إن كود التفعيل يوصل. لا تشارك أي كود تفعيل وياي أو وية أي أحد.", "وياي"),
+    ("آني أعتذر عن التأخير.", "آني"),
+    ("ما أقدر أعطيك معلومة مضبوطة.", "أقدر"),
+    ("فهمنا طلبك، وراح نتابعه ويانا.", None),
+    ("الزبون كتب «آني ما اعرف شي».", None),       # quoted: the customer's words
+])
+def test_persona_slip(draft, want):
+    f = [x for x in findings(draft, T2) if x["kind"] == "persona_slip"]
+    assert (f[0]["text"] if f else None) == want
+
+
+@pytest.mark.parametrize("ticket, draft, want", [
+    # R05: amounts in words and decimals
+    ("حولت 1.5 مليون دينار لاخوي وما وصلت", "وصلتنا رسالتك عن 5 مليون دينار.", True),
+    ("حولت 1.5 مليون دينار لاخوي وما وصلت", "وصلتنا رسالتك عن 1,000,000 دينار.", True),
+    ("حولت 1.5 مليون دينار لاخوي وما وصلت", "وصلتنا رسالتك عن 1.5 مليون دينار.", False),
+    ("حولت 1.5 مليون دينار لاخوي وما وصلت", "وصلتنا رسالتك عن 1,500,000 دينار.", False),
+    ("حولت 2 مليون و 500 الف لاخوي وما وصلت", "وصلتنا رسالتك عن 2 مليون دينار.", True),
+    ("حولت 2 مليون و 500 الف لاخوي وما وصلت", "وصلتنا رسالتك عن 2,500,000 دينار.", False),
+    ("حولت مليون ونص لاخوي", "وصلتنا رسالتك عن 1,500,000 دينار.", False),
+    ("بقيمة ألف ومئتي دولار", "وصلتنا رسالتك عن حوالة 1,200 دولار.", False),
+    # R11: the unit counts
+    ("حولت 50 الف دينار لاخوي وما وصلت", "وصلتنا رسالتك عن حوالة 50 دولار.", True),
+    ("حولت 50 الف دينار لاخوي وما وصلت", "وصلتنا رسالتك عن حوالة 50 دينار.", True),
+    ("حولت 50 الف دينار لاخوي وما وصلت", "وصلتنا رسالتك عن حوالة 50,000 دينار.", False),
+    ("حولت 50 دولار لاخوي", "وصلتنا رسالتك عن حوالة 50 دينار.", True),
+    ("شحنت بمبلغ 10٫000 دينار", "وصلتنا رسالتك عن شحن 10,000 دينار.", False),   # cx N11: ٫ as a separator
+])
+def test_amount_not_in_ticket_reads_the_whole_amount_and_its_unit(ticket, draft, want):
+    assert ("amount_not_in_ticket" in problems(draft, f"<ticket>\n{ticket}\n</ticket>")) is want
+
+
+def test_an_amount_in_words_written_in_digits_is_not_an_unknown_number():
+    """cx N09: «ألف ومئتي دولار» faithfully written «1,200 دولار» got unknown_number and amount_not_in_ticket."""
+    allowed = "<ticket>\nأرسلت حوالة دولية بقيمة ألف ومئتي دولار أمريكي قبل أربعة أيام عمل ولم تصل.\n</ticket>"
+    assert problems("وصلتنا رسالتك عن حوالة بمبلغ 1,200 دولار.", allowed) == []
+    assert draft_check.word_amounts("دز ورقتين لواحد") == [(2.0, "note")]
+
+
+@pytest.mark.parametrize("draft, ticket, ask, want", [
+    # R19: «سلمته للوكيل» names the agent but asks the amount (t2-0052); the bill type a ticket names (new-agent N1)
+    ("ممكن تكتب لنا المبلغ اللي سلمته للوكيل بالضبط؟", "سلمت الوكيل كاش وما نزل", "المبلغ, اسم الوكيل ومكانه",
+     ["agent_location"]),
+    ("ممكن تكتب لنا المبلغ واسم الوكيل ومكانه؟", "سلمت الوكيل كاش وما نزل", "المبلغ, اسم الوكيل ومكانه", []),
+    ("وين الوكيل اللي سلمته؟ وشكد المبلغ؟", "سلمت الوكيل كاش وما نزل", "المبلغ, اسم الوكيل ومكانه", []),
+    ("ممكن تكتب لنا المبلغ؟", "دفعت فاتورة الماي وما انقبلت", "المبلغ, نوع الفاتورة", []),
+])
+def test_ask_missing_reads_what_is_asked(draft, ticket, ask, want):
+    assert draft_check.ask_missing_fields(draft, _prompt(ticket, ask)) == want
+
+
+def test_asks_given_a_bill_type_the_ticket_names():
+    allowed = _prompt("دفعت فاتورة الانترنيت وما وصلت", "", "نوع الفاتورة")
+    f = [x for x in findings("ممكن تكتب لنا نوع الفاتورة؟", allowed) if x["kind"] == "asks_given"]
+    assert f and f[0]["text"] == "نوع الفاتورة"
+    assert "asks_given" not in problems("ممكن تكتب لنا نوع الفاتورة؟", _prompt("دفعت فاتورة وما وصلت", "", "نوع الفاتورة"))

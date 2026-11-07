@@ -978,13 +978,16 @@ def test_fraud_secondary_escalates_a_fraud_second_type_from_the_recheck(fake, mo
     assert result["outcome"] == "escalated" and result["flags"] == ["fraud"] and "drafter" not in fake.seen
     assert (result["team"], result["priority"]) == ("fraud", "P1")
     assert "الموضوع: الاحتيال والأمان › احتيال أو مشاركة الرمز" in result["handoff_ar"]
-    assert "أثر على الحساب: حساب مقفول" in result["handoff_ar"]       # an account effect of fraud (F14b wording)
+    # an account effect of fraud (F14b), but «حساب مقفول» read as a fact where the customer may ask us to lock it (R33)
+    assert "قفل الحساب: مذكور بالرسالة (يمكن مقفول، ويمكن الزبون يطلب يقفله)" in result["handoff_ar"]
+    assert "أثر على الحساب: حساب مقفول" not in result["handoff_ar"]
 
 
 def test_fraud_secondary_leaves_other_second_types_alone(fake, monkeypatch):
     fake.replies["classifier"] = _with_secondary("app_bug", "fees_limits_question", 0.92, "general")
     result = fake.run.process(TICKET)
-    assert result["outcome"] == "drafted" and result["flags"] == []
+    # drafted, with the second request to tick (second_request_flag, adopted in the second round of test sessions)
+    assert result["outcome"] == "flagged" and result["flags"] == ["second_request"] and result["draft_ar"]
 
 
 def test_secret_in_ticket_flags_the_draft_and_points_at_the_secrets_in_the_shown_text(fake, monkeypatch):
@@ -993,19 +996,21 @@ def test_secret_in_ticket_flags_the_draft_and_points_at_the_secrets_in_the_shown
     text = "😡 ‫" + CARD_PIN          # an emoji is two UTF-16 units; the direction control is not shown
     result = fake.run.process(text)
     assert result["outcome"] == "flagged" and result["flags"] == ["secret_in_ticket", "bidi_controls"]
-    assert result["notes_ar"] == [fake.run.FLAG_AR["secret_in_ticket"], fake.run.FLAG_AR["bidi_controls"]]
+    assert result["secret_kinds"] == ["card", "pin"]
+    assert result["notes_ar"] == [fake.run.flag_note("secret_in_ticket", ["card", "pin"]), fake.run.FLAG_AR["bidi_controls"]]
+    assert result["notes_ar"][0] == "الزبون كتب رقم بطاقته ورمزه السري: نبّهه يوقف البطاقة ويغيّر رمزه السري، ولا تكرر الرقم بالرد"
     shown = shown_text(text).encode("utf-16-le")
     found = [shown[2 * s:2 * e].decode("utf-16-le") for s, e in result["secret_spans"]]
     assert found == ["6273 9501 8342 7767", "4829"]
 
 
 def test_secret_in_ticket_adds_a_line_to_the_team_note_of_an_escalation(fake, monkeypatch):
-    from pipeline.handoff import NOTE_AR
-
     fake.replies["classifier"] = _reply("not_received", 0.40, cat="transfers")
     result = fake.run.process("راتبي ما نزل، واذا تحتاجون الرمز السري مالي هو 7392")
     assert result["outcome"] == "escalated" and result["flags"][-1] == "secret_in_ticket"
-    assert NOTE_AR["secret_in_ticket"] in result["handoff_ar"].split("\n") and len(result["secret_spans"]) == 1
+    line = "رمز سري: الزبون كتب رمزه السري بالرسالة. نبّهه يغيّر رمزه السري، ولا تكرر الرقم بالرد"
+    assert line in result["handoff_ar"].split("\n") and len(result["secret_spans"]) == 1
+    assert "7392" not in result["handoff_ar"]
 
 
 @pytest.mark.parametrize("text", ["رمز التحقق ما يوصلني من الصبح", "حولت 50000 دينار ورقم العملية 7720145",
@@ -1130,3 +1135,48 @@ def test_the_new_rules_are_adopted_and_left_the_experiment_codes(name, monkeypat
         fixes.active()
     codes = (ROOT / "scripts/experiment.py").read_text(encoding="utf-8").split("CODES: dict[str, str] = ")[1].split("}")[0]
     assert f'"{name}"' not in codes
+
+
+# --- the second round of role-played test sessions (7 Nov) ---
+
+CARD = "4111 1111 1111 1111"
+
+
+def test_the_team_note_never_writes_a_secret_the_inbox_hides(fake):
+    """R01: L13's team note read «انوصل كود 552918 ...» above the message that showed «كود ••••». The summary (a model's
+    line) and the facts (the reference) are written with each card number or code hidden."""
+    fake.replies["classifier"] = ('{"category": "fraud_security", "subcategory": "suspected_scam", "confidence": 0.95, '
+                                  '"reference": "552918"}')
+    fake.replies["summary"] = f"انوصل كود ٥٥٢٩١٨ بدون ما يطلبه، وبطاقته {CARD.replace(' ', '-')}"
+    text = f"هسه وصلني كود 552918 برسالة وانا ما طلبت شي، وبطاقتي {CARD}. واحد اتصل يريد الكود"
+    result = fake.run.process(text)
+    note = result["handoff_ar"]
+    assert result["outcome"] == "escalated" and result["secret_spans"] and "secret_in_ticket" in result["flags"]
+    assert "552918" not in note and "٥٥٢٩١٨" not in note and "1111" not in note
+    assert "الخلاصة: انوصل كود •••• بدون ما يطلبه، وبطاقته ••••" in note and "رقم العملية ••••" in note
+
+
+def test_the_secret_advice_names_what_the_customer_wrote(fake, monkeypatch):
+    """R07 (secret_forms, adopted): one sentence, «يغيّر الرمز ويوقف البطاقة», was given for any kind; a one-time code
+    is not a card. The note, the flag's note and result.secret_kinds name what was written."""
+    from pipeline import handoff, run
+    fake.replies["classifier"] = FRAUD
+    text = "هسه وصلني كود 552918 برسالة وانا ما طلبت شي"
+    on = fake.run.process(text)
+    assert on["secret_kinds"] == ["otp"] and handoff.NOTE_AR["secret_in_ticket"] not in on["handoff_ar"]
+    assert "رمز سري: الزبون كتب رمز تحقق بالرسالة. نبّهه ما يشارك الرمز ويا أي أحد، ولا تكرر الرقم بالرد" in on["handoff_ar"]
+    assert run.flag_note("secret_in_ticket", ["card", "pin"]) == \
+        "الزبون كتب رقم بطاقته ورمزه السري: نبّهه يوقف البطاقة ويغيّر رمزه السري، ولا تكرر الرقم بالرد"
+
+
+def test_the_note_s_time_has_no_english_gloss_and_an_amount_in_words_is_the_customer_s():
+    """R33: a classifier date «البارحة بالسوق (card lost); withdrawal reported today morning» was copied into the note,
+    and «ورقتين» was stated as «المبلغ 200 دولار»."""
+    from pipeline import handoff
+    from pipeline.schemas import Extraction
+    ex = Extraction(category="fraud_security", subcategory="unauthorized_charge", confidence=0.9, amount_usd=200,
+                    date="البارحة بالسوق (card lost); withdrawal reported today morning")
+    facts = handoff._facts(ex, "ابن اختي اخذ تلفوني ودز ورقتين لواحد ما اعرفه البارحة بالسوق")
+    assert facts == ["المبلغ 200 دولار (قراه النموذج، والزبون ما كتبه بالأرقام)", "الوقت: البارحة بالسوق"]
+    assert handoff._facts(ex.model_copy(update={"date": "yesterday"}), "حولت 200 دولار") == ["المبلغ 200 دولار"]
+    assert handoff.arabic_date("قبل يومين") == "قبل يومين"

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 
-# Prompt change from the 7 Nov user tests (run.py; the prompt file is side by side in prompts/).
+# Prompt change from the 7 Nov role-played test sessions (run.py; the prompt file is side by side in prompts/).
 FIXES: dict[str, str] = {
     "summary_qualifiers": "team-note summary prompt summary_system.summary_qualifiers.md: keep the customer's own "
                           "qualifiers and denials, third person, about 15 words, Arabic only",
@@ -54,6 +54,15 @@ ADOPTED: dict[str, str] = {
     "draft_rules_ut": "adopted on 7 Nov 2026: its revised drafter prompt is now draft_system.md",
     "amount_own_words": "adopted on 7 Nov 2026: the drafter always gets the customer's own amount words, and the "
                         "amount_not_in_ticket warning always runs",
+    # 7 Nov 2026, the second round of role-played test sessions: the code rules, measured cache-only.
+    "secret_forms": "adopted on 7 Nov 2026 (second round): a code after «..», a card in groups of four with mixed "
+                    "separators or one the customer calls their card, the card's code in words; «AG-2290» is an id; "
+                    "the advice names the kind",
+    "complaint_reasons": "adopted on 7 Nov 2026 (second round): complaint_risk reads a repeat contact said other ways, "
+                         "needs a threat verb near the regulator words, and says which reason",
+    "device_lost_negation": "adopted on 7 Nov 2026 (second round): a wallet said not to be open is not device_lost",
+    "second_request_flag": "adopted on 7 Nov 2026 (second round): a drafted ticket with a second type is flagged "
+                           "second_request",
 }
 
 

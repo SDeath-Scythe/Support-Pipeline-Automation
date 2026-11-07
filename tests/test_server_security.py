@@ -648,7 +648,8 @@ def test_new_decision_fields_are_checked(srv, tmp_path, over, field):
 
 def test_visits_and_acknowledged_warnings_are_logged_as_kinds(srv, tmp_path, live):
     status, _, _ = call(srv, "POST", "/api/decision",
-                        _decision(ticket_id=live(), visits=3, warnings_acknowledged=["promise", "promise", "draft_for_other_type"]))
+                        _decision(ticket_id=live(), visits=3, corrected={"subcategory": "wrong_recipient"},
+                                  warnings_acknowledged=["promise", "promise", "draft_for_other_type"]))
     assert status == 200
     rec = json.loads((tmp_path / "decisions.jsonl").read_text(encoding="utf-8"))
     assert rec["visits"] == 3 and rec["warnings_acknowledged"] == ["promise", "draft_for_other_type"]
@@ -721,9 +722,10 @@ def test_the_identity_tick_is_logged_as_a_kind(srv, tmp_path, live):
     (["account_risk"], {}),                                                         # the pipeline's flag
     (["account_risk", "draft:promise"], {"warnings_acknowledged": ["promise"]}),
     (["account_risk"], {"flags": []}),                                              # left out of the request
-    ([], {"corrected": {"subcategory": "sim_change"}}),                             # the agent's correction
+    # the agent's correction (the draft was written for another type: that point is ticked too)
+    ([], {"corrected": {"subcategory": "sim_change"}, "warnings_acknowledged": ["draft_for_other_type"]}),
     (["recheck_used_second"], {"corrected": {"subcategory": "blocked_account", "team": "accounts"},
-                               "warnings_acknowledged": ["recheck_used_second"]}),
+                               "warnings_acknowledged": ["recheck_used_second", "draft_for_other_type"]}),
 ])
 @pytest.mark.parametrize("action", ["approved", "edited"])
 def test_an_approval_of_a_blocked_account_or_a_sim_change_without_the_identity_tick_is_refused_409(
@@ -769,7 +771,8 @@ def test_a_saved_run_ticket_needs_the_tick_even_when_the_request_leaves_the_flag
 def test_a_saved_ticket_is_decided_as_today_s_rules_served_it(srv, tmp_path):
     """7 Nov: t2-0004 was drafted on 30 Oct; today's amount_not_in_ticket check fires on its draft, so it is served
     flagged with draft:amount_not_in_ticket (apply_current_rules), and the log records that, not the request's
-    drafted. t2-0030 is served with the quiet instructions_in_ticket flag and stays ready."""
+    drafted. t2-0041 is served with the quiet instructions_in_ticket flag and stays ready (t2-0030, with the same
+    note, is «تحتاج تأكيد» since the second round of role-played test sessions: its draft says «آني أفهم»)."""
     served = server.served_ticket("saved/test2/final", "t2-0004")
     assert served["outcome"] == "flagged" and served["flags"] == ["draft:amount_not_in_ticket"] and served["ticket_sha256"] is None
     body = _decision(run="saved/test2/final", ticket_id="t2-0004", action="approved", pipeline_outcome="drafted", flags=[],
@@ -779,7 +782,7 @@ def test_a_saved_ticket_is_decided_as_today_s_rules_served_it(srv, tmp_path):
     rec = server.read_decisions("saved/test2/final")[-1]
     assert rec["pipeline_outcome"] == "flagged" and rec["flags"] == ["draft:amount_not_in_ticket"]
     assert rec["warnings_acknowledged"] == ["amount_not_in_ticket"] and rec["ticket_sha256"] is None
-    quiet = server.served_ticket("saved/test2/final", "t2-0030")
+    quiet = server.served_ticket("saved/test2/final", "t2-0041")
     assert quiet["outcome"] == "drafted" and quiet["flags"] == ["instructions_in_ticket"]
 
 
@@ -888,7 +891,9 @@ def test_every_confirm_kind_the_page_ticks_is_accepted_and_nothing_free_form(srv
     for k in ("asks_secret", "hold_reason", "sensitive_number", "draft:promise", "missing:anything", "missing:reference:x"):
         assert k not in kinds, k
     acked = ["missing:reference", "recheck_used_second", "missing:amount:not_needed"]
-    assert call(srv, "POST", "/api/decision", _decision(ticket_id=live(), warnings_acknowledged=acked))[0] == 200
+    served = ["missing:reference", "recheck_used_second", "missing:amount"]
+    body = _decision(ticket_id=live(flags=served, outcome="flagged"), warnings_acknowledged=acked)
+    assert call(srv, "POST", "/api/decision", body)[0] == 200
     assert server.read_decisions("live")[-1]["warnings_acknowledged"] == acked
     status, _, raw = call(srv, "POST", "/api/decision", _decision(ticket_id=live(), warnings_acknowledged=["missing:pin"]))
     assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged"
@@ -961,7 +966,9 @@ def test_a_second_request_the_page_asks_about_is_logged_as_a_kind(srv, live):
     """User tests, 7 Nov (T07, page part): a drafted ticket with a second request asks the agent to read
     what the reply says of it; the tick is logged as second_request, never as text."""
     acked = ["second_request", "missing:reference:not_needed"]
-    assert call(srv, "POST", "/api/decision", _decision(ticket_id=live(), warnings_acknowledged=acked))[0] == 200
+    n = live(flags=["missing:reference"], outcome="flagged",
+             extraction={"subcategory": "not_received", "secondary_subcategory": "complaint"})
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=n, warnings_acknowledged=acked))[0] == 200
     assert server.read_decisions("live")[-1]["warnings_acknowledged"] == acked
     for bad in ("second_request:x", "second_request_note"):
         status, _, raw = call(srv, "POST", "/api/decision", _decision(ticket_id=live(), warnings_acknowledged=[bad]))
@@ -1136,3 +1143,81 @@ def test_edit_chars_counts_changed_characters():
     assert server.edit_chars(None, "رد جديد") == len("رد جديد")
     assert server.edit_chars("راح نرجع فلوسك", "راح نتابع طلبك") > 0
     assert server.edit_chars("abc", "abd") == 1
+
+
+# --- the second round of role-played test sessions (7 Nov) ---
+
+def test_an_approval_must_tick_every_point_its_ticket_had_and_nothing_else(srv, tmp_path, live):
+    """R10: the server enforced only the identity tick, and logged ticks of points the ticket never had (L01 approved
+    with no tick while flagged recheck_used_second; L08 logged secret_in_ticket and account_risk it never had)."""
+    served = ["recheck_used_second", "missing:reference", "draft:promise"]
+    n = live(flags=served, outcome="flagged")
+    body = _decision(ticket_id=n, action="approved", final_text=DRAFT, reason_codes=[], corrected={})
+    for acked in ([], ["recheck_used_second"], ["missing:reference"]):
+        status, _, raw = call(srv, "POST", "/api/decision", {**body, "warnings_acknowledged": acked})
+        assert status == 409 and json.loads(raw)["conflict"] == "unticked"
+    assert not (tmp_path / "decisions.jsonl").exists()
+    for bad in (["secret_in_ticket"], ["complaint_risk"], ["claims_done"], ["second_request"], ["draft_for_other_type"]):
+        status, _, raw = call(srv, "POST", "/api/decision",
+                              {**body, "warnings_acknowledged": ["recheck_used_second", "missing:reference", *bad]})
+        assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged", bad
+    ok = {**body, "warnings_acknowledged": ["recheck_used_second", "missing:reference:not_needed", "promise"]}
+    assert call(srv, "POST", "/api/decision", ok)[0] == 200
+    # a second request and a corrected type are points too
+    n2 = live(flags=[], outcome="drafted", extraction={"subcategory": "not_received", "secondary_subcategory": "complaint"})
+    body2 = {**body, "ticket_id": n2, "corrected": {"subcategory": "wrong_recipient"}}
+    status, _, raw = call(srv, "POST", "/api/decision", {**body2, "warnings_acknowledged": ["second_request"]})
+    assert status == 409 and "draft_for_other_type" in json.loads(raw)["error"]
+    assert call(srv, "POST", "/api/decision", {**body2, "warnings_acknowledged": ["second_request", "draft_for_other_type"]})[0] == 200
+
+
+def test_an_edited_reply_may_tick_a_warning_found_in_it(srv, live):
+    """An edit can bring a warning the served draft did not have: a prompt-free one is ticked only if the checks find
+    it in the reply; one that needs the drafter's prompt (no prompt is kept for a live run) is taken as sent."""
+    claim = "هلا بيك، تم إرجاع المبلغ لحسابك."
+    body = _decision(ticket_id=live(), action="edited", final_text=claim, reason_codes=[], corrected={})
+    assert call(srv, "POST", "/api/decision", {**body, "warnings_acknowledged": ["claims_done", "unknown_number"]})[0] == 200
+    status, _, raw = call(srv, "POST", "/api/decision", {**body, "ticket_id": live(), "warnings_acknowledged": ["repeated_text"]})
+    assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged"
+
+
+def test_a_fraud_escalation_forwarded_to_another_team_needs_its_tick(srv, tmp_path, live):
+    """R14: C, Tab, ↓↓, Esc, F forwarded a P1 fraud escalation to «قسم الدعم التقني» with no confirmation."""
+    n = live(flags=["fraud"], outcome="escalated", draft_ar=None, team="fraud", priority="P1",
+             extraction={"subcategory": "unknown_charge"})
+    body = _decision(ticket_id=n, action="forwarded", pipeline_outcome="escalated", flags=["fraud"], draft_text=None,
+                     final_text=None, reason_codes=[], corrected={"team": "tech"})
+    status, _, raw = call(srv, "POST", "/api/decision", body)
+    assert status == 409 and json.loads(raw)["conflict"] == "fraud_team"
+    assert not (tmp_path / "decisions.jsonl").exists()
+    assert call(srv, "POST", "/api/decision", {**body, "warnings_acknowledged": ["fraud_team_changed"]})[0] == 200
+    assert server.read_decisions("live")[-1]["warnings_acknowledged"] == ["fraud_team_changed"]
+    # to the fraud team, or with no correction: no tick
+    for corr in ({}, {"team": "fraud"}):
+        m = live(flags=["fraud"], outcome="escalated", draft_ar=None, team="fraud", priority="P1",
+                 extraction={"subcategory": "unknown_charge"})
+        assert call(srv, "POST", "/api/decision", {**body, "ticket_id": m, "corrected": corr})[0] == 200
+
+
+def test_the_log_keeps_the_served_type_team_and_priority(srv, tmp_path, live):
+    """R24: edit and override rates per type need the type the ticket was served as; a live run keeps it only in memory."""
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=live()))[0] == 200
+    rec = server.read_decisions("live")[-1]
+    assert rec["served"] == {"subcategory": "not_received", "team": "transfers", "priority": "P2"}
+    assert rec["corrected"] == {"priority": "P1"}
+
+
+@pytest.mark.parametrize("text", ["​​​", "‮⁦⁩﻿", " ‏ ­ "])
+def test_a_ticket_of_invisible_characters_only_is_empty(srv, text, monkeypatch):
+    """R26: a ticket of zero-width and direction characters was sent to the model as an empty ticket and drafted."""
+    monkeypatch.setattr(server, "process", lambda *a, **k: (_ for _ in ()).throw(AssertionError("processed")))
+    status, _, raw = call(srv, "POST", "/api/stream", {"text": text})
+    assert status == 400 and json.loads(raw)["error"] == server.ERR_AR["empty"]
+
+
+def test_the_new_reason_chips_are_codes_never_text(srv):
+    """R32: a typo, the wrong gender and the wrong language had no chip, and the log keeps no free text."""
+    meta = json.loads(call(srv, "GET", "/api/meta")[2])
+    for c in ("typo", "wrong_gender", "wrong_language"):
+        assert c in meta["reason_codes"] and meta["reason_codes_ar"][c]
+    assert "fraud_team_changed" in meta["ack_kinds"]

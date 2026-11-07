@@ -17,9 +17,11 @@ from bisect import bisect_left, bisect_right
 from . import fixes
 from .clean import CREDENTIAL, clean, fold, sensitive_numbers
 
-# The last five are the warnings from the 7 Nov user tests, flags until they were adopted the same day.
+# claims_done to amount_not_in_ticket are the warnings from the 7 Nov role-played test sessions, flags until they were
+# adopted the same day; persona_slip and asks_given come from the second round of sessions (7 Nov), as warnings.
 KINDS = ("stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number",
-         "claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket")
+         "claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket", "persona_slip",
+         "asks_given")
 # Warnings under test, each behind the flag of the same name in fixes.py: off, they never appear. None now.
 FLAG_KINDS: tuple[str, ...] = ()
 # A kind whose flag has another name.
@@ -100,6 +102,14 @@ _SECRET_EXTRA = re.compile(
     r"(?:(?:اللي|الي|(?:ال)?(?:موجود|مطبوع|مكتوب)[ةه]?)\s+)?"
     r"(?:ورا|خلف|ب?ظهر|على\s+ظهر)\s+(?:ال)?(?:بطاق\w*|كارت)"
     r"|[أا]رقام\s+(?:(?:اللي|الي|(?:ال)?موجود[ةه])\s+)?(?:بال|في\s+ال)(?:رسال[ةه]|مسج)(?!\w)"
+    # second round of role-played test sessions: «الرقم اللي مكتوب بالرسالة», «الأربع أرقام اللي تستعملها بالصراف» (the
+    # PIN told by its use), «الرقم اللي تدخل بيه», and «صورة للرسالة اللي وصلتك وبيها الأرقام»
+    r"|(?<=ال)رقم\s+(?:(?:اللي|الي)\s+)?(?:(?:ال)?(?:موجود|مكتوب|مطبوع)\s+)?(?:بال|في\s+ال)(?:رسال[ةه]|مسج)"
+    r"(?:\s+(?:ال)?(?:[أا]خير[ةه]|جديد[ةه]|اللي\s+[يت]?وصل\w*|الي\s+[يت]?وصل\w*))?(?!\w)"
+    rf"|{_HOW_MANY}?[أا]رقام\s+{_HOW_MANY}?(?:اللي|الي)\s+[تي](?:ستعمل|ستخدم|دخل|حط|كتب|طبع)\w*"
+    r"\s+(?:\S+\s+)?(?:بال|ب|على\s+ال|في\s+ال)(?:صراف|مكين[ةه]|جهاز|ATM)\w*"
+    r"|(?<=ال)رقم\s+(?:اللي|الي)\s+ت(?:دخل|سجل|فتح)\s+بي(?:ه|ها)(?!\w)"
+    r"|(?:(?<=بيها\s)|(?<=فيها\s)|(?<=بيها\sال)|(?<=فيها\sال))[أا]رقام(?!\w)"
     r"|\s*(?:[اأ]و\s*تي\s*بي|سي\s*في\s*في)(?!\w)|(?<=ال)\s*بي?ن(?=\s+(?:مال|حق)\s)"
     r"|\s*(?i:(?:verification\s+|otp\s+|sms\s+)?code|verification\s+number)(?![A-Za-z]))")
 # «آخر ٤ أرقام من البطاقة» is the safe way to find a card: «رقم البطاقة» after «آخر» is not the card.
@@ -214,7 +224,7 @@ _PURPOSE = {"حتى", "عشان", "علمود", "لكي", "كي", "لأن", "ل�
 # The secret first, then the request: «الكود اللي اجاك دزه النا», «إذا وصلك الرمز، دزه إلنا», «دزلي ياه»,
 # «الرمز اللي وصلك نحتاجه», «الرمز لازم يندز إلنا».
 _SEND_IT = re.compile(r"(?:ت?دز|(?:ا|أ|إ|ت)رسل|(?:ا|أ|إ|ت)بع[ثت]|(?:ا|ت)?كتب|(?:ا|ت)?نطي(?:ن|ني|نا)?|ت?شارك(?:نا)?"
-                      r"|(?:ب|ل)?[اإ]رسال|نحتاج|محتاجين)(?:ه|ها|يا?ه|ياها|اه)(?:لنا|النا|لي)?")
+                      r"|(?:ب|ل)?[اإ]رسال|نحتاج|محتاجين)(?:ه|ها|يا?ه|ياها|اه|هن|هم)(?:لنا|النا|لي)?")
 _SEND_TO = re.compile(r"(?:ت?دز|(?:ا|أ|إ|ت)رسل|(?:ا|أ|إ|ت)بع[ثت]|(?:ا|ت)?نطي|حط|ت?شارك)(?:لنا|لي|نا|ني)"
                       r"|[گقك]و?(?:لنا|لي)")
 _IT = {"ياه", "اياه", "إياه", "ياها", "إلنا", "النا", "لنا", "الجديد", "الجديدة", "الجديده"}
@@ -261,7 +271,9 @@ _COURTESY_CLAUSE = re.compile(r"[،,]\s*(?:[إا]ذا\s+ما\s+علي(?:ك|ج|ك
 # agent from elsewhere: «مش لازم تدزلنا الرمز») count too.
 _NEGATIONS = {"لا", "ما", "مو", "بدون", "دون", "ممنوع", "أبد", "ابد", "أبدا", "ابدا", "أبداً", "ابداً", "ماراح", "مراح",
               "محد", "احذر", "حذاري", "تجنب", "اوعى", "اوعا", "إياك", "اياك", "بالك", "عدم", "بعدم", "لعدم", "يمنع",
-              "مستحيل", "المستحيل", "لم", "لن", "ليس", "ليست", "لست", "لسنا", "لستم", "مش"}
+              "مستحيل", "المستحيل", "لم", "لن", "ليس", "ليست", "لست", "لسنا", "لستم", "مش",
+              # second round of role-played test sessions: «وبلاش ترسل رقم البطاقة» is the draft's own advice
+              "بلاش"}
 # «دزلنا بدون زحمة الرمز», «ارسل لنا بدون تأخير الرمز»: a courtesy, not "without".
 _NO_TROUBLE = {"زحمة", "زحمه", "تأخير", "تاخير", "تأخر", "تاخر", "تعب", "إزعاج", "ازعاج"}
 _GLUED_NEG = re.compile(r"(?:لا|ما)[تين]\w{2,}")
@@ -370,7 +382,7 @@ _BREAK = {"غير", "إلا", "الا", "سوى", "بس", "فقط", "حتى", "�
           "منو", "متى", "لذا", "لذلك", "لهذا", "لهيچ", "بالتالي", "لكن"}
 # After these an order-like word is a noun: «يرجى عدم دز الرمز», «ممنوع دز الرمز».
 _NOUN_NEG = {"عدم", "بعدم", "لعدم", "بدون", "ممنوع", "يمنع", "احذر", "حذاري", "تجنب", "اوعى", "اوعا", "إياك", "اياك",
-             "بالك"} | _BEWARE | _DANGER
+             "بالك", "بلاش"} | _BEWARE | _DANGER
 # An order after «ما» is the past: «النظام ما دز الرمز», «احنا ما بعد ارسلنا الرمز», «ولا مرة شاركنا الرمز». Only
 # these may come between; «ما نگدر انطينا الرمز» still asks.
 _PAST_OK = {"بعد", "كنا", "چنا", "جنا", "كان", "چان", "جان", "مرة", "مره", "يوم", "أبد", "ابد", "أبدا", "ابدا", "أبداً",
@@ -448,7 +460,12 @@ _WORD = re.compile(r"\S+")
 _HOLD = re.compile(
     r"(?<!\w)[وف]?(?:بال|لل|عال|ال|ب|ل|ك)?(?:"
     r"تحقيق\w*|[اإ]شتباه\w*|مشتبه\w*|مشبوه\w*|شبه[ةه](?!\w)|شبهات|مشكوك\w*|مريب\w*|شكوك\w*|امتثال"
-    r"|(?:رفع|قدم|سجل)\w*\s+(?:\S+\s+)?(?:بلاغ|تقرير)\w*"
+    r"|(?:ان)?(?:رفع|قدم|سجل)\w*\s+(?:\S+\s+)?(?:بلاغ|تقرير)\w*"
+    # second round of role-played test sessions: the source of funds, a body that asked to stop the account
+    r"|مصدر\s+(?:ال)?(?:[أا]موال|فلوس|مبالغ|دخل|ثرو[ةه])"
+    r"|(?:نتحقق|نتأكد|نتاكد|نراجع|نتابع|التحقق|التأكد|التاكد)\s+من\s+مصدر\s+(?:ال)?(?:[أا]موال|فلوس|مبالغ|مبلغ|دخل)"
+    r"|جه(?:[ةه]|ات)\s+(?:ال)?(?:رسمي|حكومي|قضائي|مختص)[ةه]?\s+(?:\S+\s+)?(?:طلب|تطلب|طالب|امر|أمر)\w*"
+    r"|(?:[إا]يقاف|تجميد|حجز|قفل)\s+(?:ال)?حساب(?:ك|ج|كم)?\s+(?:\S+\s+)?(?:بطلب|بامر|بأمر|بقرار)"
     r"|بلاغ(?:ات)?\s+(?:رسمي|ضد|بحق|عن(?:ك|ج|كم)(?!\w)|عن\s+حساب(?:ك|ج|كم)|على\s+حساب)"
     r"|(?:[أإا]?بلغنا|[إا]بلاغ)\s+(?:ال)?(?:جه(?:[ةه]|ات)|شرط[ةه]|سلط\w*|بنك\s+(?:ال)?مركزي)"
     r"|[إا]بلاغ\s+عن\s+(?:حساب|عملي|تحويل|حوال)\w*"
@@ -1340,6 +1357,9 @@ def _join_lines(norm: str) -> str:
 
 def _unknown_number(norm: str, pos: list[int], allowed_text: str) -> tuple[int, int] | None:
     allowed = _numbers(allowed_text)
+    t = _TICKET.search(allowed_text)
+    # «ألف ومئتي دولار» is 1200: the draft may write the customer's amount in digits (second round of test sessions).
+    allowed |= {str(int(v)) for v, _ in word_amounts(clean(t.group(1))) if v == int(v)} if t else set()
     thousands = {str(int(n) * 1000) for n in allowed if n.isdigit() and len(n) <= 4}
     if re.search(r"(^|\s)(ال|أل)ف(\s|$)", allowed_text):   # "الف وحدة" = 1,000 written as a word
         thousands.add("1000")
@@ -1401,6 +1421,27 @@ _IF_WHEN = {"إذا", "اذا", "لو", "لمن", "لما", "عندما", "مت�
 _TOLD = re.compile(r"ذكرت\w*|كتبت\w*|[نت]كتب\w*|[گقك]لت|[تي][گقك]ول\w*|مكتوب\w*|حسب|[إا]شعار\w*|رسال[ةه]\w*|طلبت|نفهم|فهمت")
 
 
+# Second round of role-played test sessions: «صلّحنا المشكلة», «والموضوع انحل», «كلمنا الدائرة», «شكواك انرفعت للإدارة
+# وراح تتحاسب», «الحد اليومي مالتك صار مليون دينار»: done, said with no money or account object.
+_DONE_MORE = re.compile(
+    r"(?<!\w)[وف]?(?:صلحنا(?:ها|ه|لك|لج)?|حلينا(?:ها|ه)?|انحل(?:ت)?|(?:تم|تمت)\s+(?:\S+\s+)?(?:حل|تصليح|معالج)\w*)(?!\w)"
+    r"|(?<!\w)[وف]?(?:كلمنا|اتصلنا\s+ب|راسلنا|تواصلنا\s+(?:ويا|مع))\s*(?:ال)?(?:دائر[ةه]|شرك[ةه]|وكيل|تاجر|محل|متجر|بنك|مصرف)(?!\w)"
+    r"|(?<!\w)(?:راح|رح|سوف|وراح)\s+(?:[يت]ت|ن)(?:حاسب|عاقب)\w*"
+    r"|(?<!\w)[وف]?(?:ال)?(?:حد|سقف)(?:ك|ج|كم)?(?:\s+\S+){0,2}?\s+(?:صار|اصبح|أصبح|انرفع|ارتفع|تغير|تعدل)(?=\s+\d|\s+(?:مليون|مليونين|[أا]لف|ميت|مية))")
+
+
+def _claims_more(norm: str, pos: list[int], stops: list[int]) -> tuple[int, int] | None:
+    for m in _DONE_MORE.finditer(norm):
+        s0, s1 = _sentence(norm, stops, m.start())
+        clause_start = max([s0] + [x + 1 for x in (norm.rfind(c, s0, m.start()) for c in "،,") if x >= 0])
+        before = [_bare(w) for w in norm[clause_start:m.start()].split()]
+        if (_NOT_YET & set(before[-2:]) or _IF_WHEN & set(before[-3:]) or any(_TOLD.fullmatch(w) for w in before)
+                or any(q in norm[s0:m.start()] for q in "«\"“") or norm[s1:s1 + 1] in ("?", "؟")):
+            continue                                        # «إذا ما انحلت», «ذكرت إنه انحل», a question, quoted
+        return _raw(pos, m.start(), m.end())
+    return None
+
+
 def _claims_done(norm: str, pos: list[int]) -> tuple[int, int] | None:
     stops = [m.start() for m in _STOP.finditer(norm)]
     for rx in (_DONE_PASSIVE, _DONE_WE):
@@ -1418,7 +1459,7 @@ def _claims_done(norm: str, pos: list[int]) -> tuple[int, int] | None:
             if not claimed or (verb in {"حول", "رفع"} and claimed != ["money"] and _TEAM.search(norm, m.end(), s1)):
                 continue                                    # «حولنا شكواك للقسم»: forwarding is what the tool does
             return _raw(pos, m.start(), m.end())
-    return _on_record(norm, pos, stops)
+    return _on_record(norm, pos, stops) or _claims_more(norm, pos, stops)
 
 
 # claims_done also covers a claim that something is on record with us (7 Nov, dev-0015's «رقم العملية 7021535 مسجل
@@ -1484,8 +1525,12 @@ _FIELD_WORDS = {
     "date": r"تاريخ|وقت|[أا]ي\s+يوم|يوم|ساع[ةه]|شوكت|متى",
     "recipient_number": r"رقم\s+(?:ال)?(?:مستلم|مستفيد|شخص|هاتف|تلفون|موبايل)|رقم\s+(?:\S+\s+){0,2}?\S*(?:حول|رح|راح|رسل|دز)",
     "phone_number": r"رقم\s+(?:\S+\s+){0,3}?\S*(?:شحن|تعبئ|رصيد)|رقم\s+(?:ال)?(?:هاتف|تلفون|موبايل|خط)",
-    "agent_location": r"وكيل|مكان|منطق[ةه]|عنوان|محل|منفذ|اسم\s",
-    "merchant": r"متجر|محل|تاجر|موقع|شرك[ةه]|مطعم|سوق|اسم\s",
+    # Second round of role-played test sessions: «شكد المبلغ اللي سلمته للوكيل؟» names the agent but asks for the
+    # amount. The agent or the shop counts only as what is asked: its name or place, «وين», «ياهو» or «... اللي».
+    "agent_location": r"مكان|منطق[ةه]|عنوان|موقع|وين|اسم\s|(?:شنو|ياهو|يا|[أا]ي)\s+(?:ال)?(?:وكيل|محل|منفذ)"
+                      r"|(?:وكيل|محل|منفذ)\s+(?:اللي|الي)",
+    "merchant": r"موقع|وين|اسم\s|(?:شنو|ياهو|يا|[أا]ي)\s+(?:ال)?(?:متجر|محل|تاجر|شرك[ةه]|مطعم|سوق)"
+                r"|(?:متجر|محل|تاجر|شرك[ةه]|مطعم)\s+(?:اللي|الي)",
     "bill_type": r"فاتور|كهرباء|ماء|مي|[إا]نترني?ت|نوع",
     "screenshot": r"صور[ةه]|سكرين|لقط[ةه]",
 }
@@ -1499,7 +1544,8 @@ _LOST_RECEIPT = re.compile(r"(?:وصل|[إا]يصال|فاتور[ةه])\w*\s+(?:
                            r"|(?:ضيعت|فقدت|ضاع\s+مني|ما\s+عندي|ماعندي|رميت|ما\s+احتفظت\s+ب)\s*(?:ال)?(?:وصل|[إا]يصال)")
 _HISTORY = re.compile(r"سجل|التطبيق|تاريخ\s+(?:ال)?عمليات|حركات")
 # The drafter asks for a bill type only if the ticket doesn't give it; a ticket that names one has given it.
-_BILL_GIVEN = re.compile(r"كهرب|(?<!\w)(?:ال)?ماء(?!\w)|[إا]نترني?ت|(?<!\w)(?:ال)?نت(?!\w)|موبايل|غاز|قسط|جامع|مدرس|اشتراك")
+_BILL_GIVEN = re.compile(r"كهرب|(?<!\w)(?:ال)?ما[ءي](?!\w)|[إا]نترني?ت|(?<!\w)(?:ال)?نت(?!\w)|موبايل|غاز|قسط|جامع|مدرس"
+                         r"|اشتراك")
 
 
 def ask_missing_fields(draft: str, allowed_text: str) -> list[str]:
@@ -1527,6 +1573,24 @@ def ask_missing_fields(draft: str, allowed_text: str) -> list[str]:
     return out
 
 
+# asks_given (second round of role-played test sessions): the draft asks for the bill type a ticket already names («فاتورة
+# الانترنيت» and «ممكن تكتب لنا نوع الفاتورة»).
+_ASKS_BILL_TYPE = re.compile(r"(?<!\w)[وفبل]?(?:ال)?نوع\s+(?:ال)?فاتور[ةه]")
+
+
+def _asks_given(draft: str, allowed_text: str) -> tuple[int, int] | None:
+    ticket = re.search(r"<ticket>\n(.*?)\n</ticket>", allowed_text, re.DOTALL)
+    if not (ticket and _BILL_GIVEN.search(fold(ticket.group(1))[0])):
+        return None
+    norm, pos = fold(draft)
+    for m in re.finditer(r"[^.!?؟\n]+[.!?؟]?", norm):
+        if m.group().rstrip()[-1:] in "؟?" or _ASKING_SENTENCE.search(m.group()):
+            hit = _ASKS_BILL_TYPE.search(m.group())
+            if hit:
+                return _raw(pos, m.start() + hit.start(), m.start() + hit.end())
+    return None
+
+
 def _ask_missing(draft: str, allowed_text: str) -> tuple[int, int] | None:
     """Nothing in the draft to point at: the span is empty, at its end (the finding's "fields" names what)."""
     return (len(draft), len(draft)) if ask_missing_fields(draft, allowed_text) else None
@@ -1542,9 +1606,15 @@ _DRIFT_WORDS = {
     "ابي", "ابيه", "ابيها", "متضايج", "متضايق", "بعثلي", "بعثتلي",                            # not Iraqi (the author)
 }
 _DRIFT_ONLY_WA = {"رح"}                                     # «رح يراجعها»; «فرح», «برح» are other words
+# Second round of role-played test sessions: stiff standard Arabic the drafter still wrote («نرجو», «بالأمس», «وكذلك»,
+# «وحفاظاً», «رجاءً», «الأجدر») and phrases («هلا وغلا» is Gulf, «بما أن» and «أيضاً أن» are standard Arabic).
+_DRIFT_MORE = {"نرجو", "بالامس", "الامس", "كذلك", "حفاظا", "رجاء", "الاجدر", "اجدر"}
+_DRIFT_PHRASES = re.compile(r"(?<!\w)(?:هلا\s+وغلا|[وف]?بما\s+[اأ]ن|[وف]?[اأ]يضا\s+[اأ]ن)(?!\w)")
 
 
-def _dialect_words(norm: str, pos: list[int]) -> tuple[int, int] | None:
+def _dialect_all(norm: str, pos: list[int]) -> list[tuple[int, int]]:
+    """Every word or phrase from another dialect or stiff standard Arabic, in text order."""
+    out = []
     tokens = list(_WORD.finditer(norm))
     for n, t in enumerate(tokens):
         w = t.group().strip("\"'«»()[]:،,.!?؟؛")
@@ -1552,8 +1622,45 @@ def _dialect_words(norm: str, pos: list[int]) -> tuple[int, int] | None:
         bare = w[1:] if w[:1] in "وفبل" and len(w) > 2 else ""
         if w == "بقدر" and n + 1 < len(tokens) and tokens[n + 1].group().startswith("ال"):
             continue                                        # «بقدر الإمكان»: "as far as", not Levantine "I can"
+        plain = w.translate(_ALEF)
+        plain_bare = plain[1:] if plain[:1] in "وفبل" and len(plain) > 2 else ""
         if (w in _DRIFT_WORDS or bare in _DRIFT_WORDS or w in _DRIFT_ONLY_WA
-                or (w[:1] == "و" and w[1:] in _DRIFT_ONLY_WA)):
+                or (w[:1] == "و" and w[1:] in _DRIFT_ONLY_WA)
+                or plain in _DRIFT_MORE or plain_bare in _DRIFT_MORE):
+            out.append((t.start() + lead, t.start() + lead + len(w)))
+    out += [m.span() for m in _DRIFT_PHRASES.finditer(norm.translate(_ALEF))]
+    merged = []
+    for a, b in sorted(out):
+        if merged and a < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(b, merged[-1][1]))
+        else:
+            merged.append((a, b))
+    return [_raw(pos, a, b) for a, b in merged]
+
+
+def _dialect_words(norm: str, pos: list[int]) -> tuple[int, int] | None:
+    found = _dialect_all(norm, pos)
+    return found[0] if found else None
+
+
+# persona_slip (second round of role-played test sessions): the draft speaks as one person («لا تشارك أي كود وياي»,
+# «آني أعتذر», «ما أقدر أعطيك»), where every draft speaks for the team («ويانا», «إحنا», «نكدر»). A word the customer
+# wrote is theirs, so a quoted one doesn't count. «فهمت» is left out: the current drafter writes «وصلتنا رسالتك وفهمت» in
+# about one draft in eight, a mild slip that would put those drafts in «تحتاج تأكيد»; the drafter prompt is the place
+# for it (docs/experiments/LOG.md, 7 Nov, second round).
+_SINGULAR = {"وياي", "آني", "اني", "اكدر", "أكدر", "اقدر", "أقدر", "اعرف", "أعرف", "اشوف", "أشوف", "اتابع",
+             "أتابع", "اتأكد", "أتأكد", "اساعدك", "أساعدك", "اساعدج", "أساعدج", "اراجع", "أراجع"}
+
+
+def _persona_slip(norm: str, pos: list[int]) -> tuple[int, int] | None:
+    for t in _WORD.finditer(norm):
+        w = t.group().strip("\"'«»()[]:،,.!?؟؛")
+        bare = w[1:] if w[:1] in "وف" and len(w) > 3 else w
+        if bare in _SINGULAR or w in _SINGULAR:
+            s0 = max(norm.rfind(c, 0, t.start()) for c in ".!?؟\n") + 1
+            lead = t.group().find(w)
+            if any(q in norm[s0:t.start() + lead] for q in "«\"“"):
+                continue                                    # quoted: the customer's words
             return _raw(pos, t.start() + lead, t.start() + lead + len(w))
     return None
 
@@ -1591,6 +1698,7 @@ _WORD_VALUE = {
     "ثمان": 8, "ثمانية": 8, "ثمن": 8, "ثمنية": 8, "تسع": 9, "تسعة": 9, "عشر": 10, "عشرة": 10, "عشرين": 20, "ثلاثين": 30, "تلاثين": 30, "اربعين": 40, "أربعين": 40,
     "خمسين": 50, "ستين": 60, "سبعين": 70, "ثمانين": 80, "ثمنين": 80, "تسعين": 90, "مية": 100, "مئة": 100,
     "ميت": 100, "ميتين": 200, "مئتين": 200, "متين": 200, "ربع": 0.25, "نص": 0.5, "نصف": 0.5,
+    "مئتي": 200, "ميتي": 200, "مائتين": 200, "مائتي": 200,
 }
 _HUNDRED_OF = {"ثلاث": 3, "ثلث": 3, "تلاث": 3, "تلث": 3, "اربع": 4, "أربع": 4, "ربع": 4, "خمس": 5, "ست": 6,
                "سبع": 7, "ثمان": 8, "ثمن": 8, "تسع": 9}
@@ -1602,7 +1710,7 @@ _MULTIPLIER = {"الف": (1, 1000), "ألف": (1, 1000), "آلاف": (1, 1000), 
                "الفين": (2, 1000), "ألفين": (2, 1000), "مليون": (1, 10**6), "ملايين": (1, 10**6), "مليونين": (2, 10**6),
                "alf": (1, 1000), "هەزار": (1, 1000)}
 _UNIT = {"دينار": "iqd", "دولار": "usd", "دولارات": "usd", "ورقة": "note", "ورقات": "note", "اوراق": "note",
-         "أوراق": "note"}
+         "أوراق": "note", "ورقتين": ("note", 2)}
 _WORD_PREFIX = ("وبال", "بال", "وال", "ال", "وب", "و", "ب", "ل")
 _NOT_AMOUNT = {"لواحد", "لوحدة", "لوحده"}                # «حولت خمسين الف لواحد»: "to someone"
 _RUN_BREAK = re.compile(r"(?<!\d)[,٬.](?!\d)|[،؛؟?!:;()«»\"]")
@@ -1618,6 +1726,8 @@ def _number_word(w: str) -> tuple[str, object] | None:
         hundreds, teens = _HUNDREDS.fullmatch(word), _TEENS.fullmatch(word)
         if re.fullmatch(r"\d[\d,٬]*", word):
             return "num", int(re.sub(r"[,٬]", "", word))
+        if re.fullmatch(r"\d+[.٫]\d+", word):                 # «1.5 مليون»
+            return "num", float(word.replace("٫", "."))
         if word in _WORD_VALUE:
             return "num", _WORD_VALUE[word]
         if hundreds:
@@ -1627,7 +1737,8 @@ def _number_word(w: str) -> tuple[str, object] | None:
         if word in _MULTIPLIER:
             return "mult", _MULTIPLIER[word]
         if word in _UNIT:
-            return "unit", _UNIT[word]
+            unit = _UNIT[word]
+            return ("dual", unit) if isinstance(unit, tuple) else ("unit", unit)
     return None
 
 
@@ -1637,6 +1748,9 @@ def _read_run(words: list[tuple[str, object]]) -> list[tuple[float, str]]:
     «مليون و200» also reads the colloquial way, as 1,200,000."""
     total, cur, last, unit = 0.0, 0.0, 0, None
     for kind, v in words:
+        if kind == "dual":                                                  # «ورقتين»: two notes
+            unit, cur = unit or v[0], cur or v[1]
+            continue
         if kind == "num":
             cur = 0 if cur >= 1000 else cur                                 # a phone or reference number before it
             cur = cur * 100 if v == 100 and 1 <= cur < 10 else cur + v      # «خمس مية» is 500
@@ -1662,15 +1776,48 @@ def word_amounts(text: str) -> list[tuple[float, str]]:
         if word:
             run.append(word)
             continue
+        if w == "و" and run:                # «2 مليون و 500 الف»: a lone «و» goes on with the amount
+            continue
         out += _read_run(run)
         run = []
+    return out
+
+
+# The ticket's amounts in digits, each with its multiplier and unit (second round of role-played test sessions): «50 الف
+# دينار» is 50,000 dinars, so «50 دولار» and «50 دينار» are not it; «1.5 مليون» is 1,500,000, so «5 مليون» is not it
+# (the digits «5» are part of «1.5»); «2 مليون و 500 الف» is 2,500,000.
+_TICKET_AMOUNT = re.compile(
+    r"(?<![\d.,٬])(\$\s*)?(\d{1,3}(?:\.\d{3}){2,}|\d[\d,٬]*(?:[.٫]\d+)?)\s*(?:(مليون|ملايين)|([أا]لف|آلاف|الاف|ألاف))?"
+    r"(?:\s+و\s*(\d+)\s*([أا]لف|آلاف|الاف|ألاف))?\s*(دينار|دولار|IQD|USD|\$)?", re.IGNORECASE)
+
+
+def ticket_amounts(ticket: str) -> list[tuple[float, str | None]]:
+    """(value, unit) of every number in the ticket, its multiplier applied; unit "iqd", "usd" or None (no currency
+    word: a bare number, or digits with only «الف»/«مليون»)."""
+    out = []
+    text = re.sub(r"(?<=\d) (?=\d{3}(?!\d))", "", ticket)     # «500 000»
+    for m in _TICKET_AMOUNT.finditer(text):
+        dollar, number, million, thousand, more, more_k, unit = m.groups()
+        plain = re.sub(r"[,٬]", "", number)
+        if re.fullmatch(r"\d{1,3}(?:\.\d{3}){2,}", number):
+            values = [float(number.replace(".", ""))]
+        elif re.fullmatch(r"\d{1,3}[.٫]\d{3}", plain):          # «10٫000», «10.000»: a separator, or a decimal
+            values = [float(plain.replace("٫", "").replace(".", "")), float(plain.replace("٫", "."))]
+        else:
+            values = [float(plain.replace("٫", "."))]
+        cur = "usd" if dollar or (unit or "").lower() in ("دولار", "usd", "$") else "iqd" if unit else None
+        for value in values:
+            value *= 1_000_000 if million else 1000 if thousand else 1
+            if more and million:
+                value += int(more) * 1000
+            out.append((value, cur))
     return out
 
 
 def _amount_not_in_ticket(norm: str, pos: list[int], allowed_text: str) -> tuple[int, int] | None:
     m = _TICKET.search(allowed_text)
     ticket = clean(m.group(1) if m else allowed_text)
-    read = word_amounts(ticket)
+    read, digits = word_amounts(ticket), ticket_amounts(ticket)
     for a in _DRAFT_AMOUNT.finditer(norm):
         dollar, number, million, thousand, unit = a.groups()
         if not (dollar or million or thousand or unit):
@@ -1678,8 +1825,8 @@ def _amount_not_in_ticket(norm: str, pos: list[int], allowed_text: str) -> tuple
         value = float(number.replace(",", "").replace("٬", ""))
         value *= 1_000_000 if million else 1000 if thousand else 1
         said = "usd" if dollar or (unit or "").lower() in ("دولار", "usd", "$") else "iqd" if unit else None
-        if amount_written(ticket, int(value) if value == int(value) else value, "iqd"):
-            continue
+        if any(abs(v - value) < 0.01 and (u is None or said is None or u == said) for v, u in digits):
+            continue                                           # the customer's digits, with their multiplier and unit
         if any(abs(v - value) < 0.01 and (u == said or (said is None and u != "note")) for v, u in read):
             continue                                           # the customer's own words, in the same unit
         last = max(g for g in range(2, 6) if a.group(g))
@@ -1696,7 +1843,8 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
     `allowed_text` is everything the drafter was given (the ticket, extracted fields and known facts):
     words and numbers from it may appear in the draft. `facts_text` is the policy facts alone: a time
     («خلال يومين») is allowed only from there. Every rule always runs (hold_reason and sensitive_number
-    since 5 Nov, and the five warnings from the user tests since 7 Nov, when they stopped being flags).
+    since 5 Nov, and the five warnings from the role-played test sessions since 7 Nov, when they stopped being flags).
+    A dialect_words finding with more than one word also has "spans" ([start, end] of each) and "words".
     """
     norm, pos = _normalise(draft)
     # Same length, so spans still map: a courtesy clause between commas is blanked unless it names a secret
@@ -1716,6 +1864,8 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
         "ask_missing": _ask_missing(draft, allowed_text),
         "dialect_words": _dialect_words(norm, pos),
         "amount_not_in_ticket": _amount_not_in_ticket(norm, pos, allowed_text),
+        "persona_slip": _persona_slip(norm, pos),
+        "asks_given": _asks_given(draft, allowed_text),
     }
     out = [{"kind": k, "start": s[0], "end": s[1], "text": draft[s[0]:s[1]]} for k, s in spans.items() if s]
     for f in out:
@@ -1723,6 +1873,11 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
             f["text"] = re.sub(r"\d", "*", f["text"])
         if f["kind"] == "ask_missing":
             f["fields"] = ask_missing_fields(draft, allowed_text)
+        if f["kind"] == "dialect_words":                   # every word, so the page can mark them all
+            found = _dialect_all(norm, pos)
+            if len(found) > 1:
+                f["spans"] = [[a, b] for a, b in found]
+                f["words"] = [draft[a:b] for a, b in found]
     return sorted(out, key=lambda f: (KINDS + FLAG_KINDS).index(f["kind"]))
 
 

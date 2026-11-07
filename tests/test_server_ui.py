@@ -320,10 +320,15 @@ def test_check_never_logs_or_stores_the_text(srv, tmp_path, capsys):
 
 # --- S5: spans recomputed for runs made before 1 Nov ---
 
-def _draft_row(tid, reply, prompt, *, spans=None, result_checks="missing", outcome="drafted", sub="app_bug"):
+def _draft_row(tid, reply, prompt, *, spans=None, result_checks="missing", outcome="drafted", sub="app_bug",
+               kinds=True):
+    """kinds: the spans were saved with today's check kinds (run.py saves check_kinds since the second round of
+    role-played test sessions); False is a run saved 1-7 Nov, with spans but no kinds."""
     data = {"model": "m", "user_prompt": prompt, "reply": reply, "checks": []}
     if spans is not None:
         data["check_spans"] = spans
+        if kinds:
+            data["check_kinds"] = list(draft_check.kinds_on())
     result = {"outcome": outcome, "flags": [], "draft_ar": reply, "extraction": {"subcategory": sub}}
     if result_checks != "missing":
         result["draft_checks"] = result_checks
@@ -385,6 +390,7 @@ def _strip_recomputed(run, original):
         for ev in row["events"]:
             if ev["data"].pop("check_spans_recomputed", False):
                 ev["data"].pop("check_spans")
+                ev["data"].pop("check_kinds")
             if ev["stage"] == "result":
                 _undo_current_rules(ev["data"])
     return run
@@ -414,6 +420,53 @@ def test_old_runs_get_spans_marked_recomputed_and_nothing_else_changes(srv, old_
     assert json.loads(f.read_text(encoding="utf-8")) == original   # the file itself is never changed
 
 
+def test_spans_saved_without_today_s_kinds_are_recomputed(srv, old_runs):
+    """Second round of role-played test sessions (7 Nov, R35): a run saved 1-7 Nov has check_spans but no check_kinds,
+    so it never got the warnings added after it, and a «تم إرجاع» draft stayed ready. Spans computed with other kinds
+    than today's are recomputed; spans saved with today's kinds are left alone."""
+    f, _ = old_runs
+    draft = "هلا بيك، تم إرجاع المبلغ لحسابك. شكرا لصبرك."
+    prompt = "<ticket>\nحولت فلوس وما وصلت\n</ticket>"
+    stale = _draft_row("t2-0001", draft, prompt, spans=[], result_checks=[], kinds=False)
+    fresh = _draft_row("t2-0002", draft, prompt, spans=[], result_checks=[])
+    f.write_text(json.dumps({"meta": {"set": "tickets"}, "tickets": [stale, fresh]}, ensure_ascii=False), encoding="utf-8")
+    status, _, raw = call(srv, "GET", "/api/run?name=20261030-000000-tickets-api")
+    assert status == 200
+    a, b = json.loads(raw)["tickets"]
+    assert [s["kind"] for s in a["events"][2]["data"]["check_spans"]] == ["claims_done"]
+    assert a["events"][2]["data"]["check_kinds"] == list(draft_check.kinds_on())
+    assert a["result"]["outcome"] == "flagged" and a["result"]["flags"] == ["draft:claims_done"]
+    assert b["events"][2]["data"]["check_spans"] == [] and b["result"]["outcome"] == "drafted" and b["result"]["flags"] == []
+
+
+def test_today_s_rules_read_the_set_file_s_text_on_a_masked_run(monkeypatch, tmp_path):
+    """R35: a run saved masked (mask_for_logs) has stars for digits in its received text, while the page shows the
+    set file's text. The code rules read that text, after the gold swap, so a card the customer wrote is hidden."""
+    from pipeline.clean import mask_for_logs
+    card = "4111 1111 1111 1111"
+    gold = f"انسحبت فلوس من بطاقتي {card} والرمز السري 4829، شنو اسوي؟"
+    saved = tmp_path / "docs" / "runs"
+    (saved / "myset").mkdir(parents=True)
+    probes = tmp_path / "data" / "probes"
+    probes.mkdir(parents=True)
+    (probes / "myset.jsonl").write_text(json.dumps({"id": "x-2", "text": gold}, ensure_ascii=False) + "\n", encoding="utf-8")
+    masked = mask_for_logs(gold)
+    run = {"meta": {}, "tickets": [{"ticket": {"id": "x-2", "text": masked},
+                                    "events": [{"stage": "received", "status": "done", "data": {"text": masked}}],
+                                    "result": {"outcome": "escalated", "flags": ["fraud"], "handoff_ar": f"الخلاصة: بطاقة {card}"}}]}
+    f = saved / "myset" / "final.json"
+    f.write_text(json.dumps(run, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(server, "ROOT", tmp_path)
+    monkeypatch.setattr(server, "RUNS", tmp_path / "runs")
+    monkeypatch.setattr(server, "SAVED", saved)
+    monkeypatch.setattr(server, "PROBES", probes)
+    server._recomputed.clear()
+    row = server.with_current_gold(f)["tickets"][0]
+    assert row["ticket"]["text"] == gold and "secret_in_ticket" in row["result"]["flags"]
+    assert row["result"]["secret_spans"] and gold[slice(*row["result"]["secret_spans"][0])] == card
+    assert card not in row["result"]["handoff_ar"] and "••••" in row["result"]["handoff_ar"]
+
+
 def test_recomputed_spans_are_cached_until_the_file_or_the_flags_change(old_runs, monkeypatch):
     f, _ = old_runs
     calls = []
@@ -434,16 +487,27 @@ def test_recomputed_spans_are_cached_until_the_file_or_the_flags_change(old_runs
 
 
 # The saved test2 run's drafts on which the warnings adopted on 7 Nov fire when its spans are recomputed.
-SAVED_NEW_WARNINGS = {"t2-0004": ["amount_not_in_ticket"], "t2-0013": ["amount_not_in_ticket"],
-                      "t2-0058": ["amount_not_in_ticket"], "t2-0017": ["ask_missing", "dialect_words"],
-                      "t2-0056": ["ask_missing"], "t2-0019": ["dialect_words"], "t2-0069": ["dialect_words"]}
-SAVED_NEW_WARNINGS_KINDS = ("claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket")
+# The 7 Nov warnings on seven drafts, and since the second round of role-played test sessions persona_slip («أكدر
+# أوعدك», «آني أتفهم», «وياي»), more stiff words («نرجو», «وكذلك», «هلا وغلا») and ask_missing on t2-0052 (it asks
+# the amount handed «للوكيل», not the agent's name or place).
+SAVED_NEW_WARNINGS = {
+    "t2-0004": ["amount_not_in_ticket"], "t2-0010": ["dialect_words", "persona_slip"], "t2-0013": ["amount_not_in_ticket"],
+    "t2-0017": ["ask_missing", "dialect_words"], "t2-0019": ["dialect_words"], "t2-0023": ["dialect_words", "persona_slip"],
+    "t2-0024": ["persona_slip"], "t2-0029": ["dialect_words", "persona_slip"], "t2-0030": ["persona_slip"],
+    "t2-0031": ["persona_slip"], "t2-0038": ["persona_slip"], "t2-0043": ["dialect_words"], "t2-0046": ["dialect_words"],
+    "t2-0052": ["ask_missing", "dialect_words"], "t2-0056": ["ask_missing"], "t2-0058": ["amount_not_in_ticket"],
+    "t2-0065": ["dialect_words", "persona_slip"], "t2-0069": ["dialect_words"], "t2-0075": ["persona_slip"],
+    "t2-0079": ["dialect_words"], "t2-0080": ["persona_slip"]}
+SAVED_NEW_WARNINGS_KINDS = ("claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket",
+                            "persona_slip", "asks_given")
+# Saved as flagged already (a missing field, a type check, the identity tick): their outcome does not move.
+SAVED_FLAGGED = {"t2-0017", "t2-0029", "t2-0046", "t2-0052", "t2-0075", "t2-0080"}
 
 
 def test_committed_final_run_gets_spans_that_agree_with_its_saved_checks(srv):
     """The spans are recomputed with today's rules: the rules the run was saved with find what it saved, and the
-    warnings adopted on 7 Nov add findings on seven drafts. Each is served as run.py flags it today: a flag
-    draft:<kind> for each new finding, and the six that were ready are «تحتاج تأكيد» (apply_current_rules)."""
+    warnings adopted on 7 Nov and in the second round add findings on 21 drafts. Each is served as run.py flags it
+    today: a flag draft:<kind> for each new finding, and those that were ready are «تحتاج تأكيد» (apply_current_rules)."""
     status, _, raw = call(srv, "GET", "/api/run?name=saved/test2/final")
     assert status == 200
     run = json.loads(raw)
@@ -468,10 +532,9 @@ def test_committed_final_run_gets_spans_that_agree_with_its_saved_checks(srv):
     by = {r["ticket"]["id"]: r["result"] for r in run["tickets"]}
     for tid, kinds in SAVED_NEW_WARNINGS.items():
         res = by[tid]
-        assert res["rules_recomputed"] == [f"draft:{k}" for k in kinds] and res["outcome"] == "flagged"
-        assert res["notes_ar"] == [FLAG_AR[f] for f in res["flags"]]
-        # t2-0017 was flagged already (missing:reference): its outcome did not move
-        assert res.get("outcome_recomputed") is (None if tid == "t2-0017" else True), tid
+        assert [f for f in res["rules_recomputed"] if f.startswith("draft:")] == [f"draft:{k}" for k in kinds], tid
+        assert res["outcome"] == "flagged" and res["notes_ar"] == [FLAG_AR[f] for f in res["flags"]], tid
+        assert res.get("outcome_recomputed") is (None if tid in SAVED_FLAGGED else True), tid
     assert by["t2-0017"]["flags"] == ["missing:reference", "draft:ask_missing", "draft:dialect_words"]
 
 
@@ -531,12 +594,17 @@ def test_committed_final_run_shows_the_six_account_risk_tickets_flagged(srv):
     by = {r["ticket"]["id"]: r["result"] for r in run["tickets"]}
     risky = sorted(i for i, r in by.items() if "account_risk" in r["flags"])
     assert risky == ["t2-0007", "t2-0016", "t2-0029", "t2-0048", "t2-0054", "t2-0080"]
-    assert all(by[i]["outcome"] == "flagged" and by[i]["flags"] == ["account_risk"] and by[i]["draft_ar"]
+    assert all(by[i]["outcome"] == "flagged" and by[i]["flags"][0] == "account_risk" and by[i]["draft_ar"]
                and by[i]["account_risk_recomputed"] for i in risky)
+    # the second round's rules add to three of them: persona_slip and dialect_words, the second request, a repeat contact
+    assert [by[i]["flags"] for i in risky] == [
+        ["account_risk"], ["account_risk"], ["account_risk", "draft:dialect_words", "draft:persona_slip", "second_request"],
+        ["account_risk", "complaint_risk"], ["account_risk"], ["account_risk", "draft:persona_slip"]]
     assert by["t2-0009"]["flags"] == ["recheck_used_second"] and "account_risk_recomputed" not in by["t2-0009"]
     outcomes = [r["outcome"] for r in by.values()]
-    # 15 / 6 / 59 with account_risk alone; the 7 Nov draft warnings move six more ready tickets (apply_current_rules)
-    assert (outcomes.count("flagged"), outcomes.count("escalated"), outcomes.count("drafted")) == (21, 6, 53)
+    # 15 / 6 / 59 with account_risk alone; the 7 Nov draft warnings moved six more ready tickets (21 / 6 / 53), and the
+    # second round's warnings and second_request ten more (apply_current_rules)
+    assert (outcomes.count("flagged"), outcomes.count("escalated"), outcomes.count("drafted")) == (31, 6, 43)
 
 
 # --- 7 Nov: a saved run is served as today's code would decide it, for the rules that need no model call ---
@@ -601,22 +669,26 @@ def test_saved_runs_get_today_s_text_rules_and_draft_flags_and_nothing_else_chan
     r = secret["result"]
     assert r["outcome"] == "flagged" and r["outcome_recomputed"] is True and r["flags"] == ["secret_in_ticket"]
     assert r["secret_spans"] == ticket_rules.secret_spans(SECRET_TEXT) and r["rules_recomputed"] == ["secret_in_ticket"]
-    assert SECRET_TEXT[slice(*r["secret_spans"][0])] == "4829" and r["notes_ar"] == [FLAG_AR["secret_in_ticket"]]
+    assert SECRET_TEXT[slice(*r["secret_spans"][0])] == "4829" and r["secret_kinds"] == ["pin"]
+    assert r["notes_ar"] == ["الزبون كتب رمزه السري: نبّهه يغيّر رمزه السري، ولا تكرر الرقم بالرد"]
     r = planted["result"]   # a quiet flag: still ready
     assert r["outcome"] == "drafted" and r["flags"] == ["instructions_in_ticket"] and "outcome_recomputed" not in r
     r = ordered["result"]
     assert r["flags"] == ["account_risk", "draft:promise", "draft:dialect_words", "complaint_risk"]
-    assert r["notes_ar"] == [FLAG_AR[x] for x in r["flags"]] and "outcome_recomputed" not in r
+    # «ثالث مرة اكتبلكم» is a repeat contact: the note says so (second round of role-played test sessions)
+    assert r["notes_ar"] == [FLAG_AR[x] for x in r["flags"][:-1]] + ["الزبون راسلنا قبل وما وصله رد: انتبه للرد"]
+    assert "outcome_recomputed" not in r and r["complaint_reasons"] == ["repeat"]
     assert r["rules_recomputed"] == ["draft:dialect_words", "complaint_risk"]
     r = escalated["result"]   # no draft flag on an escalation; its note gets the rules' lines before the identity reminder
     assert r["outcome"] == "escalated" and r["flags"] == ["recheck_disagreed", "complaint_risk", "amount_disagreed"]
-    assert r["handoff_ar"].split("\n") == ["الموضوع: x", handoff.NOTE_AR["complaint_risk"], handoff.NOTE_AR["amount_disagreed"],
+    assert r["handoff_ar"].split("\n") == ["الموضوع: x", handoff.complaint_note(["repeat"]), handoff.NOTE_AR["amount_disagreed"],
                                            handoff.IDENTITY_AR]
     assert current == original["tickets"][4]
     for row, orig in zip((secret, planted, ordered, escalated), original["tickets"]):
         assert {k: v for k, v in row["result"].items() if k not in ("outcome", "flags", "notes_ar", "secret_spans", "handoff_ar",
                                                                   "rules_recomputed", "outcome_recomputed",
-                                                                  "draft_checks", "draft_checks_recomputed")} == \
+                                                                  "draft_checks", "draft_checks_recomputed",
+                                                                  "secret_kinds", "complaint_reasons")} == \
             {k: v for k, v in orig["result"].items() if k not in ("outcome", "flags", "notes_ar", "handoff_ar", "draft_checks")}
     assert json.loads(f.read_text(encoding="utf-8")) == original   # the file itself is never changed
 
@@ -626,14 +698,19 @@ def test_committed_final_run_gets_the_quiet_note_on_its_two_planted_tickets(srv)
     by = {r["ticket"]["id"]: r["result"] for r in json.loads(raw)["tickets"]}
     quiet = sorted(i for i, r in by.items() if "instructions_in_ticket" in r["flags"])
     assert quiet == ["t2-0030", "t2-0041"]
+    # the quiet note never moves a ticket; t2-0030 is «تحتاج تأكيد» for its draft's «آني أفهم» (persona_slip)
+    assert by["t2-0041"]["outcome"] == "drafted" and by["t2-0041"]["flags"] == ["instructions_in_ticket"]
+    assert by["t2-0030"]["flags"] == ["draft:persona_slip", "instructions_in_ticket"]
     for i in quiet:
-        assert by[i]["outcome"] == "drafted" and by[i]["flags"] == ["instructions_in_ticket"]
-        assert by[i]["notes_ar"] == [FLAG_AR["instructions_in_ticket"]] and "outcome_recomputed" not in by[i]
-    # no other text rule fires on test2, and no saved ticket gets a card number or code hidden
-    rules = [f for r in by.values() for f in r["flags"] if f in server.RULE_FLAGS]
-    assert rules == ["instructions_in_ticket"] * 2 and not any("secret_spans" in r for r in by.values())
+        assert by[i]["notes_ar"][-1] == FLAG_AR["instructions_in_ticket"]
+    # one other text rule fires on test2: a repeat contact on t2-0048 («راسلتكم قبل», since the second round); no
+    # saved ticket gets a card number or code hidden
+    rules = sorted(f for r in by.values() for f in r["flags"] if f in server.RULE_FLAGS)
+    assert rules == ["complaint_risk"] + ["instructions_in_ticket"] * 2 and not any("secret_spans" in r for r in by.values())
+    assert by["t2-0048"]["complaint_reasons"] == ["repeat"]
     changed = sorted(i for i, r in by.items() if "rules_recomputed" in r)
-    assert changed == sorted([*SAVED_NEW_WARNINGS, "t2-0030", "t2-0041"])
+    assert changed == sorted({*SAVED_NEW_WARNINGS, "t2-0030", "t2-0041", "t2-0048", "t2-0074"})
+    assert by["t2-0074"]["flags"] == ["second_request"] and by["t2-0074"]["outcome"] == "flagged"
 
 
 def test_meta_names_the_account_risk_types(srv):
@@ -657,7 +734,8 @@ def test_meta_names_the_blocking_checks_and_explains_every_kind(srv):
     # «ما لكينا» names them all
     assert meta["checks_active"] == list(draft_check.KINDS) == [
         "stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number",
-        "claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket"]
+        "claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket", "persona_slip",
+        "asks_given"]
     assert meta["flag_ar"]["account_risk"].startswith("حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون")
     assert meta["quiet_flags"] == ["instructions_in_ticket"]
 

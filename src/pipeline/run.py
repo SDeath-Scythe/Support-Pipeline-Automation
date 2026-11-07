@@ -75,6 +75,9 @@ FLAG_AR = {
     "draft:ask_missing": "المسودة ما تسأل عن كل اللي ناقص",
     "draft:dialect_words": "المسودة بيها كلمة مو عراقية",
     "draft:amount_not_in_ticket": "المبلغ اللي بالمسودة مو مثل ما كتبه الزبون: قارنه بالرسالة",
+    # The draft warnings from the second round of role-played test sessions (7 Nov).
+    "draft:persona_slip": "المسودة تحجي بصيغة شخص واحد (فهمت، وياي): الرد يحجي باسم الفريق",
+    "draft:asks_given": "المسودة تسأل عن شي الزبون كاتبه بالرسالة",
     "account_risk": "حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، "
                     "ولا تكتب بالرد إنه صار أي تغيير على الحساب",
     # The code rules on the customer's text (ticket_rules.py).
@@ -85,6 +88,8 @@ FLAG_AR = {
     "other_phone": "الزبون يكتب من رقم مو رقمه: تأكد من هويته قبل أي تغيير على الحساب",
     "complaint_risk": "الزبون يهدد بشكوى للجهات الرقابية أو راسلنا أكثر من مرة: انتبه للرد",
     "instructions_in_ticket": "بالتذكرة كلام موجّه للنظام، وما انعمل بيه",
+    # A drafted ticket's second type, which no team is routed to (second_request_flag, adopted 7 Nov).
+    "second_request": "بالتذكرة طلب ثاني محد مستلمه: راجع شنو يكول الرد عنه",
     # Escalations the system decides on its own; their team note is built with no model call.
     "too_long": "التذكرة أطول من الحد المسموح: يستلمها موظف بدون نموذج",
     "pipeline_off": "النظام موقف: يستلمها موظف يدوياً",
@@ -103,6 +108,22 @@ _REFUSALS = (BudgetExceeded, CacheMiss, BackendError)   # expected refusals: one
 
 # If even the normal closing path fails, the team still gets a note.
 _LAST_RESORT_NOTE = "سبب التصعيد: صار خطأ داخلي بالنظام. اقرا التذكرة كاملة."
+
+
+# Which of the two reasons complaint_risk fired for (ticket_rules.complaint_reasons).
+COMPLAINT_AR = handoff.COMPLAINT_NOTE_AR
+
+
+def flag_note(flag: str, secret_kinds: list[str] | None = None, complaint_reasons: list[str] | None = None) -> str:
+    """A flag's note (FLAG_AR); secret_in_ticket names what the customer wrote when its kinds are known, and
+    complaint_risk says why when its reasons are known."""
+    said = handoff.secret_advice(secret_kinds) if flag == "secret_in_ticket" else None
+    if said:
+        return f"الزبون كتب {said[0]}: نبّهه {said[1]}، ولا تكرر الرقم بالرد"
+    why = [COMPLAINT_AR[r] for r in complaint_reasons or [] if r in COMPLAINT_AR] if flag == "complaint_risk" else []
+    if why:
+        return " و".join(why) + ": انتبه للرد"
+    return FLAG_AR.get(flag, flag)
 
 
 def _error(e: BaseException, *, internal: bool = False) -> dict[str, str]:
@@ -291,7 +312,8 @@ def process(raw_text: str, emit: Emit = lambda e: None,
     # What the handoff note (F17) needs, filled in as the stages run. text_flags come from the code rules on
     # the customer's text and late_flags from the models' answers; finish() adds both to every outcome.
     ctx: dict[str, Any] = {"text": "", "ex": None, "confidence": None, "second": None, "cleared": None,
-                           "text_flags": [], "late_flags": [], "secret_spans": []}
+                           "text_flags": [], "late_flags": [], "secret_spans": [], "secret_digits": [],
+                           "secret_kinds": [], "complaint_reasons": []}
 
     def finish(outcome: Outcome, flags: list[str], *, team_summary: bool = True, **extra: Any) -> dict[str, Any]:
         """Emit the result. An escalation gets a note for the team; `team_summary=False` builds it
@@ -303,6 +325,10 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         result = {"outcome": outcome.value, "flags": flags, "notes_ar": [], **extra}
         if ctx["secret_spans"]:
             result["secret_spans"] = ctx["secret_spans"]
+        if ctx["secret_kinds"] and "secret_in_ticket" in flags:
+            result["secret_kinds"] = ctx["secret_kinds"]
+        if ctx["complaint_reasons"] and "complaint_risk" in flags:
+            result["complaint_reasons"] = ctx["complaint_reasons"]
         if outcome == Outcome.ESCALATED:   # no draft: a short note for the team that receives it
             summary = None
             if team_summary and ctx["ex"] is not None:
@@ -316,8 +342,10 @@ def process(raw_text: str, emit: Emit = lambda e: None,
                                                     for e in (ctx["ex"], ctx["second"]))
             result["handoff_ar"] = handoff.note(ctx["ex"], flags, confidence=ctx["confidence"],
                                                 second=ctx["second"], cleared_secondary=ctx["cleared"],
-                                                summary=summary, identity=identity)
-        result["notes_ar"] = [FLAG_AR.get(f, f) for f in flags]
+                                                summary=summary, identity=identity, secrets=ctx["secret_digits"],
+                                                secret_kinds=ctx["secret_kinds"], text=ctx["text"] or None,
+                                                complaint_reasons=ctx["complaint_reasons"])
+        result["notes_ar"] = [flag_note(f, ctx["secret_kinds"], ctx["complaint_reasons"]) for f in flags]
         send("result", "done", result)
         sent.append(result)
         return result
@@ -348,6 +376,9 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         send("clean", "done", {"text": text, "changes": _clean_changes(raw_text)})
         ctx["text_flags"] = text_flags(raw_text, text)
         ctx["secret_spans"] = ticket_rules.secret_spans(raw_text)
+        ctx["secret_digits"] = ticket_rules.secret_digits(raw_text)
+        ctx["secret_kinds"] = ticket_rules.secret_kinds(raw_text)
+        ctx["complaint_reasons"] = ticket_rules.complaint_reasons(raw_text)
 
         # A very long ticket is not sent to a model: it costs more and is the usual shape of an
         # attempt to bury instructions. A person reads it.
@@ -495,11 +526,15 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         spans = draft_check.findings(reply, user, facts_text=facts_text)
         if ex.subcategory in ACCOUNT_RISK:   # the type the draft was written for: the re-check's, if it was used
             flags.append("account_risk")
+        # The page asks for a tick on a second request no team is routed to; as a flag, the ticket is never listed
+        # as ready while it waits for that tick (second round of role-played test sessions).
+        if ex.secondary_subcategory in tax.subcategories and ex.secondary_subcategory != ex.subcategory:
+            flags.append("second_request")
         flags += [f"draft:{p}" for p in checks]
         send("draft", "done", {"model": model_for("drafter"), "backend": backend(),
                                "seconds": round(time.time() - t0, 1), "user_prompt": user, "reply": reply,
                                "ask_for": drf.ask_for(ex), "checks": checks, "check_spans": spans,
-                               "usage": last_usage()})
+                               "check_kinds": list(draft_check.kinds_on()), "usage": last_usage()})
 
         outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
         extra = {"recheck_alternative": alternative} if alternative else {}
