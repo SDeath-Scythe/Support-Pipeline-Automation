@@ -244,7 +244,7 @@ AMOUNT_RANGES = {  # IQD, realistic per issue
     "merchant_payment": [8_000, 15_000, 27_000, 45_000, 120_000],
 }
 BRANDS = ["آسيا", "اسيا", "asia", "زين", "zain", "كورك", "korek", "نون", "noon", "امازون", "أمازون", "amazon",
-          "الرافدين", "الرشيد", "rafidain", "fastpay", "فاست باي", "كي كارد", "qi card", "qicard", "زين كاش",
+          "الرافدين", "الرشيد", "rafidain", "fastpay", "فاست باي", "كي كارد", "qi card", "qicard",
           "visa", "فيزا", "mastercard", "ماستر كارد", "ماستركارد", "paypal", "apple", "google", "talabat", "طلبات",
           "careem", "كريم", "whatsapp", "واتساب", "واتس", "facebook", "فيسبوك", "instagram", "انستا", "telegram",
           "تلكرام", "تليجرام", "earthlink", "ارثلنك", "سوبرماركت الـ"]
