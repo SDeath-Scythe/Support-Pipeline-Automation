@@ -13,17 +13,22 @@ that always run and block an approval (draft_check.py), and escalate_account_ris
 the account_risk flag (run.py), which keeps the draft.
 
 On 7 Nov four draft warnings found by the role-played test sessions were opened as flags, then six pipeline rules from
-the same tests (fraud_secondary to instructions_in_ticket) and three prompt changes (draft_rules_ut,
+the same sessions (fraud_secondary to instructions_in_ticket) and three prompt changes (draft_rules_ut,
 amount_own_words, summary_qualifiers). The same day, after measuring them with and without, all but
 summary_qualifiers became the normal code (ADOPTED below; the numbers are in docs/experiments/LOG.md).
 summary_qualifiers stays a flag: its summaries still had an English word in 1 of 54 lines.
+
+After the second round of role-played test sessions (7 Nov) six more were opened: four code rules (secret_forms,
+complaint_reasons, device_lost_negation, second_request_flag) and two drafter changes (drafter_inputs_r2,
+draft_rules_r2). All but draft_rules_r2 became the normal code the same day; draft_rules_r2 stays a flag: it removed the
+singular voice and the stiff words from the drafts, but the judge graded its drafts lower.
 """
 
 from __future__ import annotations
 
 import os
 
-# Prompt change from the 7 Nov role-played test sessions (run.py; the prompt file is side by side in prompts/).
+# Prompt changes under test (run.py, draft.py; each prompt file is side by side in prompts/).
 FIXES: dict[str, str] = {
     "summary_qualifiers": "team-note summary prompt summary_system.summary_qualifiers.md: keep the customer's own "
                           "qualifiers and denials, third person, about 15 words, Arabic only",

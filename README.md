@@ -56,7 +56,7 @@ A fixed workflow, not a free-roaming agent: predictable and testable. Models are
 - The ticket writer, the pipeline and the draft grader are models from the same family.
 - The drafter sometimes doesn't ask for a shop or agent's name when the customer only says "the restaurant"; the fix tried made drafts worse.
 - Masking covers numbers and codes, not names: saved runs hide every phone, card, account and transaction number of 7+ digits (shorter references stay visible) and any code written after a code word. The inbox hides a card number or code the customer typed until the agent shows it, but the model provider still gets the full text. The response cache, a development tool, keeps replies in full and must stay off for real tickets.
-- No support agent has used the inbox yet. Draft quality as agents see it, time saved and how carefully agents review are not measured. The six test sessions of 7 Nov, with live model calls, were role-played ([LOG, 7 Nov](docs/experiments/LOG.md)).
+- No support agent has used the inbox yet. Draft quality as agents see it, time saved and how carefully agents review are not measured. The six test sessions of 7 Nov, with live model calls, and the second round of five of them the same day were role-played ([LOG, 7 Nov](docs/experiments/LOG.md)).
 - The identity check on blocked-account and SIM-change tickets is a tick the agent gives: the tool cannot check that identity was verified. The server refuses an approval without the tick, and the decision log records it. It raises the review rate (test2 19% → 26%; mvp_test 27% → 32%, over the 30% target). A ticket whose type the re-check moved away from these types (one mvp_test ticket) gets no reminder unless the agent picks the first model's answer.
 - The tipping-off and repeated-number checks have never fired on a saved draft (0 of 2,531), so how well they work on real drafts is unknown.
 
@@ -69,7 +69,7 @@ A fixed workflow, not a free-roaming agent: predictable and testable. Models are
 
 ```bash
 pip install -r requirements-dev.txt             # adds pytest to requirements.txt
-pytest                                          # 1,926 tests, no model calls
+pytest                                          # 2,056 tests, no model calls
 python app/server.py                            # viewer: http://localhost:8000; saved runs replay with no key
 
 export SUPPORT_PIPELINE_API_KEY=...             # or ANTHROPIC_API_KEY; live runs need a key

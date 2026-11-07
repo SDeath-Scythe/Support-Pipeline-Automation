@@ -1766,8 +1766,8 @@ async function runPass(browser, pass) {
         const tip = await text("#checksTip");
         if (pass.phone) await page.click(".checks-ok"); else await page.hover(".checks-ok");
         const tipShown = await page.isVisible("#checksTip");
-        // The second tap unpins the tip; the pointer then leaves, as a finger does (the tip names eleven checks
-        // since 7 Nov, and a hovered one would cover the draft on a phone).
+        // The second tap unpins the tip; the pointer then leaves, as a finger does (the tip names thirteen checks since the
+        // second round of sessions, and a hovered one would cover the draft on a phone).
         if (pass.phone) await page.click(".checks-ok");
         await page.mouse.move(1, 1);
         check("5 Nov calm: all checks passed: «ما بيها مشكلة», and the list of checks only in its tip",
