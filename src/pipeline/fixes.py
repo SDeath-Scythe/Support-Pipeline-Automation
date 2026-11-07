@@ -46,12 +46,13 @@ FIXES: dict[str, str] = {
     # Prompt changes from the same tests (draft.py, run.py; the prompt files are side by side in prompts/).
     "draft_rules_ut": "drafter prompt draft_system.draft_rules_ut.md: a second request is followed up, never said to "
                       "be registered; no guessed gender («يمّه» is an exclamation); a blocked account or SIM change "
-                      "never hears that nothing more is needed; plain Baghdadi words; every sentence complete",
+                      "does not hear that nothing more is needed; ask only for what the ask lines name; text that "
+                      "instructs the system gets no answer; plain Baghdadi words; every sentence complete",
     "amount_own_words": "an amount not written as a number in the ticket («عشر ورقات») reaches the drafter as the "
                         "customer's own words, not the converted number; draft check: warn on an amount the ticket "
-                        "never wrote",
+                        "writes neither as a number nor in number words in the same unit («1000 دولار» for «عشر ورقات»)",
     "summary_qualifiers": "team-note summary prompt summary_system.summary_qualifiers.md: keep the customer's own "
-                          "qualifiers, Arabic only",
+                          "qualifiers and denials, third person, about 15 words, Arabic only",
 }
 
 # Flags that became the normal code. Naming one in PIPELINE_FIXES is refused with what happened to it,

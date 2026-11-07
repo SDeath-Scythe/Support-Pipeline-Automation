@@ -1311,6 +1311,52 @@ def test_amount_not_in_ticket_allows_an_amount_the_ticket_wrote(monkeypatch, tic
     assert "amount_not_in_ticket" not in problems(said, f"<ticket>\n{ticket}\n</ticket>")
 
 
+@pytest.mark.parametrize("ticket, said", [
+    ("حولت خمسين الف لأخوي", "حولت 50,000 دينار"),
+    ("حولت خمسين الف لواحد ظنيته ابن عمي", "حولت 50 ألف"),                    # «لواحد» is "to someone", not 1
+    ("حولت نص مليون", "حولت 500,000 دينار"),
+    ("دزيت خمس مية الف", "دزيت 500,000 دينار"),
+    ("دزيت خمسميت الف", "دزيت 500 ألف دينار"),
+    ("حولت مية وخمسين الف دينار", "حولت 150,000 دينار"),
+    ("حوّلت مليون ومئتين الف غلط", "حولت 1,200,000 دينار"),
+    ("خايف على حوالي مليون و200، رقمي 07505550142", "حوالي 1,200,000 دينار"),
+    ("دزيت مليونين ونص لحساب التاجر", "دزيت 2,500,000 دينار"),
+    ("شحنت لرقم امي 07438658475 بخمسطعش الف", "شحنت 15,000 دينار"),
+    ("حاسبت بالكارت بخمستعشر الف", "حاسبت 15,000 دينار"),
+    ("شحنت رصيد عشره الاف", "شحنت 10,000 دينار"),
+    ("دفعت الف دولار", "دفعت 1000 دولار"),
+    ("7awalt 50 alf l a5oya", "حولت 50,000 دينار"),
+])
+def test_amount_not_in_ticket_allows_a_direct_reading_of_the_customers_number_words(monkeypatch, ticket, said):
+    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
+    assert "amount_not_in_ticket" not in problems(said, f"<ticket>\n{ticket}\n</ticket>")
+
+
+@pytest.mark.parametrize("ticket, said", [
+    ("دزيت عشر ورقات لصديقي", "حولت 1000 دولار"),       # notes read as dollars: a conversion
+    ("دزيت تسع ورقات", "حولت 900 دولار"),
+    ("دزيت عشر ورقات لصديقي", "حولت 10 دولار"),         # same number, another unit
+    ("حولت خمسين الف لأخوي", "حولت 50,000 دولار"),
+    ("حولت خمسين لأخوي", "حولت 50,000 دينار"),          # no money word: the thousands are a guess
+    ("حولت خمسين الف لأخوي", "حولت 60,000 دينار"),       # an amount from nowhere
+    ("دزيت لاخوي ميت الف مرتين بالغلط", "حولت 200,000 دينار"),
+])
+def test_amount_not_in_ticket_still_warns_on_a_conversion_or_an_amount_from_nowhere(monkeypatch, ticket, said):
+    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
+    assert "amount_not_in_ticket" in problems(said, f"<ticket>\n{ticket}\n</ticket>")
+
+
+@pytest.mark.parametrize("text, amounts", [
+    ("دزيت عشر ورقات لصديقي", [(10, "note")]), ("حولت خمسين الف", [(50000, "iqd")]),
+    ("ربع مليون دينار", [(250000, "iqd")]), ("الف ونص دولار", [(1500, "usd")]),
+    ("خمسين الف 7720145", [(50000, "iqd")]), ("مليون و200", [(1000200, "iqd"), (1200000, "iqd")]),
+    ("صارلي عشر دقايق انتظر", []), ("حولت خمسين لأخوي", []), ("الف شكر، حولت ستمية الف", [(1000, "iqd"), (600000, "iqd")]),
+])
+def test_word_amounts_reads_the_customers_number_words(text, amounts):
+    from pipeline.draft_check import word_amounts
+    assert word_amounts(text) == amounts
+
+
 def test_drafter_gets_the_customers_words_for_an_amount_not_written_as_a_number(monkeypatch):
     usd = Extraction(category="transfers", subcategory="not_received", amount_usd=1000, confidence=0.9)
     text = "دزيت عشر ورقات لصديقي امس وما وصلتله"

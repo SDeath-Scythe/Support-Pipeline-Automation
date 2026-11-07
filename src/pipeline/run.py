@@ -74,7 +74,7 @@ FLAG_AR = {
     "draft:repeated_text": "المسودة بيها ترحيب أو جملة مكررة",
     "draft:ask_missing": "المسودة ما تسأل عن كل اللي ناقص",
     "draft:dialect_words": "المسودة بيها كلمة مو عراقية",
-    "draft:amount_not_in_ticket": "المسودة تذكر مبلغ بالأرقام والزبون ما كاتبه هيچ: قارنه بالرسالة",
+    "draft:amount_not_in_ticket": "المبلغ اللي بالمسودة مو مثل ما كتبه الزبون: قارنه بالرسالة",
     "account_risk": "حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، "
                     "ولا تكتب بالرد إنه صار أي تغيير على الحساب",
     # The code rules on the customer's text, shown while their flag (fixes.py) is on.

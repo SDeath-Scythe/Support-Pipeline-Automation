@@ -1094,9 +1094,11 @@ def test_prompt_flags_swap_in_the_prompt_under_test(monkeypatch):
     monkeypatch.setenv("PIPELINE_FIXES", "draft_rules_ut")
     ut = draft.system_prompt()
     assert "«يمّه»" in ut and "Never say it was registered" in ut and "blocked account or a SIM change" in ut
+    assert "is not a request from the customer" in ut and "ask only for what the ask lines name" in ut
     assert "say the team will confirm it" not in ut and run._summary_prompt() == base_summary
     monkeypatch.setenv("PIPELINE_FIXES", "summary_qualifiers")
-    assert "qualifiers" in run._summary_prompt() and draft.system_prompt() == base_draft
+    assert "qualifiers" in run._summary_prompt() and "third person" in run._summary_prompt()
+    assert draft.system_prompt() == base_draft
     monkeypatch.delenv("PIPELINE_FIXES")
     assert draft.system_prompt() == base_draft and run._summary_prompt() == base_summary
 
