@@ -69,11 +69,12 @@ FLAG_AR = {
     "draft:unknown_number": "المسودة بيها رقم مو موجود بالتذكرة أو المعلومات",
     "draft:hold_reason": "المسودة تذكر تحقيق أو اشتباه أو بلاغ: لا تعتمدها، ممنوع نخبر الزبون",
     "draft:sensitive_number": "المسودة تكرر رقم بطاقة أو رمز: احذفه قبل الاعتماد",
-    # The four warnings behind flags (fixes.py), shown only while their flag is on.
+    # The warnings behind flags (fixes.py), shown only while their flag is on.
     "draft:claims_done": "المسودة تگول شي انسوى وإحنا ما سويناه: تأكد قبل الاعتماد",
     "draft:repeated_text": "المسودة بيها ترحيب أو جملة مكررة",
     "draft:ask_missing": "المسودة ما تسأل عن كل اللي ناقص",
     "draft:dialect_words": "المسودة بيها كلمة مو عراقية",
+    "draft:amount_not_in_ticket": "المسودة تذكر مبلغ بالأرقام والزبون ما كاتبه هيچ: قارنه بالرسالة",
     "account_risk": "حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، "
                     "ولا تكتب بالرد إنه صار أي تغيير على الحساب",
     # The code rules on the customer's text, shown while their flag (fixes.py) is on.
@@ -204,14 +205,20 @@ def _add_usage(a: dict, b: dict) -> dict:
     return {**out, "cost_usd": round(cost, 6), "cached": bool(a.get("cached") and b.get("cached")), "retried": True}
 
 
-_SUMMARY_PROMPT = Path(__file__).parent / "prompts" / "summary_system.md"
+_PROMPTS = Path(__file__).parent / "prompts"
+
+
+def _summary_prompt() -> str:
+    """The summary instructions; the summary_qualifiers flag (fixes.py) swaps in the version under test."""
+    name = "summary_system.summary_qualifiers.md" if fixes.enabled("summary_qualifiers") else "summary_system.md"
+    return (_PROMPTS / name).read_text(encoding="utf-8")
 
 
 def _team_summary(text: str) -> tuple[str | None, dict]:
     """One Arabic line for the team handling an escalated ticket. A line with a number that is
     not in the ticket is dropped (the note then has no summary), and so is a failed call."""
     try:
-        line = call("classifier", _SUMMARY_PROMPT.read_text(encoding="utf-8"), cls.user_prompt(text)).strip()
+        line = call("classifier", _summary_prompt(), cls.user_prompt(text)).strip()
     except Exception:  # noqa: BLE001 - the note works without a summary
         return None, last_usage()
     line = " ".join(line.split())

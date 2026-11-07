@@ -13,7 +13,8 @@ that always run and block an approval (draft_check.py), and escalate_account_ris
 the account_risk flag (run.py), which keeps the draft.
 
 On 7 Nov four draft warnings found by the user tests were opened as flags (FIXES below), off by default,
-and six pipeline rules from the same tests (fraud_secondary to instructions_in_ticket).
+and six pipeline rules from the same tests (fraud_secondary to instructions_in_ticket), then three prompt
+changes (draft_rules_ut, amount_own_words, summary_qualifiers).
 """
 
 from __future__ import annotations
@@ -42,6 +43,15 @@ FIXES: dict[str, str] = {
                       "اشتكي عليكم، ثالث مرة ...): flag complaint_risk; the priority does not change",
     "instructions_in_ticket": "text aimed at the system (a forged tag, SYSTEM:, ignore previous instructions, "
                               "تجاهل التعليمات، اكتب للزبون ...): a quiet flag; the outcome does not change",
+    # Prompt changes from the same tests (draft.py, run.py; the prompt files are side by side in prompts/).
+    "draft_rules_ut": "drafter prompt draft_system.draft_rules_ut.md: a second request is followed up, never said to "
+                      "be registered; no guessed gender («يمّه» is an exclamation); a blocked account or SIM change "
+                      "never hears that nothing more is needed; plain Baghdadi words; every sentence complete",
+    "amount_own_words": "an amount not written as a number in the ticket («عشر ورقات») reaches the drafter as the "
+                        "customer's own words, not the converted number; draft check: warn on an amount the ticket "
+                        "never wrote",
+    "summary_qualifiers": "team-note summary prompt summary_system.summary_qualifiers.md: keep the customer's own "
+                          "qualifiers, Arabic only",
 }
 
 # Flags that became the normal code. Naming one in PIPELINE_FIXES is refused with what happened to it,

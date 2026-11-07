@@ -1283,3 +1283,51 @@ def test_secret_spans_are_utf16_offsets_into_the_text_the_page_shows():
     units = shown.encode("utf-16-le")
     assert [units[2 * s:2 * e].decode("utf-16-le") for s, e in spans] == ["٤٨٢٩", "5531"]
     assert secret_spans("رقم العملية 7720145 والمبلغ 50000") == []
+
+
+# --- amount_own_words: an amount the ticket wrote in words (fixes.py; t2-0058 «عشر ورقات» became «1000 دولار») ---
+
+def test_amount_not_in_ticket_warns_on_a_converted_amount(monkeypatch):
+    allowed = "<ticket>\nدزيت عشر ورقات لصديقي وما وصلت\n</ticket>\n\nAmount: 1,000 USD"
+    draft_text = "هلا بيك، فهمنا إنك حولت 1000 دولار لصديقك."
+    assert problems(draft_text, allowed) == []                       # off: the extracted amount is allowed
+    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
+    found = findings(draft_text, allowed)
+    assert [(f["kind"], f["text"]) for f in found] == [("amount_not_in_ticket", "1000 دولار")]
+    assert problems("فهمنا إنك دزيت عشر ورقات لصديقك.", allowed) == []      # the customer's words
+    assert problems("حولت $1,000 لصديقك", allowed) == ["amount_not_in_ticket"]
+
+
+@pytest.mark.parametrize("ticket, said", [
+    ("حولت 50 الف لأخوي", "حولت 50 ألف دينار"),
+    ("حولت 50 الف لأخوي", "حولت 50,000 دينار"),
+    ("حولت ٥٠٠٠٠ دينار", "حولت 50 ألف دينار"),
+    ("سحبت 2 مليون من الصراف", "سحبت 2,000,000 دينار"),
+    ("دفعت 12.5 دولار", "دفعت 12.5 دولار"),
+    ("رقم العملية 4471 والمبلغ 50 الف", "رقم العملية 4471"),      # a number with no money word
+])
+def test_amount_not_in_ticket_allows_an_amount_the_ticket_wrote(monkeypatch, ticket, said):
+    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
+    assert "amount_not_in_ticket" not in problems(said, f"<ticket>\n{ticket}\n</ticket>")
+
+
+def test_drafter_gets_the_customers_words_for_an_amount_not_written_as_a_number(monkeypatch):
+    usd = Extraction(category="transfers", subcategory="not_received", amount_usd=1000, confidence=0.9)
+    text = "دزيت عشر ورقات لصديقي امس وما وصلتله"
+    assert "Amount: 1000 USD" in draft.user_prompt(text, usd, "transfers")
+    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
+    prompt = draft.user_prompt(text, usd, "transfers")
+    assert "1000" not in prompt and "quote their words «عشر ورقات»" in prompt
+    iqd = Extraction(category="transfers", subcategory="not_received", amount_iqd=50000, confidence=0.9)
+    assert "Amount: 50,000 IQD" in draft.user_prompt("حولت 50 الف وما وصلت", iqd, "transfers")
+    words = draft.user_prompt("حولت خمسين لأخوي وما وصلت", iqd, "transfers")    # no money word to quote
+    assert "50,000" not in words and "write no number for it" in words and "«" not in words.split("Amount:")[1]
+
+
+@pytest.mark.parametrize("text, words", [
+    ("دزيت عشر ورقات لصديقي", "عشر ورقات"), ("حولت مليون ونص دينار", "مليون ونص دينار"),
+    ("دزيت 5 ورقات", "5 ورقات"), ("دزيت خمسين ورقة، وانتظرت عشر دقايق", "خمسين ورقة"),
+    ("صارلي عشر دقايق انتظر", None), ("حولت خمسين لأخوي", None),
+])
+def test_own_words_finds_number_words_that_name_money(text, words):
+    assert draft.own_words(text) == words

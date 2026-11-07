@@ -19,7 +19,9 @@ from .clean import CREDENTIAL, clean, fold, sensitive_numbers
 
 KINDS = ("stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number")
 # Warnings under test, each behind the flag of the same name in fixes.py: off, they never appear.
-FLAG_KINDS = ("claims_done", "repeated_text", "ask_missing", "dialect_words")
+FLAG_KINDS = ("claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket")
+# A kind whose flag has another name (the flag also changes the drafter's prompt, draft.py).
+_FLAG_OF = {"amount_not_in_ticket": "amount_own_words"}
 
 # Arabic letters only: not punctuation ("،" "؟" "؛"), digits or tatweel ("بالـcard"), which can
 # sit next to an English word the customer used (the API pilot flagged "declined،").
@@ -1523,6 +1525,45 @@ def _dialect_words(norm: str, pos: list[int]) -> tuple[int, int] | None:
     return None
 
 
+# amount_not_in_ticket (flag amount_own_words): an amount in the draft, a number with its money word («1000 دولار»,
+# «50 ألف»), that the ticket never wrote as a number: «عشر ورقات» read as 1,000 USD is the classifier's reading.
+_DRAFT_AMOUNT = re.compile(r"(\$\s*)?(\d[\d,٬]*(?:\.\d+)?)\s*(?:(مليون|ملايين)|([أا]لف|آلاف|الاف))?\s*"
+                           r"(دينار|دولار|IQD|USD|\$)?", re.IGNORECASE)
+_TICKET = re.compile(r"<ticket>\n?(.*?)\n?</ticket>", re.DOTALL)
+
+
+def amount_written(text: str, n: int | float | None, currency: str) -> bool:
+    """Whether the ticket writes the amount `n` as a number: its digits (with or without separators), or
+    for dinars «50 الف» / «2 مليون». The page's facts line tests the same way (app/static/js/facts.js),
+    except that it also counts «10 ورقات» as 1,000 USD; here that is the customer's words, not the number."""
+    if n is None or n <= 0:
+        return False
+    if n != int(n):   # «12.5»: as written
+        return str(n) in text
+    n, digits = int(n), "[,.\\s٫٬]?".join(str(int(n)))
+    tries = [rf"(?<!\d){digits}(?!\d)"]
+    if currency == "iqd" and n % 1_000_000 == 0:
+        tries.append(rf"(?<!\d){n // 1_000_000}\s*(?:مليون|ملايين)")
+    if currency == "iqd" and n % 1000 == 0:
+        tries.append(rf"(?<!\d){n // 1000}\s*(?:ألف|الف|آلاف|الاف|ألاف)")
+    return any(re.search(t, text) for t in tries)
+
+
+def _amount_not_in_ticket(norm: str, pos: list[int], allowed_text: str) -> tuple[int, int] | None:
+    m = _TICKET.search(allowed_text)
+    ticket = clean(m.group(1) if m else allowed_text)
+    for a in _DRAFT_AMOUNT.finditer(norm):
+        dollar, number, million, thousand, unit = a.groups()
+        if not (dollar or million or thousand or unit):
+            continue                                           # a number with no money word: not an amount
+        value = float(number.replace(",", "").replace("٬", ""))
+        value *= 1_000_000 if million else 1000 if thousand else 1
+        if not amount_written(ticket, int(value) if value == int(value) else value, "iqd"):
+            last = max(g for g in range(2, 6) if a.group(g))
+            return _raw(pos, a.start(1) if dollar else a.start(2), a.end(last))
+    return None
+
+
 def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
     """Each problem kind found in `draft`, in KINDS order, with the span of its first occurrence:
     {"kind", "start", "end", "text"} where text == draft[start:end] (for highlighting), except that a
@@ -1557,6 +1598,8 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
         spans["ask_missing"] = _ask_missing(draft, allowed_text)
     if "dialect_words" in on:
         spans["dialect_words"] = _dialect_words(norm, pos)
+    if _FLAG_OF["amount_not_in_ticket"] in on:
+        spans["amount_not_in_ticket"] = _amount_not_in_ticket(norm, pos, allowed_text)
     out = [{"kind": k, "start": s[0], "end": s[1], "text": draft[s[0]:s[1]]} for k, s in spans.items() if s]
     for f in out:
         if f["kind"] == "sensitive_number":

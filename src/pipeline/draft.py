@@ -6,16 +6,19 @@ given to it, so it cannot state them.
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
+from . import fixes
 from .clean import neutralise_tags
 from .config import load_yaml, taxonomy
+from .draft_check import amount_written
 from .llm import call
 from .requirements import reference_needed
 from .schemas import Extraction
 
-_PROMPT = Path(__file__).parent / "prompts" / "draft_system.md"
+_PROMPTS = Path(__file__).parent / "prompts"
 
 FIELD_AR = {
     "reference": "رقم العملية",
@@ -30,9 +33,50 @@ FIELD_AR = {
 }
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=2)
+def _read(name: str) -> str:
+    return (_PROMPTS / name).read_text(encoding="utf-8")
+
+
 def system_prompt() -> str:
-    return _PROMPT.read_text(encoding="utf-8")
+    """The drafter's instructions; the draft_rules_ut flag (fixes.py) swaps in the version under test."""
+    return _read("draft_system.draft_rules_ut.md" if fixes.enabled("draft_rules_ut") else "draft_system.md")
+
+
+# amount_own_words: the amount as the customer wrote it, when it is not a number in the ticket («عشر ورقات»).
+# A run of number words with a money word in it; «ورقة» (a 100 USD note) is how the classifier reads it, not
+# something the customer wrote, so the draft quotes the words instead of the converted number.
+_NUM_WORD = (r"و?(?:واحد|وحدة|ثنين|اثنين|ثنتين|ثلاث|ثلاثة|تلاث|تلاثة|اربع|أربع|اربعة|أربعة|خمس|خمسة|ست|ستة|سبع|سبعة|"
+             r"ثمان|ثمانية|ثمن|ثمنية|تسع|تسعة|عشر|عشرة|احدعش|اثنعش|ثلطعش|ربعطعش|خمسطعش|عشرين|ثلاثين|تلاثين|اربعين|"
+             r"أربعين|خمسين|ستين|سبعين|ثمانين|تسعين|مية|ميه|مئة|ميتين|ربع|نص|نصف|الف|ألف|الفين|ألفين|آلاف|الاف|"
+             r"مليون|ملايين|\d+)")
+_MONEY_WORD = r"(?:ورق[ةه]|ورقات|اوراق|أوراق|دولار|دينار|الف|ألف|آلاف|الاف|مليون|ملايين)"
+_TOKEN = rf"(?:{_NUM_WORD}|و?{_MONEY_WORD})"
+_OWN_WORDS = re.compile(rf"(?<!\w){_TOKEN}(?:\s+{_TOKEN})*(?<=\w)(?!\w)")
+
+
+def own_words(text: str) -> str | None:
+    """The first run of number words in the ticket that names money («عشر ورقات», «مليون ونص»), or None."""
+    for m in _OWN_WORDS.finditer(text):
+        if re.search(rf"(?<!\w)و?{_MONEY_WORD}(?!\w)", m.group()):
+            return m.group()
+    return None
+
+
+def amount_line(cleaned_text: str, ex: Extraction) -> str | None:
+    """The drafter's amount line. With amount_own_words on, an amount the ticket doesn't write as a number
+    is given as the customer's own words to quote (or, if they can't be found, as an instruction to use them)."""
+    if ex.amount_iqd is not None:
+        n, currency, line = ex.amount_iqd, "iqd", f"Amount: {ex.amount_iqd:,} IQD"
+    elif ex.amount_usd is not None:
+        n, currency, line = ex.amount_usd, "usd", f"Amount: {ex.amount_usd} USD"
+    else:
+        return None
+    if not fixes.enabled("amount_own_words") or amount_written(cleaned_text, n, currency):
+        return line
+    words = own_words(cleaned_text)
+    return ("Amount: the customer wrote it in words, not as a number. If you mention it, quote their words"
+            + (f" «{words}»" if words else "") + " and write no number for it.")
 
 
 _CHECKED = {"reference", "amount", "date", "recipient_number", "phone_number"}   # fields _have() can see
@@ -98,10 +142,9 @@ def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:
         lines.append(f"Second question in the ticket: {tax.get(ex.secondary_subcategory).label}")
     if ex.reference:
         lines.append(f"Reference given: {ex.reference}")
-    if ex.amount_iqd is not None:
-        lines.append(f"Amount: {ex.amount_iqd:,} IQD")
-    elif ex.amount_usd is not None:
-        lines.append(f"Amount: {ex.amount_usd} USD")
+    amount = amount_line(cleaned_text, ex)
+    if amount:
+        lines.append(amount)
     if ex.fee_iqd is not None:
         lines.append(f"Disputed fee: {ex.fee_iqd:,} IQD")
     missing = ask_for(ex)
