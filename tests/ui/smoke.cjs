@@ -1024,6 +1024,131 @@ async function runPass(browser, pass) {
     await old.close();
   }
 
+  /** The pipeline's flags under test (fixes.py), on the page: the committed run has none, so the page gets a
+   *  copy of it with a few results changed, through a browser route. The server is not changed, and its
+   *  decision checks read the real run: every draft stays as it was served. */
+  async function flagFixes() {
+    const used = decidedIds();
+    const open = run.tickets.filter((r) => !used.has(r.ticket.id));
+    // Ready tickets with nothing to tick of their own: no second request, no warning in the draft.
+    const plain = (r) => r.result.outcome === "drafted" && !r.result.extraction?.secondary_subcategory
+      && !(r.result.draft_checks || []).length && !r.events.some((e) => e.stage === "draft" && (e.data?.check_spans || []).length);
+    const [secretId, quietId, warnId] = open.filter(plain).slice(-3).map((r) => r.ticket.id);
+    const [lostId, budgetId] = open.filter((r) => r.result.outcome === "escalated").map((r) => r.ticket.id);
+    const PIN = "4829";
+    const secretText = `الرمز السري مالتي ${PIN} وانسحبت فلوس ما حولتها. ثالث مرة اكتبلكم`;
+    const warnDraft = run.tickets.find((r) => r.ticket.id === warnId).result.draft_ar;
+    const firstWord = warnDraft.slice(0, warnDraft.indexOf(" "));
+    const f = await freshPage("flags", (x) => x.route(`**/api/run?name=${encodeURIComponent(RUN)}`, async (route) => {
+      const r = await route.fetch();
+      const j = await r.json();
+      const row = (id) => j.tickets.find((x2) => x2.ticket.id === id);
+      const a = row(secretId);
+      const at = secretText.indexOf(PIN);
+      a.ticket.text = secretText;
+      Object.assign(a.result, { outcome: "flagged", flags: ["secret_in_ticket", "complaint_risk"], secret_spans: [[at, at + PIN.length]] });
+      a.events.find((e) => e.stage === "clean" && e.status === "done").data.changes.format_chars = 2;
+      row(quietId).result.flags.push("instructions_in_ticket");
+      const c = row(warnId);
+      const n = [...warnDraft].length;
+      const spans = [{ kind: "ask_missing", start: n, end: n, text: "", fields: ["amount", "reference_lost"] },
+        { kind: "dialect_words", start: 0, end: firstWord.length, text: firstWord }];
+      Object.assign(c.result, { outcome: "flagged", flags: [...c.result.flags, "draft:ask_missing", "draft:dialect_words"], draft_checks: spans });
+      c.events.filter((e) => e.stage === "draft" && e.status === "done").forEach((e) => { e.data.check_spans = spans; });
+      row(lostId).result.flags = ["device_lost", "instructions_in_ticket"];
+      row(budgetId).result.flags = ["budget_reached"];
+      await route.fulfill({ response: r, json: j });
+    }));
+    const fAct = async (fn, what) => {
+      await settled(f);
+      const n0 = decisions().length;
+      await fn();
+      await waitUntil(() => decisions().length > n0, 5000, what);
+      await sleep(150);
+      return decisions().at(-1);
+    };
+    const cust = () => f.evaluate(() => document.querySelector("#custBox .customer-text").textContent);
+
+    // secret_in_ticket: the number is hidden by default, in the message and in the queue row; one control shows it.
+    await openId(f, secretId);
+    await shot(f, "flag-secret");
+    const rowText = await t(f, `#queueList [data-key="${secretId}"] .row-text`);
+    const c1 = await cust();
+    check("secret_spans: a code the customer wrote is «••••» in «رسالة الزبون» and in the queue row, with one «اظهر الرقم»",
+      !c1.includes(PIN) && c1.includes("••••") && !rowText.includes(PIN) && rowText.includes("••••")
+      && (await f.locator("#secretToggle").count()) === 1 && (await t(f, "#secretToggle")) === "اظهر الرقم", JSON.stringify({ c1, rowText }));
+    await f.click("#secretToggle");
+    const c2 = await cust();
+    check("secret_spans: «اظهر الرقم» shows it, the button becomes «اخفي الرقم» and keeps the focus",
+      c2.includes(PIN) && !c2.includes("••••") && (await t(f, "#secretToggle")) === "اخفي الرقم" && (await active(f)) === "secretToggle", c2);
+    await openId(f, quietId);
+    await openId(f, secretId);
+    check("secret_spans: the reveal is for that visit only: back on the ticket the code is hidden again", !(await cust()).includes(PIN));
+    const why = await t(f, "#whyLine");
+    const box = await t(f, "#confirmBox");
+    check("secret_in_ticket and complaint_risk: the banner says each, the tick lists both points",
+      why.includes("الزبون كتب رقم بطاقة أو رمز سري") && why.includes("يهدد بشكوى") && box.includes("ينبّه الزبون يغيّر الرمز ويوقف البطاقة")
+      && box.includes("راجع الرد بانتباه") && box.includes("راجعت كل النقاط فوق"), JSON.stringify({ why, box }));
+    await f.check("#ackBox");
+    const dA = await fAct(() => f.click("#approveBtn"), "the approve with the two points ticked");
+    check("secret_in_ticket and complaint_risk: the approve logs both as acknowledged kinds", dA.ticket_id === secretId && dA.action === "approved"
+      && JSON.stringify(dA.warnings_acknowledged) === '["secret_in_ticket","complaint_risk"]', JSON.stringify(dA));
+
+    // instructions_in_ticket: a quiet flag. A muted note; no banner, no tick; approve as for any ready draft.
+    await openId(f, quietId);
+    await shot(f, "flag-quiet");
+    const qb = await f.evaluate(() => ({ note: document.querySelector("#sumBox .quiet-note.muted")?.textContent || "",
+      why: document.getElementById("whyLine")?.hidden !== false, tick: !!document.getElementById("ackBox"),
+      approve: document.getElementById("approveBtn")?.getAttribute("aria-disabled") || null }));
+    check("instructions_in_ticket is quiet: a muted note under the summary, no banner, no tick, approve on",
+      qb.note === "بالتذكرة كلام موجّه للنظام، وما انعمل بيه" && qb.why && !qb.tick && qb.approve !== "true", JSON.stringify(qb));
+    const dB = await fAct(() => f.click("#approveBtn"), "the approve of the quiet ticket");
+    check("instructions_in_ticket: approved with nothing to acknowledge", dB.ticket_id === quietId && dB.action === "approved"
+      && dB.warnings_acknowledged.length === 0, JSON.stringify(dB));
+
+    // The draft warnings behind flags: ask_missing has an empty span (nothing highlighted) and names its fields.
+    await openId(f, warnId);
+    await checksSettled(f);
+    await shot(f, "flag-warnings");
+    const cw = await f.evaluate(() => ({
+      marks: [...document.querySelectorAll(".composer-mirror mark.finding")].map((m) => m.textContent),
+      items: [...document.querySelectorAll("#draftChecks .check-item")].map((b) => b.textContent),
+      box: document.getElementById("confirmBox")?.textContent || "" }));
+    check("ask_missing: nothing highlighted, the checks and the tick name its fields; dialect_words highlights the word",
+      cw.marks.length === 1 && cw.marks[0] === firstWord && cw.items.length === 2 && !cw.items.some((x) => x.includes("«»"))
+      && cw.items.some((x) => x.includes("المسودة ما تسأل عن: المبلغ") && x.includes("الزبون ضيّع الوصل"))
+      && cw.box.includes("المسودة ما تسأل عن: المبلغ") && cw.box.includes("راجع الكلمة اللي مو عراقية"), JSON.stringify(cw));
+    await f.check("#ackBox");
+    const dC = await fAct(() => f.click("#approveBtn"), "the approve with the draft warnings ticked");
+    check("ask_missing and dialect_words: the server takes them as acknowledged kinds", dC.ticket_id === warnId && dC.action === "approved"
+      && JSON.stringify(dC.warnings_acknowledged) === '["ask_missing","dialect_words"]', JSON.stringify(dC));
+
+    // device_lost and budget_reached: escalations, each with its reason; the quiet flag stays out of the banner.
+    await openId(f, lostId);
+    const lw = await t(f, "#whyLine");
+    const ln = await t(f, "#sumBox .quiet-note");
+    await f.click(".why-toggle");
+    await sleep(250);
+    const wb = await t(f, "#whyBody");
+    await f.click(".why-toggle");
+    check("device_lost: the banner and «ليش؟» say the phone is lost with the wallet open; the quiet flag is a note, not in the banner",
+      lw.includes("الموبايل ضايع أو مسروق والمحفظة مفتوحة عليه") && !lw.includes("موجّه للنظام") && ln.includes("موجّه للنظام")
+      && wb.includes("ما انكتبت لأن الموبايل ضايع والمحفظة مفتوحة"), JSON.stringify({ lw, ln, wb }));
+    await openId(f, budgetId);
+    const bw = await t(f, "#whyLine");
+    check("budget_reached: the banner says the spending cap was reached", bw.includes("وصل التشغيل لحد الصرف المسموح، فيستلمها موظف."), bw);
+
+    // strip_format_chars: the clean step names what it removed.
+    await f.click("#modeProcess");
+    await f.locator("#pList .prow", { hasText: secretId }).first().click();
+    await f.waitForSelector("#pResult .result", { timeout: 8000 });
+    const chips = await f.evaluate(() => [...document.querySelectorAll(".chips .chip")].map((x) => x.textContent).join(" | "));
+    check("format_chars: «كيف يشتغل»'s clean step says «رمز مخفي انشال»", chips.includes("رمز مخفي انشال"), chips);
+    await f.click("#modeAgent");
+    await cspOf(f, "flags");
+    await f.close();
+  }
+
   async function phoneFixes() {
     const p = await freshPage("phone-fixes");
     if (await p.evaluate(() => document.body.dataset.screen === "ticket")) await p.locator("#agentMain .back-btn").first().click();
@@ -1648,7 +1773,7 @@ async function runPass(browser, pass) {
 
     // 14. The fixes from the 1 Nov review, on a fresh page of the same server (desktop passes); the
     // phone passes check the phone-only ones.
-    if (pass.phone) await phoneFixes(); else { await reviewFixes(); await flowFixes(); await pageFixes(); }
+    if (pass.phone) await phoneFixes(); else { await reviewFixes(); await flowFixes(); await pageFixes(); await flagFixes(); }
   } catch (e) {
     check("the pass ran to its end", false, e.stack || e.message);
   } finally {

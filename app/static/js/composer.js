@@ -5,7 +5,7 @@
 // an approval re-checks anything newer.
 
 import { checkDraft, ServerError } from "./api.js";
-import { CHECK_SHORT_AR } from "./labels.js";
+import { CHECK_SHORT_AR, askMissingAR } from "./labels.js";
 import { S, draftDone, extractionOf, uid } from "./state.js";
 import { cpToUtf16, debounce, el, icon, realDraft, shownDraft, spanned, withTip } from "./util.js";
 
@@ -97,11 +97,13 @@ export function buildComposer(item, onUpdate) {
       items.push(el("ul", { class: "checks-list", "aria-label": "فحص المسودة" }, findings.map((f, i) => {
         const block = isBlocking(f.kind);
         const r = cpToUtf16(text, f.start, f.end);
+        // ask_missing has nothing in the draft to point at (an empty span at its end): it names the fields.
+        const why = f.kind === "ask_missing" ? askMissingAR(f.fields).ask : S.meta.check_ar?.[f.kind] || f.kind;
         const b = el("button", { type: "button", class: `check-item ${block ? "is-blocking" : "is-warn"}` },
           icon(block ? "lock" : "check"),
           el("span", { class: "check-tag", text: block ? "يمنع الاعتماد" : "انتبه" }),
-          el("span", { class: "check-why", text: S.meta.check_ar?.[f.kind] || f.kind }),
-          el("span", { class: "check-text", dir: "rtl", text: `«${f.text}»` }));
+          el("span", { class: "check-why", text: why }),
+          f.text ? el("span", { class: "check-text", dir: "rtl", text: `«${f.text}»` }) : null);
         b.addEventListener("mouseenter", () => light(i, true));
         b.addEventListener("mouseleave", () => light(i, false));
         b.addEventListener("focus", () => light(i, true));

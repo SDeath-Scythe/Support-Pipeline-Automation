@@ -2,6 +2,7 @@
 // place it was written in the customer's text. Matching reads Arabic-Indic digits as Western digits and
 // skips the separators people type («٤٤٧١-٩٠٣٢», «2,000,000»), so the underline sits on what they wrote.
 
+import { SECRET_MASK } from "./labels.js";
 import { digitRuns, el, fmtInt, mono, num, spanned, westernDigits, withTip } from "./util.js";
 
 const SEP = "[\\s\\-_/.,٫٬،]*";   // spaces, - _ / . , and the Arabic separators
@@ -63,13 +64,19 @@ export function factsOf(extraction, text, subcategory) {
 }
 
 /** The customer's text with each found fact underlined (mark[data-fact]). Digit groups split by spaces
- *  that no fact matched keep their written order too (digitRuns). */
-export function textWithFacts(text, facts) {
-  return spanned(text, facts.map((f, i) => f.at && {
-    start: f.at.start, end: f.at.end,
-    // A reference or a phone keeps its own left-to-right order inside the Arabic sentence.
-    make: (s) => el("mark", { class: "fact-mark", dir: f.ltr ? "ltr" : null, dataset: { fact: String(i) }, text: s }),
-  }), digitRuns);
+ *  that no fact matched keep their written order too (digitRuns). Each `hidden` range ([start, end], a card
+ *  number or a code) is drawn as «••••» instead, with no underline on it. */
+export function textWithFacts(text, facts, hidden = []) {
+  const over = (at) => hidden.some(([s, e]) => at.start < e && s < at.end);
+  return spanned(text, [
+    ...hidden.map(([s, e]) => ({ start: s, end: e, make: () => el("span", { class: "secret-mask" },
+      el("span", { "aria-hidden": "true", text: SECRET_MASK }), el("span", { class: "sr-only", text: "رقم مخفي" })) })),
+    ...facts.map((f, i) => f.at && !over(f.at) && {
+      start: f.at.start, end: f.at.end,
+      // A reference or a phone keeps its own left-to-right order inside the Arabic sentence.
+      make: (s) => el("mark", { class: "fact-mark", dir: f.ltr ? "ltr" : null, dataset: { fact: String(i) }, text: s }),
+    }),
+  ], digitRuns);
 }
 
 export const NOT_FOUND_AR = "ما لكيناه بالنص بنفس الشكل";

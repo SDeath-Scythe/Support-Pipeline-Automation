@@ -1609,6 +1609,12 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
     return sorted(out, key=lambda f: (KINDS + FLAG_KINDS).index(f["kind"]))
 
 
+def kinds_on() -> tuple[str, ...]:
+    """The kinds findings() can report now: every KINDS rule, and each FLAG_KINDS warning whose flag is on."""
+    on = fixes.active()
+    return KINDS + tuple(k for k in FLAG_KINDS if _FLAG_OF.get(k, k) in on)
+
+
 def problems(draft: str, allowed_text: str, facts_text: str = "") -> list[str]:
     """The problem kinds found in `draft`, in KINDS order (see findings)."""
     return [f["kind"] for f in findings(draft, allowed_text, facts_text)]

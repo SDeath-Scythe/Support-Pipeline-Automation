@@ -506,13 +506,28 @@ def test_meta_names_the_blocking_checks_and_explains_every_kind(srv):
     meta = json.loads(raw)
     assert status == 200
     assert meta["blocking_checks"] == ["asks_secret", "hold_reason", "sensitive_number"]
-    assert list(meta["check_ar"]) == list(draft_check.KINDS)
+    # the warnings behind flags have their wording too: a run saved with the flag on still shows them
+    assert list(meta["check_ar"]) == list(draft_check.KINDS + draft_check.FLAG_KINDS)
     for kind, text in meta["check_ar"].items():
         assert text == FLAG_AR[f"draft:{kind}"] and "\n" not in text and any("؀" <= ch <= "ۿ" for ch in text)
-    # every rule runs (hold_reason and sensitive_number since 5 Nov), so «ما لكينا» may name them all
+    # every rule runs (hold_reason and sensitive_number since 5 Nov), so «ما لكينا» may name them all; with no
+    # flag on, no warning under test runs, so it names none of them
     assert meta["checks_active"] == list(draft_check.KINDS) == ["stray_latin", "promise", "asks_secret", "unknown_number",
                                                                   "hold_reason", "sensitive_number"]
     assert meta["flag_ar"]["account_risk"].startswith("حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون")
+    assert meta["quiet_flags"] == ["instructions_in_ticket"]
+
+
+@pytest.mark.parametrize("fixes, added", [
+    ("claims_done,dialect_words", ["claims_done", "dialect_words"]),
+    ("ask_missing,repeated_text", ["repeated_text", "ask_missing"]),
+    ("amount_own_words", ["amount_not_in_ticket"]),
+    ("secret_in_ticket", []),
+])
+def test_checks_active_adds_a_flagged_warning_only_while_its_flag_is_on(srv, monkeypatch, fixes, added):
+    monkeypatch.setenv("PIPELINE_FIXES", fixes)
+    meta = json.loads(call(srv, "GET", "/api/meta")[2])
+    assert meta["checks_active"] == list(draft_check.KINDS) + added
 
 
 # --- the shared facts helper (draft.py) ---

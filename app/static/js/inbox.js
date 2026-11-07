@@ -11,7 +11,8 @@ import { buildComposer, isBlocking, originalDraft } from "./composer.js";
 import { factLine, factsOf, textWithFacts } from "./facts.js";
 import {
   ACTION_ICON, ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, DRAFT_REASONS, FIELD_AR, IDENTITY_IF_REPLY_AR, NOT_NEEDED_AR,
-  PRIORITY_AR, STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL, TICK_IDENTITY_AND_REST, WHY_AR, notNeededAR,
+  PRIORITY_AR, QUIET_AR, SECRET_HIDE_AR, SECRET_MASK, SECRET_SHOW_AR, STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL,
+  TICK_IDENTITY_AND_REST, WHY_AR, askMissingAR, notNeededAR,
 } from "./labels.js";
 import {
   QUICK_S, S, allItems, correctedFor, correctionsOf, decide, draftDone, effective, errorEvent, escalatesNow, ev, extractionOf, findItem,
@@ -20,8 +21,8 @@ import {
 } from "./state.js";
 import { hideToastIf, setBanner, showToast, toastShows } from "./ui.js";
 import {
-  MOD, add, coarsePointer, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, median, num, plainText, richText,
-  ticketId, ticketsAr, typingIn,
+  MOD, add, coarsePointer, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, masked, median, num, plainText,
+  richText, ticketId, ticketsAr, typingIn,
 } from "./util.js";
 
 const hooks = { toProcess: null, newTicket: null, rerun: null, cancelLive: null, reload: null };
@@ -35,6 +36,7 @@ let deciding = false;
 let armed = null;
 const armedOn = (it) => !!armed && !!it && armed.u === uid(it);
 let fixOpenFor = null;   // uid of the ticket whose «صحّح» panel is open
+let revealedFor = null;  // uid of the ticket whose hidden card number or code the agent chose to see (page state only)
 let refusal = null;      // {id, key, kind, reason}: the toast that refused an approve, while it still applies
 let tickAsked = null;    // the ticket whose approve was refused for its tick alone: its reason is no longer quiet
 let shownKey = null;     // the ticket drawn last: a different one starts at the top of the pane
@@ -78,7 +80,22 @@ function prioNode(p) {
 }
 /** The same as words, with no pill (where it sits beside other words: the two models' answers). */
 const prioText = (p) => (p ? [ltr(p), ` · ${PRIORITY_AR[p] || ""}`] : "بدون أولوية");
-const firstWords = (t) => plainText(t).text.replace(/\s+/g, " ").slice(0, 140);
+/** The customer's message as the page shows it (direction controls dropped). */
+const shownText = (it) => plainText(it.ticket.text || ev(it, "received")?.data?.text || "").text;
+/** The card numbers and codes the customer wrote (result.secret_spans: [start, end] in UTF-16 units of
+ *  shownText), hidden until the agent asks to see them. Ranges that do not fit the text are dropped. */
+function secretSpans(it, text) {
+  const s = it.result?.secret_spans;
+  return Array.isArray(s) ? s.filter((x) => Array.isArray(x) && Number.isInteger(x[0]) && Number.isInteger(x[1])
+    && x[0] >= 0 && x[0] < x[1] && x[1] <= text.length) : [];
+}
+/** A row's text: the start of the message, with a card number or a code hidden (never revealed here). */
+const firstWords = (it) => {
+  const text = shownText(it);
+  return masked(text, secretSpans(it, text), SECRET_MASK).replace(/\s+/g, " ").slice(0, 140);
+};
+/** A flag shown as a muted note and never ticked (meta.quiet_flags: instructions_in_ticket). */
+const isQuiet = (f) => (S.meta.quiet_flags || []).includes(f);
 const tabLabel = (id) => TABS.find((t) => t.id === id)?.label || "";
 
 function liveStageWord(it) {
@@ -132,12 +149,12 @@ function whyLine(it) {
     // The two answers are offered under the message (choiceBox), and its question asks for the type.
     const sentence = (f) => (f === "recheck_used_second" && hasChoice(it) ? "النموذجين اختلفوا بنوع المشكلة." : flagSentence(f));
     const said = [...(needsIdentity(it) ? [WHY_AR.account_risk] : []),
-      ...(r.flags || []).filter((f) => !f.startsWith("draft:") && f !== "account_risk").map(sentence)];
+      ...(r.flags || []).filter((f) => !f.startsWith("draft:") && f !== "account_risk" && !isQuiet(f)).map(sentence)];
     return box("warn", "تحتاج تأكيد:", said.join(" ") || "بالمسودة شي لازم تراجعه، شوف الفحص تحت المسودة.");
   }
   if (r.outcome === "escalated") {
     if ((r.flags || []).includes("fraud")) return box("bad", "احتمال احتيال: ماكو رد للزبون.", "حوّلها أو استلمها.");
-    return box("bad", "متصعّدة:", ((r.flags || []).map(flagSentence).join(" ") || "يستلمها موظف بدون مسودة.") + identity);
+    return box("bad", "متصعّدة:", ((r.flags || []).filter((f) => !isQuiet(f)).map(flagSentence).join(" ") || "يستلمها موظف بدون مسودة.") + identity);
   }
   return null;
 }
@@ -345,7 +362,7 @@ function row(it, active) {
     // A ticket pasted in this page, done and not decided yet: one small word, so it is found in its tab.
     it.live && !d && it.status !== "running" ? el("span", { class: "row-new", text: "جديدة" }) : null,
     d ? el("span", { class: "row-decision", title: st.word }, icon(st.icon)) : null),
-  el("span", { class: "row-text", dir: "rtl" }, digitRuns(firstWords(it.ticket.text))));
+  el("span", { class: "row-text", dir: "rtl" }, digitRuns(firstWords(it))));
 }
 
 function onListKey(e) {
@@ -452,7 +469,7 @@ export function renderTicket() {
   if (changed && whyCovers()) setWhyOpen(false);
   shownKey = key;
   if (changed && key) settle();
-  if (changed) tickAsked = null;
+  if (changed) { tickAsked = null; revealedFor = null; }
   if (S.agent.loading) return main.replaceChildren(ticketSkeleton());
   if (S.agent.error) return main.replaceChildren(errorState(S.agent.error));
   const items = allItems();
@@ -564,6 +581,7 @@ function summaryBox(it) {
   const miss = escalatesNow(it) || decided ? null : (missingOf(it) || []).filter((m) => !inBanner.has(m));
   const fixed = (k) => (c[k] && c[k] !== (k === "subcategory" ? subOf(it) : it.result?.[k]) ? el("span", { class: "fixed-tag", text: "صحّحتها" }) : null);
   const second = secondRequest(it);
+  const quiet = decided ? [] : (it.result?.flags || []).filter(isQuiet);
   const sep = () => el("span", { class: "sep", "aria-hidden": "true", text: " · " });
   const open = fixOpenFor === uid(it);
   const toggle = el("button", { type: "button", id: "fixToggle", class: "btn btn-quiet btn-small icon-btn fix-toggle",
@@ -585,6 +603,7 @@ function summaryBox(it) {
     conf ? el("p", { class: conf.cls === "agreed" ? "summary-note muted" : `summary-note conf conf-${conf.cls}`, text: conf.word }) : null,
     miss?.length ? el("p", { class: "summary-note", text: `المسودة المفروض تسأل عن: ${miss.join("، ")}` }) : null,
     second ? el("p", { class: "summary-note muted", text: `طلب ثاني: ${subAr(second)} · ${teamAr(S.meta.subcategories[second]?.team)}` }) : null,
+    quiet.map((f) => el("p", { class: "summary-note muted quiet-note", text: QUIET_AR[f] || flagSentence(f) })),
     open && !decided ? fixPanel(it) : null);
 }
 
@@ -679,20 +698,33 @@ export function rowInView(it) {
 }
 
 /** The customer's message, its facts underlined where they were written, and under it one quiet line with
- *  the same facts written the normal way. (When nothing read the ticket, the summary line says so.) */
+ *  the same facts written the normal way. (When nothing read the ticket, the summary line says so.) A card
+ *  number or a code the customer wrote is «••••» until the agent presses «اظهر الرقم» (this ticket only). */
 function customerSection(it) {
   // Direction controls are dropped: the agent reads the order the model and the rules read.
   const raw = plainText(it.ticket.text || ev(it, "received")?.data?.text || "");
   const text = raw.text;
-  const facts = factsOf(extractionOf(it), text, subOf(it));
-  const body = el("p", { class: "customer-text", dir: "rtl", lang: "ar" }, textWithFacts(text, facts));
-  const sec = el("section", { class: "customer", "aria-labelledby": "custTitle" }, el("h3", { id: "custTitle", class: "section-title", text: "رسالة الزبون" }));
+  const secrets = secretSpans(it, text);
+  const hide = secrets.length && revealedFor !== uid(it) ? secrets : [];
+  // A fact read from a hidden number is hidden in the facts line too.
+  const facts = factsOf(extractionOf(it), text, subOf(it)).map((f) => (f.at && hide.some(([s, e]) => f.at.start < e && s < f.at.end)
+    ? { ...f, value: () => SECRET_MASK } : f));
+  const body = el("p", { class: "customer-text", dir: "rtl", lang: "ar" }, textWithFacts(text, facts, hide));
+  const sec = el("section", { id: "custBox", class: "customer", "aria-labelledby": "custTitle" }, el("h3", { id: "custTitle", class: "section-title", text: "رسالة الزبون" }));
   if (raw.hidden) {
     sec.append(el("p", { class: "hint hint-warn" }, icon("check"),
       `بالنص ${raw.hidden === 1 ? "رمز اتجاه مخفي واحد" : raw.hidden === 2 ? "رمزين اتجاه مخفيين" : `${raw.hidden} رموز اتجاه مخفية`} يغيّر ترتيب الكتابة. شلناها، فالنص هنا بالترتيب اللي قراه النظام.`));
   }
   sec.append(body);
   if (facts.length) sec.append(factLine(facts, body));
+  if (secrets.length) {
+    sec.append(el("p", { class: "secret-row" }, el("button", { type: "button", id: "secretToggle", class: "link-btn",
+      onclick: () => {
+        revealedFor = hide.length ? uid(it) : null;
+        $("custBox")?.replaceWith(customerSection(it));
+        $("secretToggle")?.focus();
+      } }, hide.length ? SECRET_SHOW_AR : SECRET_HIDE_AR)));
+  }
   return sec;
 }
 
@@ -741,14 +773,18 @@ function confirmTargets(it, st) {
   if (needsIdentity(it)) push("account_risk", CONFIRM_AR.account_risk);
   const notNeeded = S.notNeeded.get(uid(it)) || new Set();
   for (const f of it.result?.flags || []) {
-    if (f.startsWith("draft:") || f === "account_risk") continue;
+    if (f.startsWith("draft:") || f === "account_risk" || isQuiet(f)) continue;   // a quiet flag is a note, not a point
     // A missing field: the reply asks for it, or the agent says this ticket does not need it.
     const field = f.startsWith("missing:") ? f.slice(8) : null;
     if (field && notNeeded.has(field)) push(`${f}:not_needed`, { ...notNeededAR(FIELD_AR[field] || field), field });
     else push(f, { ...(CONFIRM_AR[f] || CONFIRM_OTHER), field });
   }
   if (secondRequest(it)) push("second_request", CONFIRM_AR.second_request);
-  for (const f of st.findings) if (!isBlocking(f.kind)) push(`draft:${f.kind}`, CONFIRM_AR[`draft:${f.kind}`] || { ask: S.meta.check_ar?.[f.kind] ?? f.kind, done: "قريت التنبيه" });
+  for (const f of st.findings) {
+    if (isBlocking(f.kind)) continue;
+    push(`draft:${f.kind}`, f.kind === "ask_missing" ? askMissingAR(f.fields)
+      : CONFIRM_AR[`draft:${f.kind}`] || { ask: S.meta.check_ar?.[f.kind] ?? f.kind, done: "قريت التنبيه" });
+  }
   if (retargeted(it)) {
     const other = effective(it).subcategory !== subOf(it) ? "draft_for_other_type" : "draft_for_other_team";
     push(other, CONFIRM_AR[other]);

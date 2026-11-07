@@ -54,6 +54,9 @@ export const FIELD_AR = dict({
 export const CHECK_SHORT_AR = dict({
   stray_latin: "حروف إنكليزية", promise: "وعد بنتيجة أو وقت", asks_secret: "طلب رمز أو كلمة سر",
   unknown_number: "رقم مو بالتذكرة", hold_reason: "ذكر تحقيق أو اشتباه أو بلاغ", sensitive_number: "تكرار رقم بطاقة أو رمز",
+  // The warnings behind flags (draft_check.FLAG_KINDS): they run only while their flag is on.
+  claims_done: "تگول شي انسوى", repeated_text: "ترحيب أو جملة مكررة", ask_missing: "ما تسأل عن كل اللي ناقص",
+  dialect_words: "كلمة مو عراقية", amount_not_in_ticket: "مبلغ ما كاتبه الزبون بالأرقام",
 });
 
 // What the agent checks before approving: what to look at ("ask"), and what the tick says once they
@@ -70,6 +73,12 @@ export const CONFIRM_AR = dict({
   "draft:stray_latin": { ask: "راجع الحروف الإنكليزية بالمسودة", done: "راجعت الحروف الإنكليزية، وهي مقصودة" },
   "draft:promise": { ask: "راجع الوعد اللي بالمسودة", done: "راجعت الوعد، وهو مقصود" },
   "draft:unknown_number": { ask: "راجع الأرقام اللي بالمسودة", done: "راجعت الأرقام، وهي صحيحة" },
+  "draft:claims_done": { ask: "راجع اللي تگول المسودة إنه انسوى", done: "راجعت، وهو صار فعلاً" },
+  "draft:repeated_text": { ask: "راجع التكرار بالمسودة", done: "راجعت التكرار، وهو مقصود" },
+  // ask_missing names its fields (askMissingAR): this is the wording when it names none.
+  "draft:ask_missing": { ask: "المسودة ما تسأل عن كل اللي ناقص", done: "راجعت، وما يحتاج نسأل" },
+  "draft:dialect_words": { ask: "راجع الكلمة اللي مو عراقية", done: "راجعت الكلمة، وهي مقصودة" },
+  "draft:amount_not_in_ticket": { ask: "قارن المبلغ اللي بالمسودة بالرسالة", done: "قارنت المبلغ بالرسالة" },
   draft_for_other_type: { ask: "المسودة انكتبت لنوع ثاني، راجع إنها تناسب النوع اللي اخترته",
     done: "راجعت إن المسودة تناسب النوع اللي اخترته" },
   // Only the team changed: the same point (logged as draft_for_other_type), said about the team.
@@ -80,7 +89,31 @@ export const CONFIRM_AR = dict({
   // A blocked account or a SIM change (run.py ACCOUNT_RISK): the draft stays; identity comes first. No
   // "before" here: the box is titled «قبل لا تعتمد:» when it lists more than one point.
   account_risk: { ask: "تأكد من هوية الزبون حسب الإجراءات", done: "تأكدت من هوية الزبون" },
+  // The code rules on the customer's text (run.py, each behind its flag). The reply is how the customer
+  // hears it, so the tick is about the reply.
+  secret_in_ticket: { ask: "تأكد إن الرد ينبّه الزبون يغيّر الرمز ويوقف البطاقة", done: "تأكدت إن الرد ينبّه الزبون يغيّر الرمز ويوقف البطاقة" },
+  bidi_controls: { ask: "قارن المبلغ والأرقام بالرسالة", done: "قارنت المبلغ والأرقام بالرسالة" },
+  amount_disagreed: { ask: "تأكد من المبلغ بالرسالة", done: "تأكدت من المبلغ" },
+  other_phone: { ask: "الزبون يكتب من رقم مو رقمه، تأكد من هويته", done: "تأكدت من هوية الزبون" },
+  complaint_risk: { ask: "الزبون يهدد بشكوى أو راسلنا أكثر من مرة، راجع الرد بانتباه", done: "راجعت الرد بانتباه" },
 });
+// The fields an ask_missing warning names (draft_check.ask_missing_fields), as its point: FIELD_AR labels,
+// and reference_lost (the customer lost the receipt, and the draft asks them for its reference) apart.
+export function askMissingAR(fields) {
+  const named = (fields || []).filter((f) => f !== "reference_lost").map((f) => FIELD_AR[f] || f);
+  const lost = (fields || []).includes("reference_lost");
+  if (!named.length && !lost) return CONFIRM_AR["draft:ask_missing"];
+  const ask = [named.length ? `المسودة ما تسأل عن: ${named.join("، ")}` : null,
+    lost ? "الزبون ضيّع الوصل، والمسودة تطلب منه رقم العملية" : null].filter(Boolean).join(". ");
+  const done = !lost ? CONFIRM_AR["draft:ask_missing"].done : named.length ? "راجعت الأسئلة اللي بالمسودة" : "راجعت طلب رقم العملية، وهو مقصود";
+  return { ask, done };
+}
+// A quiet flag (meta.quiet_flags) is a muted note under the summary, never a point to tick.
+export const QUIET_AR = dict({ instructions_in_ticket: "بالتذكرة كلام موجّه للنظام، وما انعمل بيه" });
+// The reveal of a card number or a code the customer wrote (result.secret_spans), hidden by default.
+export const SECRET_MASK = "••••";
+export const SECRET_SHOW_AR = "اظهر الرقم";
+export const SECRET_HIDE_AR = "اخفي الرقم";
 export const CONFIRM_OTHER = { ask: "اقرا الملاحظة اللي فوق", done: "قريت الملاحظة" };
 // A missing field the agent marked as not needed for this ticket (logged as missing:<field>:not_needed).
 export const NOT_NEEDED_AR = "ما يحتاج بهالتذكرة";
@@ -108,12 +141,18 @@ export const WHY_AR = dict({
   model_error: "صار خطأ بالنموذج، فيستلمها موظف.",
   account_risk: "حساب مقفول أو تبديل شريحة. تأكد من هوية الزبون حسب الإجراءات قبل لا تعتمد، ولا تكتب بالرد إنه صار أي تغيير على الحساب.",
   connection_lost: "انقطع الاتصال قبل ما تخلص المعالجة.",
+  device_lost: "الموبايل ضايع أو مسروق والمحفظة مفتوحة عليه، فيستلمها قسم الاحتيال.",
+  budget_reached: "وصل التشغيل لحد الصرف المسموح، فيستلمها موظف.",
+  secret_in_ticket: "الزبون كتب رقم بطاقة أو رمز سري. نبّهه يغيّر الرمز ويوقف البطاقة، ولا تكرر الرقم بالرد.",
+  amount_disagreed: "النموذجين قروا مبلغ مختلف، تأكد من المبلغ بالرسالة.",
+  complaint_risk: "الزبون يهدد بشكوى للجهات الرقابية أو راسلنا أكثر من مرة.",
 });
 // Why a stage did not run, as the end of «ما انرسلت لنموذج لأن …» (no colon inside).
 export const BECAUSE_AR = dict({
   pipeline_off: "النظام موقف", too_long: "التذكرة أطول من الحد المسموح", drafts_off: "المسودات موقفة",
   cancelled: "المعالجة انلغت", fraud: "احتمال احتيال",
   recheck_disagreed: "النموذجين اختلفوا", model_error: "صار خطأ بالنموذج", internal_error: "صار خطأ داخلي",
+  budget_reached: "وصل التشغيل لحد الصرف المسموح", device_lost: "الموبايل ضايع والمحفظة مفتوحة",
 });
 // A blocking check, as the reason approve is off: what is wrong, then what to do (one instruction).
 export const BLOCK_AR = dict({
@@ -135,7 +174,8 @@ export const STAGES = [
 export const OUTCOME_AR = dict({ drafted: "جاهزة للاعتماد", flagged: "جاهزة، بس بيها نقطة تحتاج تأكيد", escalated: "متصعّدة: يستلمها موظف" });
 export const OUTCOME_SHORT = dict({ drafted: "جاهزة", flagged: "تحتاج تأكيد", escalated: "متصعّدة" });
 export const DECISION_AR = dict({ pass: "يكمل للتوجيه والمسودة", recheck: "يروح للمراجعة الثانية", escalate: "يتصعّد لموظف" });
-export const CHANGE_AR = dict({ arabic_digits: "رقم عربي تحوّل", tatweel: "تطويل انشال", extra_spaces: "مسافة زايدة" });
+export const CHANGE_AR = dict({ arabic_digits: "رقم عربي تحوّل", tatweel: "تطويل انشال", extra_spaces: "مسافة زايدة",
+  format_chars: "رمز مخفي انشال" });
 export const DIFF_AR = dict({ easy: "سهلة", medium: "متوسطة", hard: "صعبة" });
 // The gold tags of a synthetic ticket ("كيف يشتغل" only).
 export const TAG_AR = dict({

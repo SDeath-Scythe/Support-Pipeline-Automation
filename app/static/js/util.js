@@ -225,6 +225,13 @@ export function cpToUtf16(text, start, end) {
   return s === null || e === null || e < s ? null : [s, e];
 }
 
+/** A text with each range [start, end] (UTF-16, not overlapping) put as `mask`. */
+export function masked(text, ranges, mask) {
+  let out = text;
+  for (const [s, e] of [...ranges].sort((a, b) => b[0] - a[0])) out = out.slice(0, s) + mask + out.slice(e);
+  return out;
+}
+
 /** A text as fragments with some ranges wrapped: spans = [{start, end, make(text) → node}] in UTF-16.
  *  plain(text) builds the parts between them (default: the text as it is). */
 export function spanned(text, spans, plain = (t) => t) {

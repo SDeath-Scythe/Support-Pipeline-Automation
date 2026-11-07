@@ -56,7 +56,7 @@ from pipeline.config import CONFIG_DIR, limits, models, pipeline_mode, taxonomy 
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.llm import (BackendError, api_key, assert_real_data_safe, backend, budget_usd, cache_only,  # noqa: E402
                           model_for, real_data)
-from pipeline.run import ACCOUNT_RISK, FLAG_AR, process  # noqa: E402
+from pipeline.run import ACCOUNT_RISK, FLAG_AR, QUIET_FLAGS, process  # noqa: E402
 
 STATIC = Path(__file__).parent / "static"
 PROBES = ROOT / "data" / "probes"
@@ -153,11 +153,14 @@ BLOCKED_AR = {"asks_secret": "الرد يطلب رمز أو كلمة سر من �
 # institution's own procedure; recheck_used_second the type), a missing field the reply asks for
 # (missing:<field>), one the agent marks as not needed (missing:<field>:not_needed), and a second request
 # in a drafted ticket that no team is routed to (second_request: the agent read what the reply says of
-# it). An allow-list.
+# it). An allow-list. The draft warnings behind flags (draft_check.FLAG_KINDS) are in it whether or not
+# their flag is on now: a run saved with the flag on still has them. A quiet flag (run.QUIET_FLAGS) is
+# shown, never ticked, so it is not.
 _ACK_FIELDS = tuple(drf.FIELD_AR)
 ACK_KINDS = tuple(dict.fromkeys(
-    [k for k in draft_check.KINDS if k not in BLOCKING_CHECKS] + ["draft_for_other_type", "second_request"]
-    + [f for f in FLAG_AR if not f.startswith("draft:")]
+    [k for k in draft_check.KINDS + draft_check.FLAG_KINDS if k not in BLOCKING_CHECKS]
+    + ["draft_for_other_type", "second_request"]
+    + [f for f in FLAG_AR if not f.startswith("draft:") and f not in QUIET_FLAGS]
     + [f"missing:{f}" for f in _ACK_FIELDS] + [f"missing:{f}:not_needed" for f in _ACK_FIELDS]))
 
 # Files under /static/: these types only, each with its exact content type. index.html is served at /.
@@ -524,20 +527,23 @@ def meta() -> dict:
         # A blocked account or a SIM change (run.py ACCOUNT_RISK): the page asks for the identity tick
         # when the agent's own correction makes a ticket one of these, as the pipeline's flag does.
         "account_risk_types": list(ACCOUNT_RISK),
+        # Flags the page shows as a muted note, never as a point to tick (run.py QUIET_FLAGS).
+        "quiet_flags": list(QUIET_FLAGS),
         "check_ar": CHECK_AR,
         "checks_active": checks_active(),
     }
 
 
 def checks_active() -> list[str]:
-    """The draft_check kinds that run now, for the page's "nothing found" line: all of them (hold_reason
-    and sensitive_number since 5 Nov, when they stopped being flags). Kept as a list so a future draft
-    rule behind a flag can be left out while it is off."""
-    return list(draft_check.KINDS)
+    """The draft_check kinds that run now, for the page's "nothing found" line: every KINDS rule
+    (hold_reason and sensitive_number since 5 Nov, when they stopped being flags), and each warning
+    behind a flag (FLAG_KINDS) while its flag is on."""
+    return list(draft_check.kinds_on())
 
 
-# One line per draft_check kind, for the page to show beside a highlighted span (the flag wording).
-CHECK_AR = {kind: FLAG_AR[f"draft:{kind}"] for kind in draft_check.KINDS}
+# One line per draft_check kind, for the page to show beside a highlighted span (the flag wording). The
+# warnings behind flags too: a run saved with the flag on is still shown with them.
+CHECK_AR = {kind: FLAG_AR[f"draft:{kind}"] for kind in draft_check.KINDS + draft_check.FLAG_KINDS}
 
 
 # --- checking a draft the agent edits ---

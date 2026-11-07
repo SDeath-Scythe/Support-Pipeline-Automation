@@ -352,6 +352,9 @@ body[data-mode="process"] .intro { display: none; }
 /* A reference or phone moves to the next line whole (it still wraps inside if longer than a line). */
 .fact-mark[dir="ltr"] { unicode-bidi: isolate; display: inline-block; max-width: 100%; }
 .fact-mark.is-hot { background: var(--accent-tint); outline: 2px solid var(--accent); outline-offset: 1px; }
+/* A card number or a code the customer wrote, hidden until «اظهر الرقم» (inbox.js customerSection). */
+.secret-mask { color: var(--muted); letter-spacing: .1em; unicode-bidi: isolate; }
+.secret-row { font-size: 14px; }
 /* A tapped underline's value, just after it (facts.js). */
 .fact-pop { display: inline-block; margin-inline: 4px; padding: 0 8px; border-radius: 6px; background: var(--ink); color: var(--bg); font-size: 13px; line-height: 1.7; white-space: nowrap; }
 /* The facts as one quiet line under the message, written the normal way. A value lights its underline. */
@@ -830,6 +833,7 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   .fact-tip::after { content: ""; position: absolute; inset: -12px; }
   .checks-ok { min-height: 44px; }
   .fix-toggle { min-width: 44px; min-height: 44px; }
+  #secretToggle { min-height: 44px; }
   .fact-mark { cursor: pointer; }
 }
 
