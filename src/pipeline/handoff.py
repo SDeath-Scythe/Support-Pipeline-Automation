@@ -26,6 +26,19 @@ _SYSTEM_REASONS = {
     "drafts_off": "المسودات موقفة: الرد على الزبون عليك",
     "cancelled": "انلغت المعالجة قبل ما تكمل",
     "internal_error": "صار خطأ داخلي بالنظام",
+    "budget_reached": "وصل التشغيل لحد الصرف المسموح، فما كملت المعالجة",
+}
+
+# A line each for what the code rules found in the customer's text (run.py; their fixes.py flags), after
+# the reasons. With none of those flags, the note is as before.
+NOTE_AR = {
+    "secret_in_ticket": "رمز سري: الزبون كتب رقم بطاقة أو رمز سري بالرسالة. نبّهه يغيّر الرمز ويوقف البطاقة، "
+                        "ولا تكرر الرقم بالرد",
+    "other_phone": "رقم ثاني: الزبون يكتب من رقم مو رقمه، فتأكد من هويته قبل أي تغيير على الحساب",
+    "complaint_risk": "شكوى: الزبون يهدد بشكوى للجهات الرقابية أو راسلنا أكثر من مرة",
+    "bidi_controls": "رموز مخفية: بالرسالة رموز تغيّر ترتيب الكتابة، فقارن المبلغ والأرقام بالرسالة",
+    "amount_disagreed": "المبلغ: النموذجين قروا مبلغ مختلف، فتأكد منه بالرسالة",
+    "instructions_in_ticket": "كلام للنظام: بالتذكرة كلام موجّه للنظام، وما انعمل بيه",
 }
 
 
@@ -75,8 +88,10 @@ def _reasons(flags: list[str], confidence: float | None, first: Extraction | Non
                    f"والثاني «{_label(second.subcategory) or second.subcategory}»")
     if "invalid_category" in flags:
         out.append("التصنيف ما يطابق قائمة الأقسام")
+    if "device_lost" in flags:
+        out.append("الموبايل ضايع أو مسروق والمحفظة مفتوحة عليه، فيحتاج تجميد الحساب بسرعة")
     if "model_error" in flags:
-        out.append("صار خطأ بالنموذج: اقرا التذكرة كاملة")
+        out.append("صار خطأ بالنموذج، فاقرا التذكرة كاملة")
     out += [why for flag, why in _SYSTEM_REASONS.items() if flag in flags]
     if not out and confidence is not None and confidence < thresholds()["confidence"]["recheck_from"]:
         out.append(f"الثقة واطية ({confidence:.2f}): نوع المشكلة مو واضح")
@@ -124,6 +139,7 @@ def note(ex: Extraction | None, flags: list[str], *, confidence: float | None = 
     reasons = _reasons(flags, confidence, ex, second)
     if reasons:
         lines.append("سبب التصعيد: " + "؛ ".join(reasons))
+    lines += [line for flag, line in NOTE_AR.items() if flag in flags]
     if identity:
         lines.append(IDENTITY_AR)
     return "\n".join(lines)

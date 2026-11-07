@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from . import fixes
+
 # Arabic-Indic (٠-٩) and Persian (۰-۹) digits -> ASCII, so references and
 # amounts compare the same way however the customer typed them.
 _DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
@@ -14,7 +16,16 @@ _WS = re.compile(r"\s+")
 
 def clean(text: str) -> str:
     text = text.translate(_DIGITS).replace(_TATWEEL, "")
+    if fixes.enabled("strip_format_chars"):
+        text = drop_format_chars(text)
     return _WS.sub(" ", text).strip()
+
+
+def drop_format_chars(text: str) -> str:
+    """strip_format_chars (fixes.py): the text without invisible format characters (Unicode Cf: zero-width
+    spaces and joiners, direction marks and controls, the BOM, soft hyphens, tag characters). A reader
+    doesn't see them, but they split a number («88\u200b41\u200b902») or reverse what the page shows."""
+    return "".join(c for c in text if unicodedata.category(c) != "Cf")
 
 
 # Persian kaf and yeh, as typed on Kurdish and Persian keyboards. «ى» is left alone: «تنسى» needs it.

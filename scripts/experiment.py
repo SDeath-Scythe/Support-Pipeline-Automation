@@ -33,8 +33,10 @@ from pipeline.requirements import REFERENCE_ALTERNATIVES, REFERENCE_NOT_NEEDED  
 
 # Short codes for the flags in pipeline/fixes.py, e.g. "F22": "some_fix". The adopted fixes (F2-F21, see
 # docs/experiments/LOG.md) are the normal code and the rest were deleted (30 Oct). F22-F25 are the draft warnings
-# opened after the 7 Nov user tests.
-CODES: dict[str, str] = {"F22": "claims_done", "F23": "repeated_text", "F24": "ask_missing", "F25": "dialect_words"}
+# opened after the 7 Nov user tests, and F26-F31 the pipeline rules opened after the same tests.
+CODES: dict[str, str] = {"F22": "claims_done", "F23": "repeated_text", "F24": "ask_missing", "F25": "dialect_words",
+                         "F26": "fraud_secondary", "F27": "secret_in_ticket", "F28": "strip_format_chars",
+                         "F29": "device_lost", "F30": "complaint_risk", "F31": "instructions_in_ticket"}
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"
 JUDGE_PROMPT = (ROOT / "scripts/prompts/judge_draft.md").read_text(encoding="utf-8")

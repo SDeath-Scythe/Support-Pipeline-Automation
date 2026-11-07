@@ -12,7 +12,8 @@ decision, for a regulated financial institution): hold_reason and sensitive_numb
 that always run and block an approval (draft_check.py), and escalate_account_risk was changed into
 the account_risk flag (run.py), which keeps the draft.
 
-On 7 Nov four draft warnings found by the user tests were opened as flags (FIXES below), off by default.
+On 7 Nov four draft warnings found by the user tests were opened as flags (FIXES below), off by default,
+and six pipeline rules from the same tests (fraud_secondary to instructions_in_ticket).
 """
 
 from __future__ import annotations
@@ -28,6 +29,19 @@ FIXES: dict[str, str] = {
                    "draft never mentions; a lost receipt is not asked for its reference",
     "dialect_words": "draft check: warn on a word from another dialect or stiff standard Arabic (عشان، وايد، رح، "
                      "يرجى، التي ...)",
+    # Pipeline rules opened after the same tests (run.py, ticket_rules.py).
+    "fraud_secondary": "a second type in an always-escalate category (fraud), from either model, escalates the "
+                       "ticket as fraud (fraud team, P1); the main type stays in the team note as «طلب ثاني»",
+    "secret_in_ticket": "a card number or a code after its word (PIN, OTP, الرمز السري، الباسورد ...) in the "
+                        "customer's text: flag secret_in_ticket, a line in the team note, and secret_spans for the page",
+    "strip_format_chars": "clean drops invisible format characters (zero-width, direction controls, BOM); direction "
+                          "controls add bidi_controls, and different amounts from the two models add amount_disagreed",
+    "device_lost": "a lost or stolen phone with the wallet or account open on it escalates to the fraud team, P1; "
+                   "writing from another person's phone adds other_phone",
+    "complaint_risk": "a threat to complain to a regulator or a repeat contact (البنك المركزي، الجهات الرقابية، "
+                      "اشتكي عليكم، ثالث مرة ...): flag complaint_risk; the priority does not change",
+    "instructions_in_ticket": "text aimed at the system (a forged tag, SYSTEM:, ignore previous instructions, "
+                              "تجاهل التعليمات، اكتب للزبون ...): a quiet flag; the outcome does not change",
 }
 
 # Flags that became the normal code. Naming one in PIPELINE_FIXES is refused with what happened to it,
