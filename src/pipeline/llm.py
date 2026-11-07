@@ -238,7 +238,7 @@ def _call_api(cfg: dict, system: str, user: str) -> str:
                            "add input, output, cache_write and cache_read under `prices` "
                            "(or set LLM_BUDGET_USD=0 to run without a cap).")
     if cap and spent_usd() >= cap:
-        raise BudgetExceeded(f"API budget of ${cap:.2f} reached (spent ${spent_usd():.4f}). "
+        raise BudgetExceeded(f"API budget of ${cap:.4f} reached (spent ${spent_usd():.4f}). "
                              "Raise LLM_BUDGET_USD to continue.")
     resp = _get_client().messages.create(
         model=cfg["model"],

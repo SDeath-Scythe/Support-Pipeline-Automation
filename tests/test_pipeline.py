@@ -259,12 +259,12 @@ def test_run_confident_ticket_is_drafted(monkeypatch):
 
 def test_fix_flags_off_by_default_and_reject_unknown(monkeypatch):
     """The adopted fixes became the normal code (30 Oct), and so did the three security rules opened
-    on 1 Nov (5 Nov). No flag is open; the mechanism stays."""
+    on 1 Nov (5 Nov). The draft warnings opened on 7 Nov are flags, all off unless named."""
     from pipeline import fixes
 
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
     assert fixes.active() == frozenset()
-    assert fixes.FIXES == {}
+    assert not set(fixes.FIXES) & set(fixes.ADOPTED)
     assert set(fixes.ADOPTED) == {"hold_reason", "sensitive_number", "escalate_account_risk"}
     monkeypatch.setenv("PIPELINE_FIXES", "draft_check")                    # adopted, so no longer a flag
     try:
@@ -1081,3 +1081,38 @@ def test_app_bugs_go_to_tech_support():
     tax = taxonomy()
     assert tax.get("app_bug").team == "tech" and tax.get("complaint").team == "general"
     assert route(Extraction(category="general", subcategory="app_bug", confidence=0.9), "التطبيق ما يفتح")[0] == "tech"
+
+
+def test_prompt_flags_swap_in_the_prompt_under_test(monkeypatch):
+    """draft_rules_ut and summary_qualifiers (fixes.py): off, the prompts are the files in use; on, the version
+    under test, side by side in prompts/."""
+    from pipeline import draft, run
+
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    base_draft, base_summary = draft.system_prompt(), run._summary_prompt()
+    assert "«يمّه»" not in base_draft and "qualifiers" not in base_summary
+    monkeypatch.setenv("PIPELINE_FIXES", "draft_rules_ut")
+    ut = draft.system_prompt()
+    assert "«يمّه»" in ut and "Never say it was registered" in ut and "blocked account or a SIM change" in ut
+    assert "say the team will confirm it" not in ut and run._summary_prompt() == base_summary
+    monkeypatch.setenv("PIPELINE_FIXES", "summary_qualifiers")
+    assert "qualifiers" in run._summary_prompt() and draft.system_prompt() == base_draft
+    monkeypatch.delenv("PIPELINE_FIXES")
+    assert draft.system_prompt() == base_draft and run._summary_prompt() == base_summary
+
+
+def test_summary_qualifiers_prompt_reaches_the_model(monkeypatch):
+    from pipeline import run
+
+    seen = []
+
+    def fake_call(role, system, user, attempt=0):
+        if "ONE short line" in system:
+            seen.append(system)
+            return "انطى الرمز لواحد اتصل بيه"
+        return '{"category": "fraud_security", "subcategory": "suspected_scam", "confidence": 0.95}'
+
+    monkeypatch.setattr(run, "call", fake_call)
+    monkeypatch.setenv("PIPELINE_FIXES", "summary_qualifiers")
+    assert "الخلاصة: انطى الرمز" in run.process("واحد اتصل وطلب الرمز وانطيته")["handoff_ar"]
+    assert "qualifiers" in seen[-1]

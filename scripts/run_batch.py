@@ -118,7 +118,7 @@ def main() -> None:
         print(f"Prompt cache: read {totals['cache_read_tokens']:,} / written {totals['cache_write_tokens']:,} tokens, "
               f"${totals['cost_per_ticket_usd']} per ticket")
     if totals.get("budget_hit"):
-        print(f"WARNING: the ${totals['budget_usd']:.2f} budget was reached; tickets after it were not classified "
+        print(f"WARNING: the ${totals['budget_usd']:.4f} budget was reached; tickets after it were not classified "
               "and this run's numbers are not valid. Raise LLM_BUDGET_USD and re-run (cached calls are free).")
     out = Path(args.out) if args.out else ROOT / "runs" / f"{started:%Y%m%d-%H%M%S}-{src.stem}-{backend()}.json"
     out.parent.mkdir(parents=True, exist_ok=True)

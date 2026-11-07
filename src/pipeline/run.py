@@ -17,15 +17,15 @@ import logging
 import re
 import time
 import traceback
+import unicodedata
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 
 from . import classify as cls
 from . import draft as drf
-from . import draft_check
-from . import handoff
-from .clean import _DIGITS, _TATWEEL, clean
+from . import draft_check, fixes, handoff, ticket_rules
+from .clean import _DIGITS, _TATWEEL, clean, sensitive_numbers
 from .config import limits, pipeline_mode, taxonomy
 from .gate import check
 from .llm import (BackendError, BudgetExceeded, CacheMiss, backend, before_retry, call, last_usage, model_for,
@@ -47,6 +47,12 @@ ACCOUNT_RISK = ("blocked_account", "sim_change")
 
 STAGES = ["received", "clean", "classify", "gate", "recheck", "route", "draft", "result"]
 
+# Flags from the code rules on the customer's text (ticket_rules.py, each behind its fixes.py flag), added
+# to every outcome. A quiet one is shown but doesn't move a drafted ticket to «تحتاج تأكيد».
+QUIET_FLAGS = ("instructions_in_ticket",)
+# device_lost: a lost or stolen phone with the wallet open on it goes where fraud goes.
+SECURITY_TEAM, SECURITY_PRIORITY = "fraud", "P1"
+
 FLAG_AR = {
     "fraud": "احتمال احتيال: يتابعها قسم الاحتيال مباشرة",
     "invalid_category": "التصنيف ما يطابق قائمة الأقسام",
@@ -56,14 +62,29 @@ FLAG_AR = {
     "recheck_disagreed": "النموذج الثاني صنّفها بشكل مختلف",
     "recheck_used_second": "النموذجين اختلفوا: اعتمدنا جواب المراجعة الثانية، تأكد من نوع المشكلة",
     "model_error": "صار خطأ بالنموذج، تحتاج مراجعة يدوية",
+    "budget_reached": "وصل التشغيل لحد الصرف المسموح: تحتاج مراجعة يدوية",
     "draft:stray_latin": "المسودة بيها حروف إنكليزية بغير مكانها",
     "draft:promise": "المسودة توعد بنتيجة أو وقت: تأكد قبل الاعتماد",
     "draft:asks_secret": "المسودة تطلب رمز أو كلمة سر: لا تعتمدها",
     "draft:unknown_number": "المسودة بيها رقم مو موجود بالتذكرة أو المعلومات",
     "draft:hold_reason": "المسودة تذكر تحقيق أو اشتباه أو بلاغ: لا تعتمدها، ممنوع نخبر الزبون",
     "draft:sensitive_number": "المسودة تكرر رقم بطاقة أو رمز: احذفه قبل الاعتماد",
+    # The warnings behind flags (fixes.py), shown only while their flag is on.
+    "draft:claims_done": "المسودة تگول شي انسوى وإحنا ما سويناه: تأكد قبل الاعتماد",
+    "draft:repeated_text": "المسودة بيها ترحيب أو جملة مكررة",
+    "draft:ask_missing": "المسودة ما تسأل عن كل اللي ناقص",
+    "draft:dialect_words": "المسودة بيها كلمة مو عراقية",
+    "draft:amount_not_in_ticket": "المسودة تذكر مبلغ بالأرقام والزبون ما كاتبه هيچ: قارنه بالرسالة",
     "account_risk": "حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، "
                     "ولا تكتب بالرد إنه صار أي تغيير على الحساب",
+    # The code rules on the customer's text, shown while their flag (fixes.py) is on.
+    "secret_in_ticket": "الزبون كتب رقم بطاقة أو رمز سري: نبّهه يغيّر الرمز ويوقف البطاقة، ولا تكرر الرقم بالرد",
+    "bidi_controls": "بالرسالة رموز مخفية تغيّر ترتيب الكتابة: قارن المبلغ والأرقام بالرسالة",
+    "amount_disagreed": "النموذجين قروا مبلغ مختلف: تأكد من المبلغ بالرسالة",
+    "device_lost": "موبايل ضايع أو مسروق والمحفظة مفتوحة عليه: يتابعها قسم الاحتيال مباشرة",
+    "other_phone": "الزبون يكتب من رقم مو رقمه: تأكد من هويته قبل أي تغيير على الحساب",
+    "complaint_risk": "الزبون يهدد بشكوى للجهات الرقابية أو راسلنا أكثر من مرة: انتبه للرد",
+    "instructions_in_ticket": "بالتذكرة كلام موجّه للنظام، وما انعمل بيه",
     # Escalations the system decides on its own; their team note is built with no model call.
     "too_long": "التذكرة أطول من الحد المسموح: يستلمها موظف بدون نموذج",
     "pipeline_off": "النظام موقف: يستلمها موظف يدوياً",
@@ -107,11 +128,53 @@ class _Cancelled(BaseException):
 
 
 def _clean_changes(raw: str) -> dict[str, int]:
-    return {
+    changes = {
         "arabic_digits": sum(1 for ch in raw if ch.translate(_DIGITS) != ch),
         "tatweel": raw.count(_TATWEEL),
         "extra_spaces": len(re.findall(r"\s{2,}|\n", raw)) + (raw != raw.strip()),
     }
+    if fixes.enabled("strip_format_chars"):
+        changes["format_chars"] = sum(1 for ch in raw if unicodedata.category(ch) == "Cf")
+    return changes
+
+
+def _text_flags(raw: str, text: str) -> list[str]:
+    """The flags the code rules raise on the customer's text (ticket_rules.py), for the fixes switched on."""
+    on = fixes.active()
+    flags = []
+    if "secret_in_ticket" in on and (sensitive_numbers(text) or ticket_rules.secret_spans(raw)):
+        flags.append("secret_in_ticket")
+    if "strip_format_chars" in on and ticket_rules.BIDI_CONTROLS.search(raw):
+        flags.append("bidi_controls")
+    if "device_lost" in on and ticket_rules.other_phone(raw):
+        flags.append("other_phone")
+    if "complaint_risk" in on and ticket_rules.complaint_risk(raw):
+        flags.append("complaint_risk")
+    if "instructions_in_ticket" in on and ticket_rules.instructions_in_ticket(raw):
+        flags.append("instructions_in_ticket")
+    return flags
+
+
+def _fraud_view(ex: Extraction) -> Extraction | None:
+    """fraud_secondary: an answer whose second type is fraud (always escalated), turned around so the fraud
+    type is the topic and the answer's own type its second request. None for any other answer."""
+    tax = taxonomy()
+    main, sec = tax.subcategories.get(ex.subcategory), tax.subcategories.get(ex.secondary_subcategory or "")
+    if main is None or main.always_escalate or sec is None or not sec.always_escalate:
+        return None
+    return ex.model_copy(update={"category": sec.category, "subcategory": ex.secondary_subcategory,
+                                 "secondary_subcategory": ex.subcategory})
+
+
+def _amounts_differ(a: Extraction, b: Extraction) -> bool:
+    """Both models read an amount in the same currency, and not the same one."""
+    return any(x is not None and y is not None and x != y
+               for x, y in ((a.amount_iqd, b.amount_iqd), (a.amount_usd, b.amount_usd)))
+
+
+def _failed(e: BaseException) -> str:
+    """The flag for a model step that failed: a budget refusal says so; anything else is a model error."""
+    return "budget_reached" if isinstance(e, BudgetExceeded) else "model_error"
 
 
 # Rule 1 of the classifier prompt (fraud: put the other issue in secondary) contradicts rule 5 (a
@@ -142,14 +205,20 @@ def _add_usage(a: dict, b: dict) -> dict:
     return {**out, "cost_usd": round(cost, 6), "cached": bool(a.get("cached") and b.get("cached")), "retried": True}
 
 
-_SUMMARY_PROMPT = Path(__file__).parent / "prompts" / "summary_system.md"
+_PROMPTS = Path(__file__).parent / "prompts"
+
+
+def _summary_prompt() -> str:
+    """The summary instructions; the summary_qualifiers flag (fixes.py) swaps in the version under test."""
+    name = "summary_system.summary_qualifiers.md" if fixes.enabled("summary_qualifiers") else "summary_system.md"
+    return (_PROMPTS / name).read_text(encoding="utf-8")
 
 
 def _team_summary(text: str) -> tuple[str | None, dict]:
     """One Arabic line for the team handling an escalated ticket. A line with a number that is
     not in the ticket is dropped (the note then has no summary), and so is a failed call."""
     try:
-        line = call("classifier", _SUMMARY_PROMPT.read_text(encoding="utf-8"), cls.user_prompt(text)).strip()
+        line = call("classifier", _summary_prompt(), cls.user_prompt(text)).strip()
     except Exception:  # noqa: BLE001 - the note works without a summary
         return None, last_usage()
     line = " ".join(line.split())
@@ -221,14 +290,21 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         if stop_requested():
             raise _Cancelled
 
-    # What the handoff note (F17) needs, filled in as the stages run.
-    ctx: dict[str, Any] = {"text": "", "ex": None, "confidence": None, "second": None, "cleared": None}
+    # What the handoff note (F17) needs, filled in as the stages run. text_flags come from the code rules on
+    # the customer's text and late_flags from the models' answers; finish() adds both to every outcome.
+    ctx: dict[str, Any] = {"text": "", "ex": None, "confidence": None, "second": None, "cleared": None,
+                           "text_flags": [], "late_flags": [], "secret_spans": []}
 
     def finish(outcome: Outcome, flags: list[str], *, team_summary: bool = True, **extra: Any) -> dict[str, Any]:
         """Emit the result. An escalation gets a note for the team; `team_summary=False` builds it
         without the one-line summary call (escalations the system decided, not the ticket)."""
-        flags = list(flags)
+        added = [f for f in ctx["text_flags"] + ctx["late_flags"] if f not in flags]
+        flags = list(flags) + added
+        if outcome == Outcome.DRAFTED and any(f not in QUIET_FLAGS for f in added):
+            outcome = Outcome.FLAGGED
         result = {"outcome": outcome.value, "flags": flags, "notes_ar": [], **extra}
+        if ctx["secret_spans"]:
+            result["secret_spans"] = ctx["secret_spans"]
         if outcome == Outcome.ESCALATED:   # no draft: a short note for the team that receives it
             summary = None
             if team_summary and ctx["ex"] is not None:
@@ -272,6 +348,10 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         text = clean(raw_text)
         ctx["text"] = text
         send("clean", "done", {"text": text, "changes": _clean_changes(raw_text)})
+        on = fixes.active()
+        ctx["text_flags"] = _text_flags(raw_text, text)
+        if "secret_in_ticket" in on:
+            ctx["secret_spans"] = ticket_rules.secret_spans(raw_text)
 
         # A very long ticket is not sent to a model: it costs more and is the usual shape of an
         # attempt to bury instructions. A person reads it.
@@ -290,7 +370,7 @@ def process(raw_text: str, emit: Emit = lambda e: None,
             send("classify", "error", _error(e))
             for s in ("gate", "recheck", "route", "draft"):
                 send(s, "skipped")
-            return finish(Outcome.ESCALATED, ["model_error"])
+            return finish(Outcome.ESCALATED, [_failed(e)])
         ctx.update(ex=ex, cleared=info.get("cleared_secondary"))
         sub = tax.subcategories.get(ex.subcategory)
         info["labels"] = {
@@ -298,6 +378,12 @@ def process(raw_text: str, emit: Emit = lambda e: None,
             "subcategory": sub.label if sub else ex.subcategory,
         }
         send("classify", "done", info)
+        # fraud_secondary: a fraud second type is handled as fraud (the gate escalates it); its own type
+        # stays in the team note as the second request.
+        view = _fraud_view(ex) if "fraud_secondary" in on else None
+        if view is not None:
+            ex, sub = view, tax.subcategories.get(view.subcategory)
+            ctx["ex"] = ex
 
         # 3. Confidence gate (rules)
         gate = check(ex, text)
@@ -306,6 +392,16 @@ def process(raw_text: str, emit: Emit = lambda e: None,
                               "high_risk": bool(sub and sub.high_risk)})
         flags = list(gate.flags)
         ctx["confidence"] = gate.confidence
+
+        # device_lost: whoever has the phone has the wallet. The fraud team takes it now, with no draft.
+        if "device_lost" in on and ticket_rules.device_lost(raw_text):
+            send("recheck", "skipped", {"why": FLAG_AR["device_lost"]})
+            ctx.update(team=SECURITY_TEAM, priority=SECURITY_PRIORITY)
+            send("route", "done", {"team": SECURITY_TEAM, "team_ar": tax.teams[SECURITY_TEAM]["label_ar"],
+                                   "priority": SECURITY_PRIORITY})
+            send("draft", "skipped", {"why": FLAG_AR["device_lost"]})
+            return finish(Outcome.ESCALATED, flags + ["device_lost"], team=SECURITY_TEAM, priority=SECURITY_PRIORITY,
+                          extraction=ex.model_dump())
 
         if gate.escalate:
             for s in ("recheck",):
@@ -327,10 +423,21 @@ def process(raw_text: str, emit: Emit = lambda e: None,
                 send("recheck", "error", _error(e))
                 send("route", "skipped")
                 send("draft", "skipped")
-                return finish(Outcome.ESCALATED, flags + ["model_error"], extraction=ex.model_dump())
+                return finish(Outcome.ESCALATED, flags + [_failed(e)], extraction=ex.model_dump())
             agree = ex2.subcategory == ex.subcategory
             info2.update(agree=agree, first=ex.subcategory, second=ex2.subcategory)
             send("recheck", "done", info2)
+            if "strip_format_chars" in on and _amounts_differ(ex, ex2):
+                ctx["late_flags"].append("amount_disagreed")
+            view2 = _fraud_view(ex2) if "fraud_secondary" in on else None
+            if view2 is not None:      # the re-check's second type is fraud: handled as fraud, as above
+                flags.append("fraud")
+                ctx["second"] = view2
+                team, priority = route(view2, text)
+                ctx.update(team=team, priority=priority)
+                send("route", "done", {"team": team, "team_ar": tax.teams[team]["label_ar"], "priority": priority})
+                send("draft", "skipped", {"why": FLAG_AR["fraud"]})
+                return finish(Outcome.ESCALATED, flags, team=team, priority=priority, extraction=ex.model_dump())
             # The re-check model was right in most disagreements, so a disagreement is drafted from its
             # answer, flagged, with the gate rules re-run for it. Never for fraud.
             sub2 = tax.subcategories.get(ex2.subcategory)
@@ -385,7 +492,7 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         except Exception as e:  # noqa: BLE001
             _log_error("draft", e)
             send("draft", "error", _error(e))
-            return finish(Outcome.ESCALATED, flags + ["model_error"], team=team, priority=priority)
+            return finish(Outcome.ESCALATED, flags + [_failed(e)], team=team, priority=priority)
         # A time («خلال يومين») is allowed only from the policy facts, never because the customer wrote it.
         facts_text = drf.facts_text(ex.subcategory)
         checks = draft_check.problems(reply, user, facts_text=facts_text)
