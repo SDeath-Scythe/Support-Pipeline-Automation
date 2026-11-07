@@ -7,7 +7,7 @@
 // "كيف يشتغل".
 
 import { NetworkError, ServerError } from "./api.js";
-import { buildComposer, isBlocking, originalDraft } from "./composer.js";
+import { buildComposer, isBlocking, isStyle, originalDraft } from "./composer.js";
 import { factLine, factsOf, fitSpans, secretMask, secretRanges, textWithFacts } from "./facts.js";
 import {
   ACTION_ICON, ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, DRAFT_REASONS, FIELD_AR, IDENTITY_IF_REPLY_AR, NOT_NEEDED_AR,
@@ -174,9 +174,12 @@ function whyLine(it) {
       ...(r.flags || []).filter((f) => !f.startsWith("draft:") && f !== "account_risk" && !isQuiet(f)
         && !(f.startsWith("missing:") && notNeeded.has(f.slice(8)))).map(sentence)];
     if (said.length) return box("warn", "تحتاج تأكيد:", said.join(" "));
-    // Only the draft's warnings: said while the draft has one; once an edit clears them, nothing is left to say.
+    // Only the draft's warnings: said while the draft has one; once an edit clears them, nothing is left to say. A
+    // style note is not one: it is the muted line under the draft (a run saved before style notes can be flagged for one).
     const st = composer && S.agent.openKey === it.key ? composer.state() : null;
-    if (st && st.current && !st.findings.length) return null;
+    const found = st ? st.findings : originalDraftFindings(it);
+    const onlyStyle = found.length > 0 && found.every((f) => isStyle(f.kind));
+    if ((st && st.current && !found.length) || onlyStyle) return null;
     return box("warn", "تحتاج تأكيد:", "بالمسودة شي لازم تراجعه، شوف الفحص تحت المسودة.");
   }
   if (r.outcome === "escalated") {
@@ -851,7 +854,7 @@ function confirmTargets(it, st) {
   }
   if (secondRequest(it)) push("second_request", CONFIRM_AR.second_request);
   for (const f of st.findings) {
-    if (isBlocking(f.kind)) continue;
+    if (isBlocking(f.kind) || isStyle(f.kind)) continue;   // a style note is the muted line under the draft, not a point
     if (f.kind === "ask_missing") {
       // A field marked not needed is not asked for again; nothing left: no point.
       const fields = (f.fields || []).filter((x) => !notNeeded.has(x));

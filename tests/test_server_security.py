@@ -902,7 +902,8 @@ def test_every_confirm_kind_the_page_ticks_is_accepted_and_nothing_free_form(srv
 # The flags of the code rules on the customer's text (run.py; flags until 7 Nov) that the page asks the agent
 # to tick, and the draft warnings from the same role-played test sessions (draft_check.KINDS since 7 Nov), which never block.
 TEXT_RULE_POINTS = ("secret_in_ticket", "bidi_controls", "amount_disagreed", "other_phone", "complaint_risk")
-NEW_WARNINGS = ("claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket")
+# dialect_words was one of them until style_notes (7 Nov, after the second round): a style note is never ticked.
+NEW_WARNINGS = ("claims_done", "repeated_text", "ask_missing", "amount_not_in_ticket")
 
 
 def test_the_new_flags_and_draft_warnings_are_ticked_as_kinds_and_the_quiet_flag_needs_none(srv, live):
@@ -930,6 +931,37 @@ def test_the_new_flags_and_draft_warnings_are_ticked_as_kinds_and_the_quiet_flag
     status, _, raw = call(srv, "POST", "/api/decision", _decision(ticket_id=live(flags=["instructions_in_ticket"]),
                                                                   warnings_acknowledged=["instructions_in_ticket"]))
     assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged"
+
+
+def test_a_style_note_is_never_ticked_or_required(srv, live):
+    """style_notes (7 Nov, after the second round of role-played test sessions): dialect_words and persona_slip are style
+    notes. /api/meta publishes them as style_kinds and still names them in checks_active and check_ar, but they are not ack
+    kinds: a ready ticket served with one approves with no tick and logs none, a tick of one is refused (400) like a quiet
+    flag's, and required_acks and allowed_acks never list one."""
+    from pipeline import draft_check
+    meta = json.loads(call(srv, "GET", "/api/meta")[2])
+    assert meta["style_kinds"] == list(draft_check.STYLE_KINDS) == ["dialect_words", "persona_slip"]
+    assert not set(meta["style_kinds"]) & set(meta["ack_kinds"])
+    assert set(meta["style_kinds"]) <= set(meta["checks_active"]) and set(meta["style_kinds"]) <= set(meta["check_ar"])
+    style = ["draft:dialect_words", "draft:persona_slip"]
+    body = _decision(action="approved", final_text=DRAFT, reason_codes=[], corrected={}, flags=style, warnings_acknowledged=[])
+    assert call(srv, "POST", "/api/decision", {**body, "ticket_id": live(flags=style, outcome="drafted")})[0] == 200
+    rec = server.read_decisions("live")[-1]
+    assert rec["pipeline_outcome"] == "drafted" and rec["flags"] == style and rec["warnings_acknowledged"] == []
+    for kind in draft_check.STYLE_KINDS:
+        n = live(flags=style, outcome="drafted")
+        status, _, raw = call(srv, "POST", "/api/decision", {**body, "ticket_id": n, "warnings_acknowledged": [kind]})
+        assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged"
+    # flagged for another point: that point is required, the style note never is, and an edit that adds one can't tick it
+    served = server.served_facts({"outcome": "flagged", "flags": ["missing:amount", *style], "draft_ar": DRAFT})
+    assert server.required_acks(served, {}) == ["missing:amount"]
+    edited = DRAFT + " ونرجو منك الصبر، آني أتابعها"
+    assert {"dialect_words", "persona_slip"} <= {f["kind"] for f in draft_check.findings(edited, "", "")}
+    assert not set(draft_check.STYLE_KINDS) & server.allowed_acks(served, {}, edited)
+    n = live(flags=["missing:amount", *style], outcome="flagged")
+    status, _, raw = call(srv, "POST", "/api/decision", {**body, "ticket_id": n, "warnings_acknowledged": []})
+    assert status == 409 and json.loads(raw)["conflict"] == "unticked"
+    assert call(srv, "POST", "/api/decision", {**body, "ticket_id": n, "warnings_acknowledged": ["missing:amount"]})[0] == 200
 
 
 def test_a_ticket_flagged_by_a_text_rule_keeps_its_draft_where_the_decision_checks_read_it(srv, monkeypatch):

@@ -502,12 +502,17 @@ SAVED_NEW_WARNINGS_KINDS = ("claims_done", "repeated_text", "ask_missing", "dial
                             "persona_slip", "asks_given")
 # Saved as flagged already (a missing field, a type check, the identity tick): their outcome does not move.
 SAVED_FLAGGED = {"t2-0017", "t2-0029", "t2-0046", "t2-0052", "t2-0075", "t2-0080"}
+# Ready ones whose new findings are style notes only (style_notes, after the second round): they get the flags and stay
+# ready.
+SAVED_STYLE_ONLY = {"t2-0010", "t2-0019", "t2-0023", "t2-0024", "t2-0030", "t2-0031", "t2-0038", "t2-0043", "t2-0065",
+                    "t2-0069", "t2-0079"}
 
 
 def test_committed_final_run_gets_spans_that_agree_with_its_saved_checks(srv):
     """The spans are recomputed with today's rules: the rules the run was saved with find what it saved, and the
     warnings adopted on 7 Nov and in the second round add findings on 21 drafts. Each is served as run.py flags it
-    today: a flag draft:<kind> for each new finding, and those that were ready are «تحتاج تأكيد» (apply_current_rules)."""
+    today: a flag draft:<kind> for each new finding, and those that were ready are «تحتاج تأكيد» (apply_current_rules),
+    unless every new finding is a style note (draft_check.STYLE_KINDS): those 11 stay ready."""
     status, _, raw = call(srv, "GET", "/api/run?name=saved/test2/final")
     assert status == 200
     run = json.loads(raw)
@@ -530,11 +535,14 @@ def test_committed_final_run_gets_spans_that_agree_with_its_saved_checks(srv):
         assert [f[6:] for f in row["result"]["flags"] if f.startswith("draft:")] == kinds, row["ticket"]["id"]
     assert drafts == 74 and len(run["tickets"]) == 80 and added == SAVED_NEW_WARNINGS
     by = {r["ticket"]["id"]: r["result"] for r in run["tickets"]}
+    assert SAVED_STYLE_ONLY == {t for t, k in SAVED_NEW_WARNINGS.items()
+                                if set(k) <= set(draft_check.STYLE_KINDS) and t not in SAVED_FLAGGED}
     for tid, kinds in SAVED_NEW_WARNINGS.items():
         res = by[tid]
         assert [f for f in res["rules_recomputed"] if f.startswith("draft:")] == [f"draft:{k}" for k in kinds], tid
-        assert res["outcome"] == "flagged" and res["notes_ar"] == [FLAG_AR[f] for f in res["flags"]], tid
-        assert res.get("outcome_recomputed") is (None if tid in SAVED_FLAGGED else True), tid
+        assert res["notes_ar"] == [FLAG_AR[f] for f in res["flags"]], tid
+        assert res["outcome"] == ("drafted" if tid in SAVED_STYLE_ONLY else "flagged"), tid
+        assert res.get("outcome_recomputed") is (None if tid in SAVED_FLAGGED | SAVED_STYLE_ONLY else True), tid
     assert by["t2-0017"]["flags"] == ["missing:reference", "draft:ask_missing", "draft:dialect_words"]
 
 
@@ -603,8 +611,11 @@ def test_committed_final_run_shows_the_six_account_risk_tickets_flagged(srv):
     assert by["t2-0009"]["flags"] == ["recheck_used_second"] and "account_risk_recomputed" not in by["t2-0009"]
     outcomes = [r["outcome"] for r in by.values()]
     # 15 / 6 / 59 with account_risk alone; the 7 Nov draft warnings moved six more ready tickets (21 / 6 / 53), and the
-    # second round's warnings and second_request ten more (apply_current_rules)
-    assert (outcomes.count("flagged"), outcomes.count("escalated"), outcomes.count("drafted")) == (31, 6, 43)
+    # second round's warnings and second_request ten more (31 / 6 / 43, apply_current_rules). Since style_notes a style
+    # note moves none: the amount and ask_missing warnings and second_request move five (20 / 6 / 54).
+    assert (outcomes.count("flagged"), outcomes.count("escalated"), outcomes.count("drafted")) == (20, 6, 54)
+    moved = sorted(i for i, r in by.items() if r.get("outcome_recomputed"))
+    assert moved == ["t2-0004", "t2-0013", "t2-0056", "t2-0058", "t2-0074"]
 
 
 # --- 7 Nov: a saved run is served as today's code would decide it, for the rules that need no model call ---
@@ -693,14 +704,55 @@ def test_saved_runs_get_today_s_text_rules_and_draft_flags_and_nothing_else_chan
     assert json.loads(f.read_text(encoding="utf-8")) == original   # the file itself is never changed
 
 
+def test_a_style_note_never_moves_a_saved_ready_ticket(srv, old_runs):
+    """style_notes (7 Nov, after the second round of role-played test sessions): a saved ready ticket whose draft has
+    only style notes today (a stiff or non-Iraqi word, a singular voice) gets their flags, notes and rules_recomputed, and
+    stays ready; one with a content warning as well becomes «تحتاج تأكيد». The served copy is what a decision is checked
+    against: the first approves with no tick, and a tick of a style note is refused on both (400)."""
+    f, _ = old_runs
+    prompt = "<ticket>\nالتطبيق يعلق\n</ticket>\nKnown facts: none"
+    reply = "نرجو آني أتابع طلبك خلال يومين"
+    dialect = {"kind": "dialect_words", "start": 0, "end": 4, "text": "نرجو"}
+    persona = {"kind": "persona_slip", "start": 5, "end": 8, "text": "آني"}
+    promise = {"kind": "promise", "start": 20, "end": 30, "text": "خلال يومين"}
+    assert [reply[x["start"]:x["end"]] for x in (dialect, persona, promise)] == ["نرجو", "آني", "خلال يومين"]
+    rows = [_draft_row("t2-0001", reply, prompt, spans=[dialect, persona], result_checks=[dialect, persona]),
+            _draft_row("t2-0002", reply, prompt, spans=[promise, dialect], result_checks=[promise, dialect])]
+    for row in rows:
+        row["result"]["notes_ar"] = []   # the result event holds the same dict
+    f.write_text(json.dumps({"meta": {"set": "tickets", "backend": "api"}, "tickets": rows}, ensure_ascii=False),
+                 encoding="utf-8")
+    name = "20261030-000000-tickets-api"
+    status, _, raw = call(srv, "GET", f"/api/run?name={name}")
+    assert status == 200
+    style, both = (r["result"] for r in json.loads(raw)["tickets"])
+    assert style["outcome"] == "drafted" and "outcome_recomputed" not in style
+    assert style["flags"] == style["rules_recomputed"] == ["draft:dialect_words", "draft:persona_slip"]
+    assert style["notes_ar"] == [FLAG_AR["draft:dialect_words"], FLAG_AR["draft:persona_slip"]]
+    assert both["outcome"] == "flagged" and both["outcome_recomputed"] is True
+    assert both["flags"] == ["draft:promise", "draft:dialect_words"]
+    base = {"run": name, "action": "approved", "pipeline_outcome": "drafted", "flags": [], "reason_codes": [],
+            "seconds": 3, "draft_text": reply, "final_text": reply, "corrected": {}}
+    for tid, acks in (("t2-0001", ["dialect_words"]), ("t2-0001", ["persona_slip"]), ("t2-0002", ["promise", "dialect_words"])):
+        status, _, raw = call(srv, "POST", "/api/decision", {**base, "ticket_id": tid, "warnings_acknowledged": acks})
+        assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged", (tid, acks)
+    assert call(srv, "POST", "/api/decision", {**base, "ticket_id": "t2-0001", "warnings_acknowledged": []})[0] == 200
+    rec = server.read_decisions(name)[-1]
+    assert rec["pipeline_outcome"] == "drafted" and rec["flags"] == ["draft:dialect_words", "draft:persona_slip"]
+    assert rec["warnings_acknowledged"] == []
+    assert call(srv, "POST", "/api/decision", {**base, "ticket_id": "t2-0002", "warnings_acknowledged": ["promise"]})[0] == 200
+    assert server.read_decisions(name)[-1]["pipeline_outcome"] == "flagged"
+
+
 def test_committed_final_run_gets_the_quiet_note_on_its_two_planted_tickets(srv):
     status, _, raw = call(srv, "GET", "/api/run?name=saved/test2/final")
     by = {r["ticket"]["id"]: r["result"] for r in json.loads(raw)["tickets"]}
     quiet = sorted(i for i, r in by.items() if "instructions_in_ticket" in r["flags"])
     assert quiet == ["t2-0030", "t2-0041"]
-    # the quiet note never moves a ticket; t2-0030 is «تحتاج تأكيد» for its draft's «آني أفهم» (persona_slip)
+    # the quiet note never moves a ticket, nor does the style note on t2-0030's draft («آني أفهم», persona_slip)
     assert by["t2-0041"]["outcome"] == "drafted" and by["t2-0041"]["flags"] == ["instructions_in_ticket"]
     assert by["t2-0030"]["flags"] == ["draft:persona_slip", "instructions_in_ticket"]
+    assert by["t2-0030"]["outcome"] == "drafted" and "outcome_recomputed" not in by["t2-0030"]
     for i in quiet:
         assert by[i]["notes_ar"][-1] == FLAG_AR["instructions_in_ticket"]
     # one other text rule fires on test2: a repeat contact on t2-0048 («راسلتكم قبل», since the second round); no

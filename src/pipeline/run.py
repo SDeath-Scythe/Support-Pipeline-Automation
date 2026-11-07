@@ -50,6 +50,17 @@ STAGES = ["received", "clean", "classify", "gate", "recheck", "route", "draft", 
 # Flags from the code rules on the customer's text (ticket_rules.py; flags until 7 Nov), added to every
 # outcome. A quiet one is shown but doesn't move a drafted ticket to «تحتاج تأكيد».
 QUIET_FLAGS = ("instructions_in_ticket",)
+# A draft warning that is a style point, not a risk (draft_check.STYLE_KINDS: a stiff or non-Iraqi word, a singular
+# voice; style_notes, adopted 7 Nov). Its flag stays, as the record that it was found, but it never moves a drafted
+# ticket to «تحتاج تأكيد»: friction follows risk, and a tick for a style point teaches agents to tick without reading.
+STYLE_FLAGS = tuple(f"draft:{k}" for k in draft_check.STYLE_KINDS)
+
+
+def holds(flag: str) -> bool:
+    """A flag that keeps a drafted ticket out of «جاهزة»: any flag but a quiet one (QUIET_FLAGS) or a style note
+    (STYLE_FLAGS)."""
+    return flag not in QUIET_FLAGS and flag not in STYLE_FLAGS
+
 # device_lost: a lost or stolen phone with the wallet open on it goes where fraud goes.
 SECURITY_TEAM, SECURITY_PRIORITY = "fraud", "P1"
 
@@ -76,7 +87,7 @@ FLAG_AR = {
     "draft:dialect_words": "المسودة بيها كلمة مو عراقية",
     "draft:amount_not_in_ticket": "المبلغ اللي بالمسودة مو مثل ما كتبه الزبون: قارنه بالرسالة",
     # The draft warnings from the second round of role-played test sessions (7 Nov).
-    "draft:persona_slip": "المسودة تحجي بصيغة شخص واحد (فهمت، وياي): الرد يحجي باسم الفريق",
+    "draft:persona_slip": "المسودة تحجي بصيغة شخص واحد (آني، وياي): الرد يحجي باسم الفريق",
     "draft:asks_given": "المسودة تسأل عن شي الزبون كاتبه بالرسالة",
     "account_risk": "حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، "
                     "ولا تكتب بالرد إنه صار أي تغيير على الحساب",
@@ -320,7 +331,7 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         without the one-line summary call (escalations the system decided, not the ticket)."""
         added = [f for f in ctx["text_flags"] + ctx["late_flags"] if f not in flags]
         flags = list(flags) + added
-        if outcome == Outcome.DRAFTED and any(f not in QUIET_FLAGS for f in added):
+        if outcome == Outcome.DRAFTED and any(holds(f) for f in added):
             outcome = Outcome.FLAGGED
         result = {"outcome": outcome.value, "flags": flags, "notes_ar": [], **extra}
         if ctx["secret_spans"]:
@@ -536,7 +547,7 @@ def process(raw_text: str, emit: Emit = lambda e: None,
                                "ask_for": drf.ask_for(ex, text), "checks": checks, "check_spans": spans,
                                "check_kinds": list(draft_check.kinds_on()), "usage": last_usage()})
 
-        outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED
+        outcome = Outcome.FLAGGED if any(holds(f) for f in flags) else Outcome.DRAFTED
         extra = {"recheck_alternative": alternative} if alternative else {}
         if fee_call:
             extra["fee_followup"] = True

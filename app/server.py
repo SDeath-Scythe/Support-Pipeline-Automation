@@ -56,7 +56,7 @@ from pipeline.config import CONFIG_DIR, limits, models, pipeline_mode, taxonomy 
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.llm import (BackendError, api_key, assert_real_data_safe, backend, budget_usd, cache_only,  # noqa: E402
                           model_for, real_data)
-from pipeline.run import ACCOUNT_RISK, FLAG_AR, QUIET_FLAGS, SECURITY_TEAM, flag_note, process, text_flags  # noqa: E402
+from pipeline.run import ACCOUNT_RISK, FLAG_AR, QUIET_FLAGS, SECURITY_TEAM, flag_note, holds, process, text_flags  # noqa: E402
 
 STATIC = Path(__file__).parent / "static"
 PROBES = ROOT / "data" / "probes"
@@ -163,10 +163,11 @@ BLOCKED_AR = {"asks_secret": "الرد يطلب رمز أو كلمة سر من �
 # not fraud). An allow-list, and each decision may only tick the points its ticket had (allowed_acks). A draft
 # warning behind a flag (draft_check.FLAG_KINDS; none since the 7 Nov ones
 # were adopted) is in it whether or not its flag is on now: a run saved with the flag on still has it. A
-# quiet flag (run.QUIET_FLAGS) is shown, never ticked, so it is not.
+# quiet flag (run.QUIET_FLAGS) and a style note (draft_check.STYLE_KINDS: a stiff or non-Iraqi word, a singular
+# voice) are shown, never ticked, so they are not: an ack of one is refused (400).
 _ACK_FIELDS = tuple(drf.FIELD_AR)
 ACK_KINDS = tuple(dict.fromkeys(
-    [k for k in draft_check.KINDS + draft_check.FLAG_KINDS if k not in BLOCKING_CHECKS]
+    [k for k in draft_check.KINDS + draft_check.FLAG_KINDS if k not in BLOCKING_CHECKS and k not in draft_check.STYLE_KINDS]
     + ["draft_for_other_type", "second_request", "fraud_team_changed"]
     + [f for f in FLAG_AR if not f.startswith("draft:") and f not in QUIET_FLAGS]
     + [f"missing:{f}" for f in _ACK_FIELDS] + [f"missing:{f}:not_needed" for f in _ACK_FIELDS]))
@@ -523,9 +524,9 @@ def _with_current_rules(result, found: dict) -> dict | None:
     nothing is added. Only adds: a flag draft:<kind> on a ticket with a draft, after its other draft flags
     (or before the code rules' flags); the code rules' flags at the end; their notes at the same places;
     secret_spans; and, on an escalation, the team note's line for each new code-rule flag (before the
-    identity reminder). A ready ticket with a new flag that is not quiet becomes flagged. Marked
-    rules_recomputed (the flags added) and, when the outcome moved, outcome_recomputed, so the page can
-    say the run is older than the rules. Outcome, team, priority, type and draft are otherwise as saved."""
+    identity reminder). A ready ticket with a new flag that holds (run.holds: not a quiet flag or a style note)
+    becomes flagged. Marked rules_recomputed (the flags added) and, when the outcome moved, outcome_recomputed,
+    so the page can say the run is older than the rules. Outcome, team, priority, type and draft are otherwise as saved."""
     if not isinstance(result, dict) or not isinstance(result.get("flags"), list):
         return None
     old = result["flags"]
@@ -542,7 +543,7 @@ def _with_current_rules(result, found: dict) -> dict | None:
     if isinstance(notes, list) and len(notes) == len(old):
         out["notes_ar"] = (notes[:at] + [FLAG_AR.get(f, f) for f in new_draft] + notes[at:]
                            + [FLAG_AR.get(f, f) for f in new_rules])
-    if result.get("outcome") == "drafted" and any(f not in QUIET_FLAGS for f in new_draft + new_rules):
+    if result.get("outcome") == "drafted" and any(holds(f) for f in new_draft + new_rules):
         out["outcome"], out["outcome_recomputed"] = "flagged", True
     if spans:
         out["secret_spans"] = spans
@@ -568,8 +569,9 @@ def _with_current_rules(result, found: dict) -> dict | None:
 
 def apply_current_rules(tickets: list, gold_text: bool = False) -> int:
     """A saved run served as today's code would decide it, for the rules that need no model call (the
-    author's decision, 7 Nov): a ready ticket whose draft has a draft-check finding today is flagged with
-    draft:<kind>, as run.py flags a live one, and the code rules on the customer's text add their flags,
+    author's decision, 7 Nov): a ready ticket whose draft has a draft-check finding today gets the flag
+    draft:<kind> and becomes flagged, as run.py flags a live one, unless the finding is a style note (it gets the
+    flag and stays ready), and the code rules on the customer's text add their flags,
     notes and secret_spans (see _with_current_rules), in its result and in its "result" event, the way
     apply_account_risk does. Nothing is re-routed, re-prioritised, re-typed or re-drafted, and the file is
     never written. A decision is checked against this copy (served_ticket). Returns how many tickets it
@@ -702,6 +704,9 @@ def meta() -> dict:
         "account_risk_types": list(ACCOUNT_RISK),
         # Flags the page shows as a muted note, never as a point to tick (run.py QUIET_FLAGS).
         "quiet_flags": list(QUIET_FLAGS),
+        # Draft-check kinds that are style notes (a stiff or non-Iraqi word, a singular voice): highlighted, and said
+        # in one muted line under the draft, never a point to tick or a reason to block an approval.
+        "style_kinds": list(draft_check.STYLE_KINDS),
         # Where fraud goes (run.py): a fraud escalation forwarded anywhere else needs the fraud_team_changed tick.
         "security_team": SECURITY_TEAM,
         "check_ar": CHECK_AR,
@@ -886,7 +891,8 @@ def required_acks(served: dict, corrected: dict) -> list[str]:
     ticket was served with that is not a draft warning or a quiet note (account_risk is checked apart, see
     needs_identity); second_request when a drafted ticket has a second type; draft_for_other_type when the agent
     corrected the type or the team of a drafted ticket. A missing:<field> point is also met by
-    missing:<field>:not_needed."""
+    missing:<field>:not_needed. A draft warning is never one here (the page asks for its tick), and a style note
+    (draft_check.STYLE_KINDS) is never one anywhere."""
     out = [f for f in served["flags"] if not f.startswith("draft:") and f not in QUIET_FLAGS and f != "account_risk"
            and f in ACK_KINDS]
     if served["outcome"] in ("drafted", "flagged") and served.get("secondary_subcategory"):
@@ -909,13 +915,14 @@ def fraud_forward(served: dict, corrected: dict) -> bool:
 def allowed_acks(served: dict, corrected: dict, final: str | None) -> set[str]:
     """Every kind this decision may tick: the required points (and missing:<field>:not_needed for each missing
     field), the identity tick, fraud_team_changed, a draft warning the ticket was served with, and on an edited
-    reply a warning the prompt-free checks find in it (or one that needs the prompt)."""
+    reply a warning the prompt-free checks find in it (or one that needs the prompt). Never a style note
+    (draft_check.STYLE_KINDS)."""
     out = set(required_acks(served, corrected)) | {"account_risk", "fraud_team_changed"}
     out |= {f"{f}:not_needed" for f in out if f.startswith("missing:")}
     out |= {f[len("draft:"):] for f in served["flags"] if f.startswith("draft:")}
     if final is not None and _sha256(final) != served.get("draft_sha256"):
         out |= set(PROMPT_CHECKS) | {f["kind"] for f in draft_check.findings(final, "", "")}
-    return out
+    return out - set(draft_check.STYLE_KINDS)
 
 
 def decision_record(body: dict) -> dict:

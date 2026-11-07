@@ -22,6 +22,9 @@ After the second round of role-played test sessions (7 Nov) six more were opened
 complaint_reasons, device_lost_negation, second_request_flag) and two drafter changes (drafter_inputs_r2,
 draft_rules_r2). All but draft_rules_r2 became the normal code the same day; draft_rules_r2 stays a flag: it removed the
 singular voice and the stiff words from the drafts, but the judge graded its drafts lower.
+
+Then style_notes was opened and adopted the same day: the two style warnings (a stiff or non-Iraqi word, a singular
+voice) stay found and highlighted, but no longer flag a ready ticket or ask for a tick, since friction follows risk.
 """
 
 from __future__ import annotations
@@ -74,6 +77,9 @@ ADOPTED: dict[str, str] = {
                            "second_request",
     "drafter_inputs_r2": "adopted on 7 Nov 2026 (second round): the amount line reads «1.5 مليون», «2 مليون و 500 الف» and "
                          "«ألف ومئتي» whole; no shop is asked at a cash machine",
+    "style_notes": "adopted on 7 Nov 2026 (after the second round): dialect_words and persona_slip (draft_check.STYLE_KINDS) "
+                   "are style notes; their draft:<kind> flag is kept, but it never moves a drafted ticket to flagged and "
+                   "is never a point to tick",
 }
 
 

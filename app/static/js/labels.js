@@ -78,9 +78,7 @@ export const CONFIRM_AR = dict({
   "draft:repeated_text": { ask: "راجع التكرار بالمسودة", done: "راجعت التكرار، وهو مقصود" },
   // ask_missing names its fields (askMissingAR): this is the wording when it names none.
   "draft:ask_missing": { ask: "المسودة ما تسأل عن كل اللي ناقص", done: "راجعت، وما يحتاج نسأل" },
-  "draft:dialect_words": { ask: "راجع الكلمة اللي مو عراقية", done: "راجعت الكلمة، وهي مقصودة" },
   "draft:amount_not_in_ticket": { ask: "قارن المبلغ اللي بالمسودة بالرسالة", done: "قارنت المبلغ بالرسالة" },
-  "draft:persona_slip": { ask: "المسودة تحجي بصيغة شخص واحد، خليها باسم الفريق", done: "راجعت صيغة المسودة" },
   "draft:asks_given": { ask: "المسودة تسأل عن شي الزبون كاتبه بالرسالة", done: "راجعت السؤال، وهو مقصود" },
   draft_for_other_type: { ask: "المسودة انكتبت لنوع ثاني، راجع إنها تناسب النوع اللي اخترته",
     done: "راجعت إن المسودة تناسب النوع اللي اخترته" },
@@ -131,6 +129,18 @@ export function askMissingAR(fields) {
     lost ? "الزبون ضيّع الوصل، والمسودة تطلب منه رقم العملية" : null].filter(Boolean).join(". ");
   const done = !lost ? CONFIRM_AR["draft:ask_missing"].done : named.length ? "راجعت الأسئلة اللي بالمسودة" : "راجعت طلب رقم العملية، وهو مقصود";
   return { ask, done };
+}
+// A style note (meta.style_kinds: dialect_words, persona_slip) is one muted line under the draft, never a point to tick:
+// friction follows risk, and a tick for a style point teaches agents to tick without reading. It names the words.
+export function styleNoteAR(findings) {
+  const said = (findings || []).map((f) => {
+    const words = Array.isArray(f.words) && f.words.length ? f.words : f.text ? [f.text] : [];
+    const quoted = words.map((w) => `«${w}»`).join("، ");
+    if (f.kind === "dialect_words") return `${words.length > 1 ? "كلمات" : "كلمة"} مو عراقية${quoted ? `: ${quoted}` : ""}`;
+    if (f.kind === "persona_slip") return `الرد يحجي بصيغة المفرد${quoted ? `: ${quoted}` : ""}`;
+    return null;
+  }).filter(Boolean);
+  return said.length ? `ملاحظة صياغة: ${said.join(" · ")}` : "";
 }
 // A quiet flag (meta.quiet_flags) is a muted note under the summary, never a point to tick.
 export const QUIET_AR = dict({ instructions_in_ticket: "بالتذكرة كلام موجّه للنظام، وما انعمل بيه" });

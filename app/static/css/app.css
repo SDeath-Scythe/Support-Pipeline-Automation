@@ -470,6 +470,8 @@ body[data-mode="process"] .intro { display: none; }
 .has-tip.is-dismissed > .tip { visibility: hidden; opacity: 0; transition: none; }   /* same weight as the rules above, and after them */
 .checks-state { font-size: 14px; color: var(--muted); }
 .checks-state.is-bad { color: var(--bad); }
+/* A style note (a stiff or non-Iraqi word, a singular voice): one muted line, never a point to tick. */
+.checks-style { font-size: 14px; color: var(--muted); }
 
 /* The team note: a compact definition list; a long field wraps in its own column. */
 .handoff { background: var(--surface); border: 1px solid var(--line); border-inline-start: 3px solid var(--bad-line); border-radius: var(--radius); padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 8px; }

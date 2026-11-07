@@ -5,7 +5,7 @@
 // an approval re-checks anything newer.
 
 import { checkDraft, ServerError } from "./api.js";
-import { CHECK_SHORT_AR, askMissingAR } from "./labels.js";
+import { CHECK_SHORT_AR, askMissingAR, styleNoteAR } from "./labels.js";
 import { S, draftDone, extractionOf, uid } from "./state.js";
 import { cpToUtf16, debounce, el, icon, realAt, realDraft, shownAt, shownDraft, spanned, withTip } from "./util.js";
 
@@ -20,6 +20,11 @@ export function originalDraft(item) {
 
 export function isBlocking(kind) {
   return (S.meta.blocking_checks || []).includes(kind);
+}
+/** A style note (meta.style_kinds: a stiff or non-Iraqi word, a singular voice): highlighted like a warning and said
+ *  in one muted line under the draft, but never a point to tick or a reason to block an approval. */
+export function isStyle(kind) {
+  return (S.meta.style_kinds || []).includes(kind);
 }
 
 /**
@@ -102,8 +107,11 @@ export function buildComposer(item, onUpdate) {
     if (check === "pending") items.push(el("p", { class: "checks-state", text: "يفحص التعديل…" }));
     if (check === "error") items.push(el("p", { class: "checks-state is-bad" }, error || "ما كدرنا نفحص التعديل.", " ",
       el("button", { type: "button", class: "link-btn", text: "جرب مرة ثانية", onclick: () => checkNow() })));
-    if (findings.length) {   // while a newer check runs, the last answer stays listed (not highlighted)
+    // A style note is not listed as a warning: it is one muted line after the list, and it goes once an edit clears it.
+    const style = findings.filter((f) => isStyle(f.kind));
+    if (findings.length > style.length) {   // while a newer check runs, the last answer stays listed (not highlighted)
       items.push(el("ul", { class: "checks-list", "aria-label": "فحص المسودة" }, findings.map((f, i) => {
+        if (isStyle(f.kind)) return null;
         const block = isBlocking(f.kind);
         const r = ranges(f)[0];
         // ask_missing has nothing in the draft to point at (an empty span at its end): it names the fields.
@@ -121,13 +129,14 @@ export function buildComposer(item, onUpdate) {
         b.addEventListener("blur", () => light(i, false));
         b.addEventListener("click", () => { if (r && checkedText === text) { ta.focus(); ta.setSelectionRange(r[0], r[1]); } });
         return el("li", {}, b);
-      })));
-    } else if (current()) {
+      }).filter(Boolean)));
+    } else if (current() && !style.length) {
       // All clear: a few muted words; what was checked is in their tip (hover, focus, or a tap that pins it).
       const ran = (S.meta.checks_active || []).map((k) => CHECK_SHORT_AR[k] || k);
       const ok = el("button", { type: "button", class: "checks-ok" }, icon("ready"), "ما بيها مشكلة");
       items.push(withTip(ok, `فحصنا المسودة وما لكينا: ${ran.join("، ")}`, { id: "checksTip", tag: "p", cls: "checks-clean" }));
     }
+    if (style.length) items.push(el("p", { id: "styleNote", class: "checks-style", dir: "rtl", text: styleNoteAR(style) }));
     list.replaceChildren(...items);
   }
 

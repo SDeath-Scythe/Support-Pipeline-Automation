@@ -24,7 +24,9 @@
 // blocked-account and SIM-change tickets are «تحتاج تأكيد». Since 7 Nov it serves the run as today's code
 // would decide it for the rules that need no model call (apply_current_rules): six more ready drafts have a
 // draft warning and are «تحتاج تأكيد», so the tab counts were 21 / 6 / 53. After the second round of role-played test
-// sessions the new warnings (persona_slip, more stiff words) and second_request move ten more: 31 / 6 / 43.
+// sessions the new warnings (persona_slip, more stiff words) and second_request move ten more: 31 / 6 / 43. Since
+// style_notes (7 Nov) a style note (a stiff or non-Iraqi word, a singular voice) is one muted line under the draft and
+// never moves a ready ticket: 20 / 6 / 54.
 //
 // Since 5 Nov the inbox is calmer: «ليش؟» is a drawer, closed until the agent opens it; the queue head is
 // the counter and its bar; a row is its priority, id and text (its status is in its name); the ticket has
@@ -49,7 +51,7 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..", "..");
 const PYTHON = process.env.PYTHON || "python";
 const RUN = "saved/test2/final";
-const EXPECT = { flagged: 31, escalated: 6, drafted: 43, total: 80, type: "78/80", priority: "79/80" };
+const EXPECT = { flagged: 20, escalated: 6, drafted: 54, total: 80, type: "78/80", priority: "79/80" };
 const SECRET_ASK = " دزلنا الرمز اللي وصلك";
 const LIVE_NO_KEY = "ماكو مفتاح API";   // «كيف يشتغل»'s cause when there is no key (labels.js LIVE_CAUSE_AR)
 
@@ -1144,23 +1146,77 @@ async function runPass(browser, pass) {
     check("instructions_in_ticket: approved with nothing to acknowledge", dB.ticket_id === quietId && dB.action === "approved"
       && dB.warnings_acknowledged.length === 0, JSON.stringify(dB));
 
-    // The draft warnings behind flags: ask_missing has an empty span (nothing highlighted) and names its fields.
+    // style_notes (7 Nov, after the second round): a stiff or non-Iraqi word or a singular voice is highlighted as before
+    // and said in one muted line under the draft, never a point to tick: a ready ticket with only style notes approves
+    // with one key and the log keeps no tick for it. An edit that takes the words out takes the line away. The real run
+    // has such tickets (the routed copy leaves them as served).
+    {
+      const styleKinds = meta.style_kinds || [];
+      const onlyStyle = (r) => r.result.outcome === "drafted" && (r.result.draft_checks || []).length > 0
+        && r.result.draft_checks.every((x) => styleKinds.includes(x.kind)) && ![secretId, quietId, warnId].includes(r.ticket.id);
+      const cands = open.filter(onlyStyle);
+      const sr = cands.find((r) => new Set(r.result.draft_checks.map((x) => x.kind)).size > 1) || cands[0];
+      check(`style_notes: /api/meta names the style kinds, and «جاهزة» has ready tickets with style notes only (${cands.length})`,
+        styleKinds.join() === "dialect_words,persona_slip" && !styleKinds.some((k) => (meta.ack_kinds || []).includes(k)) && !!sr,
+        JSON.stringify({ styleKinds, n: cands.length }));
+      if (sr) {
+        const sid = sr.ticket.id;
+        const words = sr.result.draft_checks.flatMap((x) => (x.words && x.words.length ? x.words : [x.text]));
+        await openId(f, sid);
+        await checksSettled(f);
+        await shot(f, "style-note");
+        const s1 = await f.evaluate(() => ({ note: document.getElementById("styleNote")?.textContent || "",
+          cls: document.getElementById("styleNote")?.className || "", items: document.querySelectorAll("#draftChecks .check-item").length,
+          marks: [...document.querySelectorAll(".composer-mirror mark.finding")].map((m) => m.textContent),
+          why: document.getElementById("whyLine")?.hidden !== false, tick: !!document.getElementById("ackBox"),
+          tab: document.querySelector('[role=tab][aria-selected="true"]')?.dataset.tab,
+          approve: document.getElementById("approveBtn")?.getAttribute("aria-disabled") || null }));
+        check(`style_notes: ${sid} is in «جاهزة»; its style notes are one muted line naming ${words.map((w) => `«${w}»`).join("، ")}, still highlighted, with no warning item, banner or tick`,
+          s1.tab === "drafted" && s1.note.startsWith("ملاحظة صياغة: ") && s1.cls === "checks-style"
+          && words.every((w) => s1.note.includes(`«${w}»`) && s1.marks.includes(w))
+          && s1.items === 0 && s1.why && !s1.tick && s1.approve !== "true", JSON.stringify(s1));
+        let cleaned = sr.result.draft_ar;
+        for (const [a, b] of sr.result.draft_checks.flatMap((x) => x.spans || [[x.start, x.end]]).sort((p, q) => q[0] - p[0])) {
+          cleaned = cleaned.slice(0, a) + cleaned.slice(b);
+        }
+        await f.fill("#draft", cleaned);
+        await checksSettled(f);
+        await sleep(200);
+        const s2 = await f.evaluate(() => ({ note: !!document.getElementById("styleNote"), ok: !!document.querySelector("#draftChecks .checks-ok"),
+          marks: document.querySelectorAll(".composer-mirror mark.finding").length }));
+        check("style_notes: an edit that takes the words out takes the line and the highlights away («ما بيها مشكلة»)",
+          !s2.note && s2.ok && s2.marks === 0, JSON.stringify(s2));
+        await f.click(".composer-head .link-btn");   // «رجّع المسودة الأصلية»
+        await checksSettled(f);
+        await sleep(150);
+        check("style_notes: back to the original draft, the line is back", (await t(f, "#styleNote")).startsWith("ملاحظة صياغة: "));
+        const dS = await fAct(() => f.keyboard.press("Control+Enter"), "the one-key approve of a ready ticket with a style note");
+        check(`style_notes: ${sid} approves with one key (Ctrl+Enter), logged as served (drafted, its draft:<kind> flags) with no tick`,
+          dS.ticket_id === sid && dS.action === "approved" && dS.pipeline_outcome === "drafted" && dS.warnings_acknowledged.length === 0
+          && sr.result.draft_checks.every((x) => dS.flags.includes(`draft:${x.kind}`)), JSON.stringify(dS));
+      }
+    }
+
+    // The draft warnings behind flags: ask_missing has an empty span (nothing highlighted) and names its fields;
+    // dialect_words, a style note (style_notes), is highlighted and said in the muted line, never a point to tick.
     await openId(f, warnId);
     await checksSettled(f);
     await shot(f, "flag-warnings");
     const cw = await f.evaluate(() => ({
       marks: [...document.querySelectorAll(".composer-mirror mark.finding")].map((m) => m.textContent),
       items: [...document.querySelectorAll("#draftChecks .check-item")].map((b) => b.textContent),
+      style: document.getElementById("styleNote")?.textContent || "",
       box: document.getElementById("confirmBox")?.textContent || "" }));
-    check("ask_missing: nothing highlighted, the checks and the tick name its fields; dialect_words highlights the word",
-      cw.marks.length === 1 && cw.marks[0] === firstWord && cw.items.length === 2 && !cw.items.some((x) => x.includes("«»"))
+    check("ask_missing: nothing highlighted, the checks and the tick name its fields; dialect_words highlights the word and is the muted line, not a point",
+      cw.marks.length === 1 && cw.marks[0] === firstWord && cw.items.length === 1 && !cw.items.some((x) => x.includes("«»"))
       && cw.items.some((x) => x.includes("المسودة ما تسأل عن: المبلغ") && x.includes("الزبون ضيّع الوصل"))
-      && cw.box.includes("المسودة ما تسأل عن: المبلغ") && cw.box.includes("راجع الكلمة اللي مو عراقية"), JSON.stringify(cw));
+      && cw.style === `ملاحظة صياغة: كلمة مو عراقية: «${firstWord}»`
+      && cw.box.includes("المسودة ما تسأل عن: المبلغ") && !cw.box.includes("عراقية"), JSON.stringify(cw));
     await f.check("#ackBox");
-    const dC = await fRefused(() => f.click("#approveBtn"), "the approve with the draft warnings ticked");
-    check("ask_missing and dialect_words: the page sends them as kinds; the server refuses warnings it never served on this draft (400)",
+    const dC = await fRefused(() => f.click("#approveBtn"), "the approve with the draft warning ticked");
+    check("ask_missing: the page sends it as a kind, and no tick for the style note; the server refuses a warning it never served on this draft (400)",
       dC.status === 400 && !dC.logged && dC.sent.ticket_id === warnId
-      && JSON.stringify(dC.sent.warnings_acknowledged) === '["ask_missing","dialect_words"]', JSON.stringify(dC));
+      && JSON.stringify(dC.sent.warnings_acknowledged) === '["ask_missing"]', JSON.stringify(dC));
     // R17: the line at the top follows the checks: an edit the server finds clean takes the draft's sentence away.
     {
       const before = await f.evaluate(() => ({ text: document.getElementById("whyLine")?.textContent || "", hidden: !!document.getElementById("whyLine")?.hidden }));
@@ -1358,9 +1414,11 @@ async function runPass(browser, pass) {
       await typeAtEnd(s, " نرجو تنتظر، وكذلك راجع التطبيق بالأمس.");
       await checksSettled(s);
       const dw = await s.evaluate(() => ({ marks: [...document.querySelectorAll(".composer-mirror mark.finding")].map((m) => m.textContent),
-        items: [...document.querySelectorAll("#draftChecks .check-item")].map((b) => b.textContent).join(" | ") }));
-      check("R21: dialect_words marks and names every word in an edit («نرجو»، «وكذلك»، «بالأمس»)",
-        ["نرجو", "وكذلك", "بالأمس"].every((w) => dw.marks.includes(w)) && dw.items.includes("«نرجو»، «وكذلك»، «بالأمس»"), JSON.stringify(dw));
+        items: [...document.querySelectorAll("#draftChecks .check-item")].map((b) => b.textContent).join(" | "),
+        style: document.getElementById("styleNote")?.textContent || "", tick: document.getElementById("confirmBox")?.textContent || "" }));
+      check("R21: dialect_words marks and names every word in an edit («نرجو»، «وكذلك»، «بالأمس»), in the muted style line, with no tick for it",
+        ["نرجو", "وكذلك", "بالأمس"].every((w) => dw.marks.includes(w)) && dw.style.includes("كلمات مو عراقية: «نرجو»، «وكذلك»، «بالأمس»")
+        && !dw.items.includes("نرجو") && !dw.tick.includes("عراقية"), JSON.stringify(dw));
       await s.click("#reasonBox summary");
       const chips = await s.evaluate(() => [...document.querySelectorAll(".reason-chip")].map((c) => c.textContent));
       check("R32: the reasons offer «بيه غلط إملائي أو حروف زايدة», «يخاطب الزبون بغير جنسه» and «مو بلغة الزبون»",
@@ -2391,10 +2449,11 @@ async function runFresh(browser, pass) {
     const goldRow = await pr.evaluate(() => [...document.querySelectorAll(".trace .gold tbody tr")].find((r) => r.querySelector("th")?.textContent === "النتيجة")?.textContent || "");
     const resBox = await t(pr, "#pResult .result");
     // 7 Nov: six ready drafts with a draft warning were «تحتاج تأكيد» (74 → 68); the second round's warnings and
-    // second_request move ten more (68 → 58). The gold file says «جاهزة».
-    check(`«كيف يشتغل»: outcome 58/80 by the 5 Nov rule and the 7 Nov rules, said in the overview, and ${rk}'s expected «تحتاج تأكيد» with ✓ and the note`,
-      outcomeStat === "58/80" && ruleNote.includes("6 تذاكر حساب مقفول أو تبديل شريحة") && ruleNote.includes("انعلّمت هسه بنفس القاعدة")
-      && ruleNote.includes("قواعد 7 تشرين الثاني") && ruleNote.includes("24 تذكرة انضافتلها علامة") && ruleNote.includes("16 تذكرة كانت «جاهزة» وصارت «تحتاج تأكيد»")
+    // second_request moved ten more (68 → 58). Since style_notes a style note moves none: five ready tickets move (an
+    // amount, ask_missing, second_request), 74 → 69. The gold file says «جاهزة».
+    check(`«كيف يشتغل»: outcome 69/80 by the 5 Nov rule and the 7 Nov rules, said in the overview, and ${rk}'s expected «تحتاج تأكيد» with ✓ and the note`,
+      outcomeStat === "69/80" && ruleNote.includes("6 تذاكر حساب مقفول أو تبديل شريحة") && ruleNote.includes("انعلّمت هسه بنفس القاعدة")
+      && ruleNote.includes("قواعد 7 تشرين الثاني") && ruleNote.includes("24 تذكرة انضافتلها علامة") && ruleNote.includes("5 تذاكر كانت «جاهزة» وصارت «تحتاج تأكيد»")
       && goldRow.includes("تحتاج تأكيد (قاعدة 5 تشرين الثاني)") && goldRow.includes("✓") && !goldRow.includes("✗")
       && resBox.includes("أقدم من قاعدة 5 تشرين الثاني"), `${outcomeStat} | ${ruleNote} | ${goldRow} | ${resBox.slice(0, 300)}`);
     await done(pr, "account-risk");

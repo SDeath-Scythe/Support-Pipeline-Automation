@@ -22,6 +22,10 @@ from .clean import CREDENTIAL, clean, fold, sensitive_numbers
 KINDS = ("stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number",
          "claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket", "persona_slip",
          "asks_given")
+# Style points, not risks: a stiff or non-Iraqi word, a singular voice. They run, return spans and are highlighted
+# like every kind, but never flag a drafted ticket and are never a point to tick (run.py, the server and the page
+# read this; style_notes, after the second round of role-played test sessions).
+STYLE_KINDS = ("dialect_words", "persona_slip")
 # Warnings under test, each behind the flag of the same name in fixes.py: off, they never appear. None now.
 FLAG_KINDS: tuple[str, ...] = ()
 # A kind whose flag has another name.
