@@ -825,7 +825,7 @@ def test_held_out_false_alarms_are_not_asking(text):
     assert not _asks(text)
 
 
-# User tests (7 Nov, T04): the code described as "the digits that reached you" or "the message you got", and English
+# Role-played test sessions (7 Nov, T04): the code described as "the digits that reached you" or "the message you got", and English
 # requests with other verbs. Each is paired with its warning or negated form.
 @pytest.mark.parametrize("text, asks", [
     ("هلا بيك، ونحتاج الأرقام الستة اللي وصلتك على تلفونك حتى نوقف الحوالة.", True),
@@ -1160,7 +1160,7 @@ def test_known_facts_are_the_lines_the_drafter_gets(monkeypatch):
     assert "Known facts: " + "; ".join(facts) in draft.user_prompt("…", _ex(), "transfers")
 
 
-# --- the draft warnings from the 7 Nov user tests (flags until they were adopted the same day) ---
+# --- the draft warnings from the 7 Nov role-played test sessions (flags until they were adopted the same day) ---
 
 def _flagged(monkeypatch, kind: str, text: str, allowed: str = "") -> list[str]:
     return [k for k in problems(text, allowed or "… " + text) if k == kind]
@@ -1287,7 +1287,7 @@ def test_the_new_warnings_run_with_no_flag():
     assert NEW_WARNINGS <= set(draft_check.KINDS) and draft_check.FLAG_KINDS == ()
 
 
-# --- ticket_rules.py: the code rules on the customer's text (from the 7 Nov user tests, adopted the same day) ---
+# --- ticket_rules.py: the code rules on the customer's text (from the 7 Nov role-played test sessions, adopted the same day) ---
 
 @pytest.mark.parametrize("text, rule, want", [
     ("ضاع موبايلي والمحفظة بيه مفتوحة", "device_lost", True),
@@ -1619,3 +1619,42 @@ def test_asks_given_a_bill_type_the_ticket_names():
     f = [x for x in findings("ممكن تكتب لنا نوع الفاتورة؟", allowed) if x["kind"] == "asks_given"]
     assert f and f[0]["text"] == "نوع الفاتورة"
     assert "asks_given" not in problems("ممكن تكتب لنا نوع الفاتورة؟", _prompt("دفعت فاتورة وما وصلت", "", "نوع الفاتورة"))
+
+
+# --- the drafter flags from the second round of role-played test sessions (fixes.py) ---
+
+@pytest.mark.parametrize("text, ex, want", [
+    ("حولت 1.5 مليون دينار لاخوي وما وصلت", {"amount_iqd": 1500000}, "Amount: 1,500,000 IQD"),
+    ("حولت 2 مليون و 500 الف لاخوي وما وصلت", {"amount_iqd": 2500000}, "Amount: 2,500,000 IQD"),
+    ("أرسلت حوالة بقيمة ألف ومئتي دولار ولم تصل", {"amount_usd": 1200}, "«ألف ومئتي دولار»"),
+])
+def test_drafter_inputs_r2_reads_the_whole_amount(monkeypatch, text, ex, want):
+    """R05 (drafter_inputs_r2, adopted): the drafter was told «5 مليون» for «1.5 مليون», «2 مليون» for «2 مليون و 500 الف»,
+    «ألف» for «ألف ومئتي دولار»."""
+    e = Extraction(category="transfers", subcategory="not_received", confidence=0.9, **ex)
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert want in draft.amount_line(text, e)
+
+
+def test_drafter_inputs_r2_asks_no_shop_at_a_cash_machine(monkeypatch):
+    """R19 (drafter_inputs_r2, adopted): a card that fails at the ATM was asked for «اسم المتجر» (cx N04)."""
+    e = Extraction(category="cards", subcategory="card_payment_failed", confidence=0.9)
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert draft.ask_for(e, "الصراف الآلي ما يقبل بطاقتي") == ["amount"]
+    assert draft.ask_for(e, "البطاقة ترفض بكل مكان") == ["amount"]
+    assert draft.ask_for(e, "دفعت بالبطاقة بمحل وما مشت") == ["amount", "merchant"]
+    assert draft.ask_for(e) == ["amount", "merchant"]
+
+
+def test_draft_rules_r2_tells_the_drafter_about_a_secret_and_swaps_the_prompt(monkeypatch):
+    """R09: the drafter was never told the customer wrote a secret; R20, R21, R22, R34 are prompt rules."""
+    e = Extraction(category="transfers", subcategory="not_received", confidence=0.9)
+    text = "البطاقة اللي عندي رقمها 4211 7781 0093 5526 والرقم السري مالها 1958"
+    monkeypatch.delenv("PIPELINE_FIXES", raising=False)
+    assert "Security:" not in draft.user_prompt(text, e, "transfers") and "Security:" not in draft.system_prompt()
+    monkeypatch.setenv("PIPELINE_FIXES", "draft_rules_r2")
+    line = next(x for x in draft.user_prompt(text, e, "transfers").split("\n") if x.startswith("Security:"))
+    assert line == "Security: the customer wrote a card number, their PIN in the ticket. Never repeat it. Advise them to stop the card and change their PIN."
+    assert "1958" not in line and "4211" not in line
+    prompt = draft.system_prompt()
+    assert "Security:" in prompt and "«فهمنا»" in prompt and "هلا وغلا" in prompt and "«أما طلب …»" in prompt

@@ -730,7 +730,7 @@ def test_meta_names_the_blocking_checks_and_explains_every_kind(srv):
     assert list(meta["check_ar"]) == list(draft_check.KINDS + draft_check.FLAG_KINDS) and draft_check.FLAG_KINDS == ()
     for kind, text in meta["check_ar"].items():
         assert text == FLAG_AR[f"draft:{kind}"] and "\n" not in text and any("؀" <= ch <= "ۿ" for ch in text)
-    # every rule runs (hold_reason and sensitive_number since 5 Nov, the user-test warnings since 7 Nov), so
+    # every rule runs (hold_reason and sensitive_number since 5 Nov, the warnings from the role-played test sessions since 7 Nov), so
     # «ما لكينا» names them all
     assert meta["checks_active"] == list(draft_check.KINDS) == [
         "stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number",

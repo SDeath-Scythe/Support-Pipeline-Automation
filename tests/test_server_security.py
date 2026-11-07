@@ -732,7 +732,7 @@ def test_an_approval_of_a_blocked_account_or_a_sim_change_without_the_identity_t
         srv, tmp_path, live, served, over, action):
     """5 Nov review: a hand-made request (or a stale page) could approve without the identity tick. Nothing
     is logged; with the tick it is; taking the ticket over needs none (no reply is approved). The flag is
-    the one the server served, whatever the request says (user tests, 7 Nov)."""
+    the one the server served, whatever the request says (role-played test sessions, 7 Nov)."""
     final = {"final_text": DRAFT} if action == "approved" else {}
     ids = [live(flags=served, outcome="flagged" if served else "drafted") for _ in range(3)]
     status, _, body = call(srv, "POST", "/api/decision", _decision(ticket_id=ids[0], action=action, **final, **over))
@@ -798,7 +798,7 @@ def _saved_body(ticket_id, **over):
 @pytest.mark.parametrize("ticket_id", ["t2-0025", "t2-0045"])   # fraud escalations, no draft
 @pytest.mark.parametrize("action", ["approved", "edited"])
 def test_an_escalated_ticket_cannot_be_approved_whatever_the_request_says_409(srv, tmp_path, ticket_id, action):
-    """User tests, 7 Nov (T03): t2-0025 was logged as approved / drafted / no flags because the request said so.
+    """Role-played test sessions, 7 Nov (T03): t2-0025 was logged as approved / drafted / no flags because the request said so.
     The outcome and flags are the served ones; an escalation is only forwarded or taken over."""
     status, _, raw = call(srv, "POST", "/api/decision", _saved_body(ticket_id, action=action, draft_text=None, final_text=FINAL))
     assert status == 409 and json.loads(raw)["conflict"] == "escalated"
@@ -819,7 +819,7 @@ def test_a_correction_to_a_type_that_is_never_drafted_cannot_be_approved_409(srv
 
 
 def test_a_ticket_or_a_draft_the_server_did_not_serve_is_refused_400(srv, tmp_path, live):
-    """User tests, 7 Nov (T03): t2-9999 and live-1 were logged though no such ticket was served."""
+    """Role-played test sessions, 7 Nov (T03): t2-9999 and live-1 were logged though no such ticket was served."""
     for body in ({**_saved_body("t2-0002"), "ticket_id": "t2-9999"}, _decision(ticket_id="live-1"),
                  _decision(run=SAVED, ticket_id=live())):      # a live id is not a saved run's ticket
         status, _, raw = call(srv, "POST", "/api/decision", body)
@@ -860,7 +860,7 @@ def test_a_live_run_cut_short_can_be_taken_over_but_not_approved(srv, live):
 
 
 def test_a_second_decision_on_a_live_ticket_is_refused_409(srv, live):
-    """User tests, 7 Nov (T11): every live ticket was «live-1». Now each run has its own id from the
+    """Role-played test sessions, 7 Nov (T11): every live ticket was «live-1». Now each run has its own id from the
     server, so a second decision on one is refused like on a saved run."""
     a, b = live(), live()
     assert a != b
@@ -881,7 +881,7 @@ def test_the_live_registry_keeps_hashes_only_and_a_bounded_number(srv, live, mon
 
 
 def test_every_confirm_kind_the_page_ticks_is_accepted_and_nothing_free_form(srv, live):
-    """User tests, 7 Nov (T28): a missing reference and the type after a disagreement were ticked but not
+    """Role-played test sessions, 7 Nov (T28): a missing reference and the type after a disagreement were ticked but not
     logged. The kinds are an allow-list; /api/meta gives it to the page."""
     kinds = json.loads(call(srv, "GET", "/api/meta")[2])["ack_kinds"]
     assert kinds == list(server.ACK_KINDS)
@@ -900,13 +900,13 @@ def test_every_confirm_kind_the_page_ticks_is_accepted_and_nothing_free_form(srv
 
 
 # The flags of the code rules on the customer's text (run.py; flags until 7 Nov) that the page asks the agent
-# to tick, and the draft warnings from the same user tests (draft_check.KINDS since 7 Nov), which never block.
+# to tick, and the draft warnings from the same role-played test sessions (draft_check.KINDS since 7 Nov), which never block.
 TEXT_RULE_POINTS = ("secret_in_ticket", "bidi_controls", "amount_disagreed", "other_phone", "complaint_risk")
 NEW_WARNINGS = ("claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket")
 
 
 def test_the_new_flags_and_draft_warnings_are_ticked_as_kinds_and_the_quiet_flag_needs_none(srv, live):
-    """The 7 Nov lanes merged: the draft warnings from the user tests and the confirm points of the code rules
+    """The 7 Nov lanes merged: the draft warnings from the role-played test sessions and the confirm points of the code rules
     on the customer's text are kinds the page ticks and the log keeps; instructions_in_ticket is a quiet note,
     never a point, so no tick is asked for it and none is taken."""
     from pipeline import draft_check
@@ -963,7 +963,7 @@ def test_a_ticket_flagged_by_a_text_rule_keeps_its_draft_where_the_decision_chec
 
 
 def test_a_second_request_the_page_asks_about_is_logged_as_a_kind(srv, live):
-    """User tests, 7 Nov (T07, page part): a drafted ticket with a second request asks the agent to read
+    """Role-played test sessions, 7 Nov (T07, page part): a drafted ticket with a second request asks the agent to read
     what the reply says of it; the tick is logged as second_request, never as text."""
     acked = ["second_request", "missing:reference:not_needed"]
     n = live(flags=["missing:reference"], outcome="flagged",

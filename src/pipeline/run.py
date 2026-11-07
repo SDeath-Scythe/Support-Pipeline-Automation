@@ -69,7 +69,7 @@ FLAG_AR = {
     "draft:unknown_number": "المسودة بيها رقم مو موجود بالتذكرة أو المعلومات",
     "draft:hold_reason": "المسودة تذكر تحقيق أو اشتباه أو بلاغ: لا تعتمدها، ممنوع نخبر الزبون",
     "draft:sensitive_number": "المسودة تكرر رقم بطاقة أو رمز: احذفه قبل الاعتماد",
-    # The draft warnings from the 7 Nov user tests (adopted the same day).
+    # The draft warnings from the 7 Nov role-played test sessions (adopted the same day).
     "draft:claims_done": "المسودة تگول شي انسوى وإحنا ما سويناه: تأكد قبل الاعتماد",
     "draft:repeated_text": "المسودة بيها ترحيب أو جملة مكررة",
     "draft:ask_missing": "المسودة ما تسأل عن كل اللي ناقص",
@@ -510,7 +510,7 @@ def process(raw_text: str, emit: Emit = lambda e: None,
 
         # 6. Draft (drafter model), then rule checks on it
         send("draft", "running", {"model": model_for("drafter"), "backend": backend(),
-                                  "ask_for": drf.ask_for(ex)})
+                                  "ask_for": drf.ask_for(ex, text)})
         t0 = time.time()
         user = drf.user_prompt(text, ex, team)
         check_stop()
@@ -533,7 +533,7 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         flags += [f"draft:{p}" for p in checks]
         send("draft", "done", {"model": model_for("drafter"), "backend": backend(),
                                "seconds": round(time.time() - t0, 1), "user_prompt": user, "reply": reply,
-                               "ask_for": drf.ask_for(ex), "checks": checks, "check_spans": spans,
+                               "ask_for": drf.ask_for(ex, text), "checks": checks, "check_spans": spans,
                                "check_kinds": list(draft_check.kinds_on()), "usage": last_usage()})
 
         outcome = Outcome.FLAGGED if flags else Outcome.DRAFTED

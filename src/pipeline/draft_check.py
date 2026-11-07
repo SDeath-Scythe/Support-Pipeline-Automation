@@ -1394,7 +1394,7 @@ def _sensitive_number(norm: str, pos: list[int]) -> tuple[int, int] | None:
     return _raw(pos, spans[0][0], spans[0][1]) if spans else None
 
 
-# --- the warnings from the 7 Nov user tests (flags until they were adopted the same day) ---
+# --- the warnings from the 7 Nov role-played test sessions (flags until they were adopted the same day) ---
 
 # claims_done: the draft says something is already done that the tool cannot have done: «تم إرجاع المبلغ»,
 # «رجعنالك المبلغ», «سجلنا شكواك», «شكواك فسجلناها», «تم تغيير الرقم», «فتحنا الحساب». Forwarding is what the tool does,
@@ -1597,7 +1597,7 @@ def _ask_missing(draft: str, allowed_text: str) -> tuple[int, int] | None:
 
 
 # dialect_words: a word from another dialect or from stiff standard Arabic (the dataset generator's drift list in
-# scripts/generate_tickets.py, and the words the user tests found in drafts). Whole words only, after one و/ف/ب/ل.
+# scripts/generate_tickets.py, and the words the role-played test sessions found in drafts). Whole words only, after one و/ف/ب/ل.
 _DRIFT_WORDS = {
     "بدي", "بدك", "بدو", "هيك", "كتير", "منيح", "هلق", "بقدر", "مابقدر", "شو", "قديش",       # Levantine
     "وايد", "ابغي", "ابغا", "عشان", "علشان", "توصلنا",                                       # Gulf

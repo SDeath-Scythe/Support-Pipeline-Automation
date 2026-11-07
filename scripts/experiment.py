@@ -33,8 +33,10 @@ from pipeline.requirements import REFERENCE_ALTERNATIVES, REFERENCE_NOT_NEEDED  
 
 # Short codes for the flags in pipeline/fixes.py, e.g. "F22": "some_fix". The adopted fixes (F2-F21, see
 # docs/experiments/LOG.md) are the normal code and the rest were deleted (30 Oct). F22-F33, opened after the
-# 7 Nov user tests, became the normal code the same day; F34 is still under test.
-CODES: dict[str, str] = {"F34": "summary_qualifiers"}
+# 7 Nov role-played test sessions, became the normal code the same day; F34 is still under test. F35-F38 (secret_forms,
+# complaint_reasons, device_lost_negation, second_request_flag), opened after the second round of sessions, became the
+# normal code the same day, and so did F40 (drafter_inputs_r2); F39 (draft_rules_r2) is still under test.
+CODES: dict[str, str] = {"F34": "summary_qualifiers", "F39": "draft_rules_r2"}
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"
 JUDGE_PROMPT = (ROOT / "scripts/prompts/judge_draft.md").read_text(encoding="utf-8")

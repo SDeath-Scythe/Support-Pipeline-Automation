@@ -126,7 +126,7 @@ def test_stylesheets_load_nothing_from_another_site():
 
 def test_only_preferences_go_to_local_storage():
     """Ticket text, drafts and edits stay in memory: the one stored key holds four preferences (since the
-    7 Nov user tests not the mode: every visit starts in the inbox). The phone's history entry for a ticket
+    7 Nov role-played test sessions not the mode: every visit starts in the inbox). The phone's history entry for a ticket
     holds its id only."""
     util = (STATIC / "js" / "util.js").read_text(encoding="utf-8")
     assert util.count("localStorage.setItem") == 1

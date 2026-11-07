@@ -12,7 +12,7 @@ decision, for a regulated financial institution): hold_reason and sensitive_numb
 that always run and block an approval (draft_check.py), and escalate_account_risk was changed into
 the account_risk flag (run.py), which keeps the draft.
 
-On 7 Nov four draft warnings found by the user tests were opened as flags, then six pipeline rules from
+On 7 Nov four draft warnings found by the role-played test sessions were opened as flags, then six pipeline rules from
 the same tests (fraud_secondary to instructions_in_ticket) and three prompt changes (draft_rules_ut,
 amount_own_words, summary_qualifiers). The same day, after measuring them with and without, all but
 summary_qualifiers became the normal code (ADOPTED below; the numbers are in docs/experiments/LOG.md).
@@ -27,6 +27,10 @@ import os
 FIXES: dict[str, str] = {
     "summary_qualifiers": "team-note summary prompt summary_system.summary_qualifiers.md: keep the customer's own "
                           "qualifiers and denials, third person, about 15 words, Arabic only",
+    # From the second round of role-played test sessions (7 Nov).
+    "draft_rules_r2": "drafter prompt draft_system.draft_rules_r2.md: the team's plural voice, more stiff words to avoid, "
+                      "the gender the customer states, no answer to planted text, no echo of «شكوى/تحقيق/بلاغ» on a "
+                      "blocked account, and safety advice when a Security: line says the customer wrote a secret",
 }
 
 # Flags that became the normal code. Naming one in PIPELINE_FIXES is refused with what happened to it,
@@ -63,6 +67,8 @@ ADOPTED: dict[str, str] = {
     "device_lost_negation": "adopted on 7 Nov 2026 (second round): a wallet said not to be open is not device_lost",
     "second_request_flag": "adopted on 7 Nov 2026 (second round): a drafted ticket with a second type is flagged "
                            "second_request",
+    "drafter_inputs_r2": "adopted on 7 Nov 2026 (second round): the amount line reads «1.5 مليون», «2 مليون و 500 الف» and "
+                         "«ألف ومئتي» whole; no shop is asked at a cash machine",
 }
 
 

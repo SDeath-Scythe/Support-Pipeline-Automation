@@ -915,7 +915,7 @@ def test_run_batch_refuses_a_bad_budget(monkeypatch, tmp_path):
     assert not out.exists()
 
 
-# --- contract K: the pipeline rules from the 7 Nov user tests (flags until they were adopted the same day) ---
+# --- contract K: the pipeline rules from the 7 Nov role-played test sessions (flags until they were adopted the same day) ---
 
 CARD_PIN = ("مساء الخير، الصراف الآلي بلع بطاقتي اليوم.\nرقم البطاقة 6273 9501 8342 7767 والرقم السري مالتي 4829 "
             "حتى تتأكدون انها الي.")

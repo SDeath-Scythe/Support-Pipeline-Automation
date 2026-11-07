@@ -133,7 +133,7 @@ function readDecisions(file) {
   try { return fs.readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; }
 }
 
-/** T06 (user tests, 7 Nov): a ticket just on screen can't be decided for a moment (its action bar says
+/** T06 (role-played test sessions, 7 Nov): a ticket just on screen can't be decided for a moment (its action bar says
  *  data-settling meanwhile). Wait until it can. */
 const settled = (p) => waitUntil(() => p.evaluate(() => !document.querySelector("#actionBar[data-settling]")), 4000, "the ticket to settle");
 
@@ -502,7 +502,7 @@ async function runPass(browser, pass) {
         && tickNow === "تأكدت من هوية الزبون وراجعت باقي النقاط" && lineNow.startsWith("تحتاج تأكيد: حساب مقفول أو تبديل شريحة.")
         && !afterBox.includes("هوية") && !(await t(p, "#whyLine")).includes("هوية"),
         `${alt} | ${JSON.stringify(items)} | ${tickNow} | ${lineNow} | ${afterBox}`);
-      // T23 (user tests, 7 Nov): a refused approve for the tick alone shows no toast (on a phone it sat on
+      // T23 (role-played test sessions, 7 Nov): a refused approve for the tick alone shows no toast (on a phone it sat on
       // the tick it asked for): «أشّر على …» under the buttons is no longer quiet, the focus is on the tick.
       await p.evaluate(() => document.activeElement?.blur());
       await p.keyboard.press("Control+Enter");
@@ -661,7 +661,7 @@ async function runPass(browser, pass) {
     const [st2] = await post({ ...base, action: "took_over" });
     const [st3, j3] = await post({ ...base, action: "took_over" });
     check("SEC-1 / F8: the server refuses a secret request (409) and a second decision on one ticket (409)", st1 === 409 && st2 === 200 && st3 === 409 && j3.conflict === "decided", `${st1} ${st2} ${st3}`);
-    // T03 (user tests, 7 Nov): a ticket the run does not have, a draft it did not serve, and an escalation
+    // T03 (role-played test sessions, 7 Nov): a ticket the run does not have, a draft it did not serve, and an escalation
     // approved by a hand-made request are refused; nothing is logged.
     const esc = run.tickets.find((r) => r.result.outcome === "escalated" && !decidedIds().has(r.ticket.id))?.ticket.id;
     const nLog = decisions().length;
@@ -764,7 +764,7 @@ async function runPass(browser, pass) {
     await p2.close();
   }
 
-  /** User tests, 7 Nov: the inbox's flow and corrections (T06, T07, T12, T24, T25, T29, T35, T38, T42). */
+  /** Role-played test sessions, 7 Nov: the inbox's flow and corrections (T06, T07, T12, T24, T25, T29, T35, T38, T42). */
   async function flowFixes() {
     const p = await freshPage("flow");
     const pAct = async (fn, what) => {
@@ -905,7 +905,7 @@ async function runPass(browser, pass) {
     await p.close();
   }
 
-  /** User tests, 7 Nov: bidi, keys, reasons, help and live tickets (T10, T27, T30, T31, T32, T33, T34). */
+  /** Role-played test sessions, 7 Nov: bidi, keys, reasons, help and live tickets (T10, T27, T30, T31, T32, T33, T34). */
   async function pageFixes() {
     const p = await freshPage("page");
     const pAct = async (fn, what) => {
@@ -1399,7 +1399,7 @@ async function runPass(browser, pass) {
     const bh = await p.evaluate(() => [document.getElementById("actionBar").getBoundingClientRect().height, parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar-h"))]);
     check("A11Y-1: --bar-h follows the phone action bar", Math.abs(bh[0] - bh[1]) <= 2, JSON.stringify(bh));
 
-    // T22 (user tests, 7 Nov): a ticket opened from the queue is a history entry holding its id only; the
+    // T22 (role-played test sessions, 7 Nov): a ticket opened from the queue is a history entry holding its id only; the
     // back gesture comes back to the queue, on the page; «القائمة» goes back through that entry too.
     {
       const hist = await p.evaluate(() => ({ state: JSON.stringify(history.state), url: location.href, screen: document.body.dataset.screen }));
@@ -1640,7 +1640,7 @@ async function runPass(browser, pass) {
         check("phone: the toast's «تراجع» has no Ctrl+Z hint (J9)", kd === "none", kd);
       }
       const approvedId = decisions().at(-1).id;
-      // T29 (user tests, 7 Nov): on another ticket, Ctrl+Z first names the last decision and asks; a second
+      // T29 (role-played test sessions, 7 Nov): on another ticket, Ctrl+Z first names the last decision and asks; a second
       // Ctrl+Z (or the toast's «تراجع») takes it back.
       let asked = "";
       const d = await act(async () => {
@@ -1698,7 +1698,7 @@ async function runPass(browser, pass) {
       if (pass.phone) {
         await page.check("#ackBox");
       } else {
-        // T21 (user tests, 7 Nov): the refusal puts the focus on the box itself, so Space ticks it; X ticks
+        // T21 (role-played test sessions, 7 Nov): the refusal puts the focus on the box itself, so Space ticks it; X ticks
         // and unticks it from outside a text field.
         const focused = await page.evaluate(() => document.activeElement?.id);
         const ticked = () => page.evaluate(() => document.getElementById("ackBox").checked);
@@ -1727,7 +1727,7 @@ async function runPass(browser, pass) {
       check(`flagged ${k2} [${k2Flags.join(", ")}]: the log line keeps its flags as served and each point ticked (warnings_acknowledged)`,
         k2Points.length > 0 && JSON.stringify(d.flags) === JSON.stringify(k2Flags)
         && JSON.stringify(d.warnings_acknowledged) === JSON.stringify(k2Points), JSON.stringify(d));
-      // T13 (user tests, 7 Nov): a P1 escalation waits, more urgent than every flagged P2. The inbox stays
+      // T13 (role-played test sessions, 7 Nov): a P1 escalation waits, more urgent than every flagged P2. The inbox stays
       // in «تحتاج تأكيد» and says so in one quiet line above the ticket; «روح لـ…» goes there.
       const note = await text("#urgentNote");
       check("T13: after the flagged approve the inbox stays in «تحتاج تأكيد»; a quiet line says an urgent ticket waits in «متصعّدة»",
@@ -2520,7 +2520,7 @@ async function runFresh(browser, pass) {
     check(`each move to another tab was said in the toast (${moved} times)`, moved >= 1, String(moved));
     check(`T13: «روح لـ…» showed (${noteSeen} times), was followed from «${cameFrom}», and the inbox came back there when that tab was empty`,
       noteSeen > 0 && cameFrom && returned === cameFrom, JSON.stringify({ noteSeen, cameFrom, returned }));
-    // T28 (user tests, 7 Nov): each approved flagged ticket logs the points ticked for it, the missing
+    // T28 (role-played test sessions, 7 Nov): each approved flagged ticket logs the points ticked for it, the missing
     // field and the type after a disagreement included, as kinds.
     const points = decisions().filter((d) => ["approved", "edited"].includes(d.action) && d.pipeline_outcome === "flagged");
     const unlogged = points.filter((d) => d.flags.some((f) => (f === "recheck_used_second" || f.startsWith("missing:"))

@@ -711,7 +711,7 @@ def meta() -> dict:
 
 def checks_active() -> list[str]:
     """The draft_check kinds that run now, for the page's "nothing found" line: every KINDS rule
-    (hold_reason and sensitive_number since 5 Nov, the five user-test warnings since 7 Nov, when they
+    (hold_reason and sensitive_number since 5 Nov, the five warnings from the role-played test sessions since 7 Nov, when they
     stopped being flags), and each warning behind a flag (FLAG_KINDS) while its flag is on."""
     return list(draft_check.kinds_on())
 
