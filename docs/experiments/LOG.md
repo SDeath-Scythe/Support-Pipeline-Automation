@@ -1,10 +1,65 @@
-# Results log: fix experiments, 20 Oct 2026
+# Results log: fix experiments
 
-Method: [README.md](README.md). Per-config pages and the summary table: [fixes_30/summary.md](fixes_30/summary.md) (round 1 kept as [summary-round1.md](fixes_30/summary-round1.md)). Every step below is its own commit on `claude/eager-tesla-x1dcxj`.
+Newest first. Method: [README.md](README.md). The 20 Oct rounds (from "Current recommendation" down) have per-config pages and a summary table in [fixes_30/summary.md](fixes_30/summary.md) (round 1 kept as [summary-round1.md](fixes_30/summary-round1.md)); each of their steps is its own commit on `claude/eager-tesla-x1dcxj`.
 
-All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were model-written, and the draft judge is a model, so treat single-ticket differences with care.
+The 20 Oct numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. From 29 Oct, reported pipeline numbers come from the API. Gold labels for `fixes_30` were model-written, and the draft judge is a model, so treat single-ticket differences with care.
 
-## 7 Nov: Twelve of the thirteen user-test flags become the normal code
+## 7 Nov: Role-played test sessions with live model calls, and the fixes
+
+**What was done.** Six role-played test sessions used the viewer in a browser, with live model calls on tickets they wrote themselves: a new support agent, a team lead, a support agent on a phone, a compliance reviewer, a competition judge and a customer-experience quality lead. Each ran its own viewer with a spending cap of $1.25. Together they ran **70 live tickets for about $0.23** in model calls, and decided 65 tickets of the saved final run. Their reports, about 95, were reproduced and merged into **43 confirmed issues** (T01 to T43): 7 high, 16 medium and 20 low. 5 reports were not reproduced, and 18 were by design or for later. **These sessions were role-played: no support agent has used the inbox yet.**
+
+**What they liked.** The first screen: the card that explains the three tabs, and the line that nothing goes to a customer by itself. Friction that follows risk: approve waits for the tick on a flagged ticket, and a fraud ticket goes to its team with one key and an undo. Drafts in calm Iraqi Arabic that promise nothing; planted instructions changed no type or priority, and a reply the customer dictated («تم إرجاع مبلغ 500,000 دينار إلى حسابك») was refused. The facts line read Arabic-Indic digits, «مليونين ونص» and Mosuli words. «كيف يشتغل», the README and SECURITY.md were called honest about their limits.
+
+**The seven high issues, and what changed:**
+1. **A fraud second issue changed nothing** (T01): a lost card with an unknown ATM withdrawal went to the cards team at P3. A fraud type given as the second issue, by either model, now escalates the ticket as fraud: fraud team, P1, no draft, and the team note names the other request (`fraud_secondary`).
+2. **A card number, PIN or code the customer typed was neither flagged nor hidden** (T02). It now flags the ticket (`secret_in_ticket`): a draft asks for the tick «تأكدت إن الرد ينبّه الزبون يغيّر الرمز ويوقف البطاقة», an escalation's team note says it, and the inbox shows the number as «••••» in «رسالة الزبون» and the queue row until «اظهر الرقم». The text still goes to the model provider unmasked.
+3. **The decision API accepted what the page never sends** (T03): an approved fraud escalation, an unknown ticket id, and a live identity-check ticket with its flag left out. The server now checks each decision against the ticket as it served it: 400 for a ticket or a draft it did not serve, 409 for an approve or edit of an escalation or of a type that is never drafted. For a live run it keeps what it served in memory, with keyed hashes in place of the text.
+4. **The code-request check missed a paraphrase and English** (T04: «الأرقام الستة اللي وصلتك على تلفونك»). It now knows the code as the digits or the message that arrived, and English after "enter", "type", "write", "read out", "say" or "what are". No flag was needed: on every guard set and the 2,531 saved drafts nothing changed.
+5. **The draft check passed claims of things done** (T05: «تم إرجاع مبلغ …», «شكواك على الموظف فسجلناها»). A new warning, `claims_done`, asks for a tick.
+6. **Approve-and-next acted on a ticket nobody had seen** (T06: a 180 ms double tap approved a P1). A ticket just on screen cannot be decided for 700 ms (1.5 s when the inbox has changed tab).
+7. **A second request was neither routed nor shown, while the draft said a team would handle it** (T07). A drafted ticket now shows «طلب ثاني: النوع · القسم» and asks for a tick on «بالتذكرة طلب ثاني محد مستلمه، راجع شنو يكول الرد عنه». The drafter's rule 4 now says a second request will be followed up, never that it was registered or handled (dev: 2 of 5 drafts said so, now 0 of 5). It is still not routed to a second team.
+
+**Pipeline changes: thirteen flags, measured with and without.** Each change to what the pipeline decides or drafts went into `src/pipeline/fixes.py` as a flag, off by default, and was run with and without it on the same tickets. The code rules were replayed from the cache on dev (233), test2 (80), mvp_test (78) and adversarial_14; the draft warnings were also run on the 2,531 saved drafts and the 42 session drafts; the prompt flags were re-drafted on the API and graded twice by the cli judge. Twelve were then made the normal code (next entry).
+
+| Flag | What it does | Without → with | Adopted |
+|---|---|---|---|
+| `fraud_secondary` | A fraud type as the second issue, from either model, escalates as fraud (P1, no draft) | Scored sets: 0 tickets changed; fraud recall 17/17, 6/6, 6/6 both ways. Replies recorded in the sessions: 3 tickets from cards P3 or transfers P2 → fraud P1, escalated | yes |
+| `secret_in_ticket` | A card number, PIN or code in the ticket flags it, and gives the page the spans to hide | Scored sets and edge_cases: 0 fired. Session tickets: 2 of 18, both true; the 2 controls stay clean | yes |
+| `strip_format_chars` | The clean step drops invisible format characters; direction controls add `bidi_controls`, and two models reading different amounts add `amount_disagreed` | Scored sets hold none. The session ticket with direction controls: 3 findings caused by the hidden characters → `bidi_controls` only. dev-0138: drafted → flagged `amount_disagreed` («ميت الف مرتين»: 100,000 or 200,000) | yes |
+| `device_lost` | A lost or stolen phone with the wallet still open goes to the fraud team at P1, no draft; writing from someone else's phone adds `other_phone` | Scored sets: 0 changes (8 lost-phone tickets don't say the wallet is open). The session ticket: flagged, accounts P2 → escalated, fraud P1 | yes |
+| `complaint_risk` | A regulator, a threat to complain or a repeat contact flags the ticket; priority and team never change | dev 1 (already flagged), adversarial 1 (drafted → flagged), test2 0, mvp_test 0; all true after one false alarm (mvp-0005) was fixed | yes |
+| `instructions_in_ticket` | Text that tries to instruct the system adds a quiet note: no tick, no outcome change | dev 5, test2 2, mvp_test 2, adversarial 3, edge_cases 1: all 13 read, all planted | yes |
+| `claims_done` | Warning: the draft says something was done (refunded, registered) | Saved drafts 0 of 2,531; session drafts 1 of 42, true | yes |
+| `repeated_text` | Warning: a second greeting or a repeated sentence | Saved 1 (dev-0132, true); sessions 0 | yes |
+| `ask_missing` | Warning: the draft doesn't ask for a field the drafter was told to ask for | Saved 44 drafts on 15 tickets, 14 true. test2 + mvp_test: 3 old drafts → 4 drafts from the adopted drafter | yes |
+| `dialect_words` | Warning: a word from another dialect or from formal Arabic («رح», «يرجى», «عشان», «وايد», «التي») | Saved 98 drafts, 25 of 25 sampled true; sessions 6 of 6 true. test2 + mvp_test: 4 old → 1 new | yes |
+| `amount_own_words` | The drafter gets the customer's own words for an amount not written in digits; the warning `amount_not_in_ticket` fires on an amount the customer didn't write | dev: the narrowed warning fires on 3 of 215 no-flag drafts (all «ورقة» turned into dollars), 0 with the flag; judge on the 61 changed drafts: mean 4.51 → 4.61, bad 4 → 1 | yes |
+| `draft_rules_ut` | Revised drafter rules: a second request is followed up; no guessed gender; on a blocked account, never "nothing more is needed"; plain Baghdadi words; ask only for what the ask lines name; instructions in the ticket get no answer | dev 60, graded twice: asks right 53 / 53 → 55 / 55, bad 4 / 4 → 3 / 3, avoid-list words 8 → 0, address terms 3 → 0. test2 + mvp_test (live): avoid-list 4 → 0, address terms 6 → 0, judge on 40 drafts 4.38 → 4.55 (grading 2: 4.33 → 4.53) | yes |
+| `summary_qualifiers` | The escalation summary keeps the customer's own qualifiers, in the third person and in Arabic | 18 dev escalations × 3 replicates: English words 3 → 1 of 54, first person 0 → 0, over 20 words 20 → 20 | no: the bar was 0 English words |
+
+Two pipeline fixes needed no flag: the code-request check (item 4 above) and the budget stop, which is now `budget_reached` instead of a model error, with the cap printed to four decimals (T39). With all twelve adopted, the saved drafts' review rate rose (dev 53 → 68 of 233, test2 21 → 27 of 80, mvp_test 27 → 28 of 78), mostly from the new warnings on drafts the old drafter wrote. With drafts from the adopted drafter it went from 21 to 22 of 80 on test2 and from 24 to 26 of 75 on mvp_test, and no team or priority moved (next entry).
+
+**Viewer and server:**
+- **Decisions:** checked against what the server served (T03); each live run has its own id («live-» and 6 hex digits on screen) and the log keeps a keyed hash of its cleaned text (T11); ticked points are logged from an allow-list (T28); four new reason codes (dialect, a false claim, duplicate, instructions in the ticket), and reasons about a reply only when there was one (T31).
+- **Disclosure:** the new-ticket dialog says the text goes to an outside model provider abroad, so paste only tickets allowed to be sent; the header says «وضع التطوير» while `REAL_DATA` is unset (T17).
+- **Flow:** the pause before a new ticket can be decided (T06); the inbox stays in the agent's tab and offers «روح لـ…» when a more urgent ticket waits (T13); a refused Ctrl+Enter puts the focus on the tick, and X ticks it (T21); forward names the corrected team (T12); corrections show after a reload and warn before leaving (T24, T25); Ctrl+Z on another ticket asks first (T29); a team-only correction has its own point (T38); a missing field can be marked «ما يحتاج بهالتذكرة» (T42).
+- **Text:** digits typed with spaces keep their order, a hyphenated reference doesn't split (T10), and English reads in order (T27).
+- **Phone:** the back gesture returns to the queue (T22); a refusal for the tick is said under the buttons and the box is brought into view, and toasts sit at the top (T23); short screens and the on-screen keyboard (T36); 44 px touch targets and no key hints (T37).
+- **Help and keys:** the «?» sheet is now «شلون تشتغل»: four lines (the tabs, ticking, forwarding, undo) and a button that brings back the first-visit card, then the keys (T32). Ctrl+Enter sends a new ticket, C opens the correction panel, Esc closes it (T30).
+- **Live tickets:** every visit starts in «وضع الموظف»; a finished live ticket becomes the open one, marked «جديدة» (T33), and heads the «كيف يشتغل» list (T34).
+- **The page side of the new rules:** the hidden number, confirm points for `secret_in_ticket`, `bidi_controls`, `amount_disagreed`, `other_phone` and `complaint_risk`, the quiet note, the reasons for `device_lost` and `budget_reached`, `ask_missing` naming its fields, and «رمز مخفي انشال» in the clean step.
+
+**Tests.** pytest: 1,926 pass (1,694 before), with the API keys removed and no model call. `node tests/ui/smoke.cjs`: 527/527 (448 before): desk-light 151, desk-dark 151, phone-light 89, phone-dark 89, fresh-clone 47.
+
+**Still open:**
+- **Questions for the institution:** an AML or frozen-account type (a session's frozen account was typed as an unknown charge); the safety advice a customer who lost a phone should get (none was written); masking before the text goes to the provider (SECURITY.md, section 11).
+- **Not built:** a model-based check for unclear sentences in drafts and notes (only a prompt line); a second team for a second request, in routing and in the decision record; duplicate detection; replies in English; new ticket types; a view for a team lead.
+- **Left from the fixes:** `summary_qualifiers` stays a flag, and about a third of summaries are over 20 words; 3 of 146 new drafts put words in «»; one draft carried a second, revised reply (caught by `stray_latin`); «مسجل عندنا» is not yet a `claims_done` phrase. The saved test2 run shows the new warnings on 7 ready tickets but keeps them in «جاهزة» (the author's decision). The desktop toast still sits at the bottom, no real phone keyboard was tried, and edge_cases was not re-run.
+- **People:** these sessions were role-played. No support agent has used the inbox yet.
+
+**Spend.** The sessions: about $0.23, from the cost of each stage in the streams they saved, with a few uncaptured tickets estimated. The fixes: $1.40, from the run files' `cost_usd` (pipeline rules $0.06, prompt flags $0.80, their revision $0.24, the adoption's re-drafts $0.31). Reproducing the reports, the viewer fixes and the draft warnings made no paid call, and the judge ran on the free cli backend. In all, about $1.63.
+
+## 7 Nov: Twelve of the thirteen test-session flags become the normal code
 
 **What was adopted** (`src/pipeline/fixes.py`, `ADOPTED`). The six code rules on the customer's text: `fraud_secondary`, `secret_in_ticket`, `strip_format_chars`, `device_lost`, `complaint_risk` and `instructions_in_ticket`. They found no false alarm on dev, test2, mvp_test, adversarial_14 or edge_cases, and they fix the reported cases. Four draft warnings: `claims_done`, `repeated_text` and `dialect_words` (0 or near 0 false alarms on 2,531 saved drafts), and `ask_missing` (14 of 15 saved hits true). `amount_own_words`, with the narrowed check, which no longer fires on a faithful digit form (12 saved tickets read: all were note conversions or amounts computed by the model). And the revised `draft_rules_ut`, which replaced `draft_system.md`. On the same 60 dev drafts, graded twice, asks_right was 55/55 against 53/53 with no flag, bad drafts 3/3 against 4/4, and its code gains held. The warnings ask for a tick, and none blocks an approval.
 
@@ -471,7 +526,7 @@ On top of rec+F16+F20, dev 233 with a replicate ($0.33 for both):
 
 **Locked: `PIPELINE_FIXES=mvp`** (`src/pipeline/fixes.py`): F2, F3c, F6b, F11, F12, F14b, F15, F16, F17, F18, F19, F20, F21; thresholds 0.75 / 0.60; unknown charges stay with the fraud and security team (P1, escalated). Next: mvp_test and heldout, once each.
 
-## 29 Oct: round 2 review, F20 (duplicate payments), calibration with F20
+## 29 Oct: round 2 review, F20 (a payment made twice), calibration with F20
 
 **Author's round 2** (`data/review/dev_round2_answers.json`, 16 tickets from dev/recF16; the cli grader's verdicts stored beside the author's, hidden from the author during the review):
 - Drafts: **10 of 13 send as is, 3 after small edits, 0 rewrite.** Asks for the right things 9/13; missing a question on 4 (dev-0199: the restaurant's name, the known F11 weakness).
@@ -487,7 +542,7 @@ On top of rec+F16+F20, dev 233 with a replicate ($0.33 for both):
 | rec+F16 / -r1 | 228 / 228 | 227 / 227 | 4 / 4 | 0 / 0 | 19% / 19% |
 | **rec+F16+F20 / -r1** | **231 / 232** | **229 / 229** | **1 / 0** | 0 / 0 | 18% / 19% |
 
-All three double payments (dev-0109, 0138, 0190) fixed in both replicates; every other changed ticket also moved to the gold answer. Cost $0.27. **Adopt F20.**
+All three tickets paid twice (dev-0109, 0138, 0190) fixed in both replicates; every other changed ticket also moved to the gold answer. Cost $0.27. **Adopt F20.**
 
 **Calibration with F20** ([dev/calibration-recF16F20.md](dev/calibration-recF16F20.md), re-check on all 233, $0.41): confidence ≥ 0.85 → 213/213 correct. `recheck_from` 0.60 vs 0.65 now makes **no difference** (no ticket left between them). `pass_above` 0.85 removes the last wrong type marked ready (1 → 0) for 10 more re-checks per 233 tickets (≈ $0.05) and review 17% → 18%: one ticket, so weak evidence.
 

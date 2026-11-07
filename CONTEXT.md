@@ -1,8 +1,8 @@
 # Project context: read this first
 
-The starting point for anyone, person or AI session, picking up this project. It says what the project is, the rules for working on it, what was decided and why, what was tried and failed, where things stand, and what comes next. The detailed experiment report is [`HANDOVER.md`](HANDOVER.md); the dataset is described in [`data/README.md`](data/README.md).
+The starting point for anyone picking up this project. It says what the project is, the rules for working on it, what was decided and why, what was tried and failed, where things stand, and what comes next. The detailed experiment report is [`HANDOVER.md`](HANDOVER.md); the dataset is described in [`data/README.md`](data/README.md).
 
-*Last updated 5 Nov 2026 (the three safety rules adopted). Work happens on the `mvp` branch and is merged into `main` when the author says so; both hold everything up to the 5 Nov adoption of the three safety rules (the commit after bfe8893). Line numbers in this file refer to commit d1280b6; references to the 5 Nov changes give a file and a function name instead.*
+*Last updated 7 Nov 2026 (the fixes from the role-played test sessions). Work happens on the `mvp` branch and is merged into `main` when the author says so. Line numbers in this file refer to commit d1280b6, except where a line says otherwise; references to later changes give a file and a function name instead.*
 
 ---
 
@@ -82,7 +82,7 @@ These are standing instructions from the author. Follow them unless the author s
 | **One main issue per ticket; a second only when related** | That's how real tickets look, and how industry triage works (Zendesk reads one intent per ticket). It is also one of the author's rules (section 3). |
 | **Patch the dataset, don't rebuild it** | A rebuild would throw away the 71 tickets the review sheet marked correct (that review was done by an AI model, not the author). `generate_tickets.py repair` replaces only the tickets that break a rule. |
 | **The agent inbox is the main screen; «كيف يشتغل» keeps the process view** (1 Nov) | Mentor feedback: more care on UI/UX. The old first screen was a debugger. An agent needs a queue, one ticket, a draft to check and a quick way to decide. Friction follows risk: one key for a ready draft, a tick on the one thing to check for a flagged one, no draft for an escalation. |
-| **The viewer defaults to `api`; the scripts stay on `cli`** (app/server.py:467 `default_viewer_backend`; `config/models.yaml`:10 `backend`) | The viewer is what a reader starts. On someone else's computer, cli would run pasted tickets on their own Claude Code login, with a setup no number was measured on. With no key, live runs are off and saved runs still replay. |
+| **The viewer defaults to `api`; the scripts stay on `cli`** (app/server.py:470 `default_viewer_backend`, as of 7 Nov; `config/models.yaml`:10 `backend`) | The viewer is what a reader starts. On someone else's computer, cli would run pasted tickets on their own Claude Code login, with a setup no number was measured on. With no key, live runs are off and saved runs still replay. |
 | **The decision log keeps no reply text; the server refuses a blocked approval** (app/server.py:653 `decision_record`, :759 `append_decision`) | The log is for measuring the pipeline, and a reply can carry a customer's details, so it keeps keyed hashes and a count of edited characters. An approved or edited reply that still has a blocking check (`asks_secret`; since 5 Nov also `hold_reason` and `sensitive_number`) gets 409, so a stale check in the page or a hand-made request can't pass it. |
 | **`hold_reason` adopted: always on, and it blocks an approval** (5 Nov; `src/pipeline/draft_check.py` `findings`, `_hold_reason`; `app/server.py` `BLOCKING_CHECKS`) | A draft must not hint at an investigation, a suspicion, a report or money laundering: telling the customer is tipping off, which Iraq's AML/CFT Law 39/2015 forbids. «رفعنا بلاغ» and «سجلنا بلاغ بمشكلتك» stay flagged although they may only mean "we raised a ticket": a false alarm costs the agent an edit, and a miss is a legal breach. It fired on 0 of 2,531 saved drafts, so it costs nothing measurable. Decided for a regulated financial institution (LOG, 5 Nov). |
 | **`sensitive_number` adopted: always on, and it blocks an approval** (5 Nov; `src/pipeline/draft_check.py` `findings`, `_sensitive_number`) | A draft must not repeat a card number or a code: the reply would put it in one more place, and repeating it back is poor card-industry practice. It fired on 0 of 2,531 saved drafts. Decided the same way. |
@@ -90,10 +90,10 @@ These are standing instructions from the author. Follow them unless the author s
 
 ## 5. Feature flags
 
-**None are open (5 Nov).** The three flags opened by the 1 Nov security review are now normal code. They were decided on 5 Nov (section 4; LOG, 5 Nov), with no prompt change and no model call:
+**One is open (7 Nov): `summary_qualifiers`** (the escalation summary keeps the customer's qualifiers, in Arabic; it left 1 English word in 54 summaries, and the bar was 0). The three flags opened by the 1 Nov security review are now normal code. They were decided on 5 Nov (section 4; LOG, 5 Nov), with no prompt change and no model call:
 - `hold_reason` (no tipping off) and `sensitive_number` (no card number or code repeated back) always run, and both block an approval, in the inbox and at the server, as `asks_secret` does (`app/server.py` `BLOCKING_CHECKS`). «رفعنا بلاغ» and «سجلنا بلاغ بمشكلتك» stay flagged. Neither rule fired on any of 2,531 saved drafts.
 - `escalate_account_risk` was changed into the `account_risk` flag: a blocked account or a SIM change keeps its draft, and the agent ticks «تأكدت من هوية الزبون» before approving. It reads the type after the re-check and never escalates. test2, replayed from the cache: 6 tickets flagged, all the right type, t2-0009 no longer caught; review rate 19% → 26%. mvp_test, from its saved run: 4 flagged, 27% → 32%, over the 30% target.
-- `PIPELINE_FIXES` names nothing. Naming one of the three old flags is refused with what became of it (`src/pipeline/fixes.py` `ADOPTED`, `active`), and the viewer and `run_batch` refuse to start with one. On 7 Nov twelve more flags from the user tests were adopted the same way; only `summary_qualifiers` is still a flag.
+- `PIPELINE_FIXES` names nothing. Naming one of the three old flags is refused with what became of it (`src/pipeline/fixes.py` `ADOPTED`, `active`), and the viewer and `run_batch` refuse to start with one. On 7 Nov twelve more flags from the role-played test sessions were adopted the same way, after with/without runs (LOG, 7 Nov entries); only `summary_qualifiers` is still a flag.
 
 **30 Oct, the first adoption.** On the author's word, the 13 adopted fixes became the normal code and every dropped one was deleted; `PIPELINE_FIXES` is now empty and the pipeline runs as measured. Proof: every prompt is byte-identical to the measured `mvp` configuration (a test pins the classifier prompt's hash), and replaying test2 through the response cache gave identical results on all 80 tickets (only app bugs' team, and so their draft, changed, by the author's routing choice).
 
@@ -127,9 +127,9 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
 - **Logging every ticket to a Google Sheet:** discussed, not built. Run events and token/cost logging in `runs/` replaced it.
 - **An Arabizi normalisation rule:** removed. It could corrupt real numbers, and Arabizi is rare.
 
-## 7. Where things stand (5 Nov)
+## 7. Where things stand (7 Nov)
 
-**Branches:** work happens on **`mvp`** and is merged into `main`. Since 30 Oct (8dfd12c, masking and the committed final run) they added the security hardening (76463d4), SECURITY.md and FAILURE_MODES.md (e4621cf), the agent inbox (36b843b) and its polish (d1280b6), the docs update (bfe8893), and the 5 Nov adoption of the three safety rules (the commit after bfe8893).
+**Branches:** work happens on **`mvp`** and is merged into `main`. Since 30 Oct (8dfd12c, masking and the committed final run) they added the security hardening (76463d4), SECURITY.md and FAILURE_MODES.md (e4621cf), the agent inbox (36b843b) and its polish (d1280b6), the docs update (bfe8893), the 5 Nov adoption of the three safety rules (the commit after bfe8893) and the calmer inbox, then on 7 Nov the code-request check and the fixes from six role-played test sessions.
 
 **Done:**
 - [x] Pipeline, viewer, cli/api switch, response and prompt caching, cost logging and a spend cap
@@ -158,11 +158,12 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
   - test2, replayed from the cache with 0 misses: type 78/80, priority 79/80, fraud 6/6, all prompts identical; 6 tickets drafted → flagged, all the right type; t2-0009 no longer caught; review rate 19% → 26%. mvp_test, from its saved run: 27% → 32%, over the 30% target.
   - mvp_test and dev cannot be fully replayed from the cache: 10 app-bug drafts (and their summaries) are missing since the 30 Oct routing change.
   - The review of the adoption (14 findings, LOG.md 5 Nov, "Review"): the viewer gives saved runs the flag (the final run shows 15 / 6 / 59); the tick is logged and the server refuses an approval without it; an agent's correction to either type asks for it; an escalation of either type has the reminder in its team note; clearer Arabic wording.
-- [x] Tests: 694 pytest tests pass (no model calls); the browser smoke script `tests/ui/smoke.cjs` passes 369/369 checks
+- [x] Six role-played test sessions with live model calls (7 Nov; LOG.md, 7 Nov: Role-played test sessions): 70 live tickets for about $0.23, 43 confirmed issues (7 high). The viewer and server fixes were made directly; the pipeline fixes were 13 flags measured with and without, and 12 were adopted. Fixes cost $1.40 in API calls.
+- [x] Tests: 1,926 pytest tests pass (no model calls); the browser smoke script `tests/ui/smoke.cjs` passes 527/527 checks
 
 **Open:**
 - [ ] Unknown charges: they stay with the fraud team; the author is unsure, and the mentor notes (section 8) record no answer. FAILURE_MODES.md (mode 4) leaves the decision to the deploying institution, with its fraud team.
-- [ ] The author's user-research notes from support staff (still open). No agent has used the inbox yet, so the decision log and the session summary hold no human data. Drafts rated by people and agent minutes per ticket wait on this.
+- [ ] The author's user-research notes from support staff (still open). No agent has used the inbox yet (the 7 Nov test sessions were role-played), so the decision log and the session summary hold no human data. Drafts rated by people and agent minutes per ticket wait on this.
 - [x] The one-page update (Claude Docs "Support Pipeline Automation: MVP Update") refreshed on 1 Nov: the inbox and security section with a screenshot, known limits and next steps
 - [ ] heldout2, run once on this final version: the next run
 - [ ] The review rate with `account_risk`: 32% on mvp_test (from its saved run), over the 30% target; heldout2 will show it on fresh tickets
@@ -177,7 +178,7 @@ The flag mechanism stays (`src/pipeline/fixes.py`, `scripts/experiment.py`): a n
 - Images and videos in tickets: yes, but **not in the MVP**. List them under future plans.
 - Ask for help whenever needed.
 
-Done since the call (section 7): the security hardening, the agent inbox and its polish, SECURITY.md and FAILURE_MODES.md, and (5 Nov) the three flags decided.
+Done since the call (section 7): the security hardening, the agent inbox and its polish, SECURITY.md and FAILURE_MODES.md, (5 Nov) the three flags decided, and (7 Nov) the fixes from six role-played test sessions.
 
 1. **heldout2** (80, sealed): the next run, once, on this final version. Before it, the author decides whether to run the small fraud-worded probe set that FAILURE_MODES.md (mode 3) proposes (about $0.05).
 2. **User research (still open):** the author's notes on the conversations already held with support staff (role, when, what they said); then, if possible, a few support staff try the inbox on the final run. Note what slows them down or confuses them; the decision log records each decision without reply text.
@@ -192,16 +193,16 @@ Known limits to state in the write-up: tickets and most labels are model-written
 
 ```bash
 pip install -r requirements-dev.txt                       # adds pytest to requirements.txt
-env -u SUPPORT_PIPELINE_API_KEY -u ANTHROPIC_API_KEY python -m pytest -q   # 694 tests, no model calls
+env -u SUPPORT_PIPELINE_API_KEY -u ANTHROPIC_API_KEY python -m pytest -q   # 1,926 tests, no model calls
 python app/server.py                                      # viewer: http://localhost:8000, API backend by default
-node tests/ui/smoke.cjs                                   # browser smoke test: 369 checks, several minutes
+node tests/ui/smoke.cjs                                   # browser smoke test: 527 checks, several minutes
 LLM_BACKEND=cli python scripts/run_batch.py ...            # dev runs on the Pro plan
 python scripts/experiment.py run <config> --set <file> [--backend api]
 python scripts/generate_tickets.py stats                  # dataset tables, never ticket text
 python scripts/generate_tickets.py repair --split dev --dry-run
 ```
 
-- **The viewer** runs new tickets on the API backend unless `LLM_BACKEND` says otherwise (app/server.py:467 `default_viewer_backend`). With no key, live runs are off, the page says why, and saved runs still replay: it opens on the committed final run (`docs/runs/test2/final.json`). With a key, a pasted ticket runs the measured configuration under the spending cap. Decisions go to `runs/decisions.jsonl` (git-ignored; `DECISIONS_FILE` moves it).
+- **The viewer** runs new tickets on the API backend unless `LLM_BACKEND` says otherwise (app/server.py:470 `default_viewer_backend`, as of 7 Nov). With no key, live runs are off, the page says why, and saved runs still replay: it opens on the committed final run (`docs/runs/test2/final.json`). With a key, a pasted ticket runs the measured configuration under the spending cap. Decisions go to `runs/decisions.jsonl` (git-ignored; `DECISIONS_FILE` moves it).
 - **`LLM_BACKEND=cli` is for development scripts only.** It is the scripts' default (`config/models.yaml`:10 `backend`). Every pipeline run behind a reported number, and the thresholds, used `LLM_BACKEND=api`. The draft judge runs on cli (section 4).
 - **The smoke script** starts its own viewers with no key, so it calls no model. It needs Node with Playwright and its Chromium ([`tests/ui/README.md`](tests/ui/README.md)).
 - **Safety switches:** `PIPELINE_MODE=off` stops every model call; `REAL_DATA=1` refuses the development paths. Details: SECURITY.md.
