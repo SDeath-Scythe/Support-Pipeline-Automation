@@ -1015,7 +1015,9 @@ SENSITIVE += [  # review of 1 Nov: a password, a code further away, glued or wri
     "رمز التتبع 88213 مال الشحنة وصلنا",
 ])
 def test_sensitive_number_leaves_references(text):
-    assert problems(text, text) == []
+    # «رقمك ... مسجل عدنا» is a claims_done since 7 Nov (on record with us); no other rule fires on these
+    assert [k for k in problems(text, text) if k != "claims_done"] == []
+    assert problems(text, text) == (["claims_done"] if "مسجل عدنا" in text else [])
 
 
 def test_sensitive_numbers_reports_cards_and_codes():
@@ -1180,6 +1182,46 @@ def test_claims_done_flags_a_claim_the_tool_cannot_have_done(monkeypatch, text):
 ])
 def test_claims_done_leaves_hand_offs_negations_and_quotes(monkeypatch, text):
     assert _flagged(monkeypatch, "claims_done", text) == []
+
+
+# claims_done, 7 Nov: something said to be on record with us (dev-0015's «رقم العملية 7021535 مسجل عندنا»). The first four
+# are the saved drafts it fires on (dev-0015 twice, dev-0040, dev-0118); none of the 146 drafts of the adopted drafter.
+@pytest.mark.parametrize("text, span", [
+    ("على الجهاز الجديد ما يخليك تدخل للحساب. رقم العملية 7021535 مسجل عندنا، وراح يراجع قسم الحسابات حالتك.", "مسجل عندنا"),
+    ("بعد ما طلعت شريحة جديدة بنفس الرقم، ومسجلين عندنا رقم آخر عملية 7021535. راح نحول طلبك لقسم الحسابات.", "ومسجلين عندنا"),
+    ("ورقم ابن عمك اللي كتبته (07500721674) مسجل عندنا. إذا ممكن تكتبلي تاريخ ووقت العملية.", "مسجل عندنا"),
+    ("رقم العملية TX95304083 سجلناه عندنا، وقسم الحسابات راح يتحقق من حالة حسابك.", "سجلناه عندنا"),
+    ("رقمك مسجل عدنا وراح يوصلك الرمز.", "مسجل عدنا"),
+    ("الحوالة مسجلة بالنظام وراح تنحل.", "مسجلة بالنظام"),
+    ("تم تسجيل العملية بنظامنا.", "تم تسجيل العملية بنظامنا"),
+    ("الدفعة تم تسجيلها بالنظام.", "تم تسجيلها بالنظام"),
+    ("الحساب متسجل عندنا باسمك.", "متسجل عندنا"),
+    ("حوالتك سجلناها عندنا.", "سجلناها عندنا"),
+    ("الرقم مسجل بالنظام مالتنا.", "مسجل بالنظام"),
+])
+def test_claims_done_flags_a_claim_that_something_is_on_record_with_us(text, span):
+    found = [f for f in findings(text, text) if f["kind"] == "claims_done"]
+    assert [f["text"] for f in found] == [span]
+
+
+@pytest.mark.parametrize("text", [
+    # hand-offs: registered, but not "with us" or "in the system"
+    "سجلنا طلبك", "سجلنا ملاحظتك", "وصلنا طلبك وسجلناه", "سجلنا رقم العملية وراح يتابع القسم",
+    # the customer's registered number, and a status the customer or the app reported
+    "راح يوصلك رمز على رقمك المسجل عندنا", "التطبيق يطلع لك رسالة إن الجهاز غير مسجل والرمز ما يوصلك.",
+    "بس الشركة قطعت الخط وتكول ما مسجلة عندهم دفعة.", "ذكرت إن رقمك مسجل عندنا بس الرمز ما يوصل",
+    "حسب كلامك الرقم مسجل عندنا", "رقمك مو مسجل عندنا، فحدّثه بالتطبيق", "حسابك غير مسجل عندنا بهالرقم",
+    # asked, or for the customer to check
+    "رقمك مسجل عندنا؟", "هل الرقم مسجل عندنا باسمك؟", "إذا رقمك مسجل عندنا راح يوصلك الرمز",
+    "تأكد إن رقمك مسجل عندنا", "لازم يكون الرقم مسجل عندنا باسمك",
+    # «سجّل» and «سجلت», said by the customer or asked of them
+    "سجّل دخول من جديد وجرب", "سجلت الدخول بس ما اشتغل", "سجلت عندنا قبل؟", "إذا سجلت الشكوى عندنا قبل، دزلنا رقمها",
+    "سجلي دخول بالتطبيق مرة ثانية", "تكدر تسجل بالنظام من التطبيق",
+    # quoted
+    "طلبت نكتبلك «رقمك مسجل عندنا»، بس ما نگدر نأكده.",
+])
+def test_claims_done_leaves_on_record_said_by_or_asked_of_the_customer(text):
+    assert [f for f in findings(text, text) if f["kind"] == "claims_done"] == []
 
 
 @pytest.mark.parametrize("text, flagged", [

@@ -1418,6 +1418,37 @@ def _claims_done(norm: str, pos: list[int]) -> tuple[int, int] | None:
             if not claimed or (verb in {"حول", "رفع"} and claimed != ["money"] and _TEAM.search(norm, m.end(), s1)):
                 continue                                    # «حولنا شكواك للقسم»: forwarding is what the tool does
             return _raw(pos, m.start(), m.end())
+    return _on_record(norm, pos, stops)
+
+
+# claims_done also covers a claim that something is on record with us (7 Nov, dev-0015's «رقم العملية 7021535 مسجل
+# عندنا»): the tool cannot have checked the institution's records. «مسجل عندنا», «مسجلة بالنظام», «سجلناه عندنا», «تم
+# تسجيلها بنظامنا»: registered, and said to be "with us" or "in the system". Without that, «سجلنا طلبك», «سجلنا رقم
+# العملية» and «وصلنا طلبك وسجلناه» are hand-offs and stay allowed, and «رقمك المسجل» is the customer's number. Not when
+# negated («غير مسجل عندنا»), asked («رقمك مسجل عندنا؟», «إذا مسجل عندنا»), for the customer to check («تأكد إنه مسجل
+# عندنا», «لازم يكون مسجل عندنا»), told («ذكرت إن رقمك مسجل عندنا»; but «الرقم اللي كتبته مسجل عندنا» is ours) or
+# quoted. «سجّل» and «سجلت», said by the customer or asked of them, are not matched at all.
+_WITH_US = (r"(?:عندنا|عدنا|لدينا|بنظامنا|بسيستمنا|بسجلاتنا|بالنظام|بالسيستم|بالسجلات"
+            r"|(?:ب|في\s+)(?:ال)?(?:نظام|سيستم|سجلات)\s+(?:مالتنا|مالنا|عندنا))")
+_ON_RECORD = re.compile(r"(?<!\w)[وف]?(?P<v>مسجل(?:[ةه]|ين)?|متسجل[ةه]?|سجلنا(?:ه|ها|هم)?|(?:تم|تمت|صار)\s+تسجيل(?:ه|ها|هم)?)"
+                        rf"(?:\s+[^\s،,.؟?!:؛«»]+){{0,3}}?\s+{_WITH_US}(?!\w)")
+_NOT_ON_RECORD = {"غير", "مو", "ما", "لم", "مش", "ليس", "ماكو"}
+_RELATIVE = {"اللي", "الي", "الذي", "التي"}
+_FOR_YOU_TO_CHECK = {"تأكد", "تاكد", "تأكدي", "تاكدي", "اتأكد", "تتأكد", "تتاكد", "تحقق", "تتحقق", "شوف", "تشوف", "لازم", "يجب",
+                     "يكون", "تكون", "يصير", "تصير", "ممكن", "المفروض"}
+
+
+def _on_record(norm: str, pos: list[int], stops: list[int]) -> tuple[int, int] | None:
+    for m in _ON_RECORD.finditer(norm):
+        s0, s1 = _sentence(norm, stops, m.start())
+        clause_start = max([s0] + [x + 1 for x in (norm.rfind(c, s0, m.start()) for c in "،,") if x >= 0])
+        before = [_bare(w) for w in norm[clause_start:m.start()].split()]
+        told = any(_TOLD.fullmatch(w) and not (i and before[i - 1] in _RELATIVE) for i, w in enumerate(before))
+        if ((_NOT_YET | _NOT_ON_RECORD) & set(before[-2:]) or (_IF_WHEN | _FOR_YOU_TO_CHECK) & set(before[-3:])
+                or told or any(q in norm[s0:m.start()] for q in "«\"“")
+                or norm[s1:s1 + 1] in ("?", "؟")):
+            continue                                    # «غير مسجل عندنا», «إذا مسجل عندنا», «تأكد إنه ...», a question
+        return _raw(pos, m.start(), m.end())
     return None
 
 
