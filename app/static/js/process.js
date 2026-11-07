@@ -222,7 +222,22 @@ function drawList() {
     b.addEventListener("click", () => openTicket(i));
     return el("li", {}, b);
   });
-  list.replaceChildren(...rows);
+  list.replaceChildren(...S.live.map(liveRow), ...rows);
+}
+
+/** A ticket pasted in this page (newest first, above the source's): its trace stage by stage. */
+function liveRow(it) {
+  const st = it.status === "running" ? "running" : it.result?.outcome || "";
+  const b = el("button", { type: "button", class: "prow", "aria-current": P.current === it.key ? "true" : null },
+    el("span", { class: `pdot ${st}`, "aria-hidden": "true" }),
+    el("span", { class: "prow-body" }, el("span", { class: "prow-text", dir: "rtl" }, digitRuns(plainText(it.ticket.text).text)),
+      el("span", { class: "prow-meta" }, ticketId(it.key), " · تذكرة مباشرة", st ? ` · ${OUTCOME_SHORT[st] || (st === "running" ? "تنعالج" : "")}` : "")));
+  b.addEventListener("click", () => { showLive(it); $("traceTitle")?.focus(); });
+  return el("li", {}, b);
+}
+/** A live ticket started or ended: its row in the side list follows. */
+export function refreshList() {
+  if (document.body.dataset.mode === "process") drawList();
 }
 
 export function showDefault() {
@@ -274,6 +289,11 @@ export function showLive(item) {
   buildView({ id: item.key, text: item.ticket.text }, "تذكرة مباشرة");
   item.events.forEach(render);
   P.follow = item.key;
+}
+/** The header's «كيف يشتغل» with a live ticket open in the inbox: its trace, unless this view was on a
+ *  ticket of its own (a replay left part way is drawn whole again instead). */
+export function showLiveFromInbox(item) {
+  if (!P.current || S.live.some((x) => x.key === P.current)) showLive(item);
 }
 export function liveEvent(item, e) {
   if (P.follow === item.key && P.current === item.key && document.body.dataset.mode === "process") render(e);

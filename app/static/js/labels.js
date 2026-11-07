@@ -39,6 +39,10 @@ export const STAGE_DOING = dict({
 });
 export const STAGE_ORDER = ["received", "clean", "classify", "gate", "recheck", "route", "draft", "result"];
 
+// The reasons (server REASON_CODES) that are about a reply: offered only on a ticket that had a draft.
+export const DRAFT_REASONS = new Set(["tone", "dialect", "asks_unneeded", "promise", "false_claim", "wrong_number",
+  "missing_question", "shop_or_agent_name"]);
+
 // What the drafter is asked to request (draft.FIELD_AR).
 export const FIELD_AR = dict({
   reference: "رقم العملية", amount: "المبلغ", date: "تاريخ ووقت العملية", recipient_number: "رقم المستلم",

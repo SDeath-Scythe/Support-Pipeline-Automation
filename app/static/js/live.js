@@ -77,13 +77,19 @@ export function initNewTicket() {
     count.classList.toggle("is-over", n > max);
   };
   ta.addEventListener("input", () => { err.textContent = ""; update(); });
+  // Ctrl/Cmd+Enter runs it, as it approves a draft in the inbox (keyboard.js leaves a dialog's keys to it).
+  const form = document.getElementById("newForm");
+  ta.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === "Enter" && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
+  });
 
   // Closed without running (رجوع, Escape): the pasted text goes. A refused run keeps it while the
   // dialog stays open, so the agent can fix it.
   dlg.addEventListener("close", () => { ta.value = ""; err.textContent = ""; });
   document.getElementById("newCancel").addEventListener("click", () => dlg.close());
-  document.getElementById("newForm").addEventListener("submit", async (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (run.getAttribute("aria-disabled") === "true") return;   // already sending this one
     const text = ta.value.trim();
     const max = S.meta.limits.max_ticket_chars;
     const st = liveState();

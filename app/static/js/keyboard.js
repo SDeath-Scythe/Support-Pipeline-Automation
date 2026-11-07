@@ -6,7 +6,7 @@ import { dismissTips, openDialog, typingIn } from "./util.js";
 
 /**
  * actions: {next, prev, approve, focusDraft, leave, takeOver, disarm, forward, toggleWhy, closeWhy, whyIsDrawer,
- *   toggleTick, undo, tab(n), save()}
+ *   toggleTick, toggleFix, closeFix(target), undo, tab(n), save()}
  */
 export function initKeys(actions) {
   const sheet = document.getElementById("sheet");
@@ -41,6 +41,8 @@ export function initKeys(actions) {
       // a field (a select keeps its own Escape).
       if (dismissTips()) { e.preventDefault(); return; }
       if (agent && !typingIn(e.target) && actions.disarm()) { e.preventDefault(); return; }
+      // The correction panel, also from one of its selects (an open select's list takes Escape itself).
+      if (agent && actions.closeFix(e.target)) { e.preventDefault(); return; }
       const why = document.getElementById("why");
       if (agent && actions.whyIsDrawer() && document.body.classList.contains("why-open")
         && (why.contains(e.target) || !typingIn(e.target))) { e.preventDefault(); actions.closeWhy(); }
@@ -67,6 +69,7 @@ export function initKeys(actions) {
       case "KeyF": e.preventDefault(); actions.forward(); break;
       case "KeyW": e.preventDefault(); actions.toggleWhy(); break;
       case "KeyX": if (actions.toggleTick()) e.preventDefault(); break;
+      case "KeyC": if (actions.toggleFix()) e.preventDefault(); break;
       case "Digit1": case "Digit2": case "Digit3": case "Digit4":
       case "Numpad1": case "Numpad2": case "Numpad3": case "Numpad4":
         e.preventDefault(); actions.tab(Number(e.code.slice(-1)) - 1); break;

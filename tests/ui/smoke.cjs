@@ -499,16 +499,19 @@ async function runPass(browser, pass) {
         && tickNow === "تأكدت من هوية الزبون وراجعت باقي النقاط" && lineNow.startsWith("تحتاج تأكيد: حساب مقفول أو تبديل شريحة.")
         && !afterBox.includes("هوية") && !(await t(p, "#whyLine")).includes("هوية"),
         `${alt} | ${JSON.stringify(items)} | ${tickNow} | ${lineNow} | ${afterBox}`);
-      // Polish 5: the refusal («أشّر على …») goes with its ticket.
+      // T23 (user tests, 7 Nov): a refused approve for the tick alone shows no toast (on a phone it sat on
+      // the tick it asked for): «أشّر على …» under the buttons is no longer quiet, the focus is on the tick.
       await p.evaluate(() => document.activeElement?.blur());
       await p.keyboard.press("Control+Enter");
-      await waitUntil(async () => (await t(p, "#status")).includes("أشّر على"), 3000, "the refusal").catch(() => {});
-      const shownBefore = await p.evaluate(() => document.getElementById("toast").classList.contains("is-shown"));
+      await waitUntil(async () => !(await p.getAttribute("#approveWhy", "class").catch(() => "is-muted")).includes("is-muted"), 3000, "the refusal").catch(() => {});
+      const refused = await p.evaluate(() => ({ toast: document.getElementById("toast").classList.contains("is-shown"),
+        why: document.getElementById("approveWhy")?.textContent || "", quiet: !!document.getElementById("approveWhy")?.classList.contains("is-muted"),
+        active: document.activeElement?.id }));
       await p.keyboard.press("j");
       await sleep(200);
-      check("polish 5: the refusal goes when another ticket opens", shownBefore
-        && !(await p.evaluate(() => document.getElementById("toast").classList.contains("is-shown"))) && !(await t(p, "#ticketTitle")).includes(flagged),
-        `${shownBefore} | ${await t(p, "#status")}`);
+      check("T23: a refused approve for the tick alone: no toast, «أشّر على …» under the buttons not quiet, the focus on the tick; J then opens the next ticket",
+        !refused.toast && refused.why.includes("أشّر على") && !refused.quiet && refused.active === "ackBox" && !(await t(p, "#ticketTitle")).includes(flagged),
+        JSON.stringify(refused));
     }
 
     // M2: a ticked promise is logged as an acknowledged warning (kinds only), and the tick says so.
@@ -705,8 +708,11 @@ async function runPass(browser, pass) {
     await sleep(200);
     check("L2: forwarding a ticket with no team asks for the team first", (await active(p)) === "fixTeam", await active(p));
 
-    // «كيف يشتغل»: the stage map, the scale, the legend, the skipped stage, the rows, the replay.
+    // «كيف يشتغل»: the stage map, the scale, the legend, the skipped stage, the rows, the replay. (T34: the
+    // pasted ticket is open, so the header's «كيف يشتغل» opens on its trace; the overview is one click away.)
     await p.click("#modeProcess");
+    await p.waitForSelector("#traceTitle", { timeout: 10000 });
+    await p.click("#pOverview");
     await p.waitForSelector("#ovTitle", { timeout: 10000 });
     check("L5: the overview starts with the 8-step stage map", (await p.locator(".stage-strip .ss").count()) === 8);
     check("A11Y-7: the outcome bar has a legend with the counts", (await t(p, ".bar-legend")).includes(String(EXPECT.flagged)), await t(p, ".bar-legend"));
@@ -876,6 +882,148 @@ async function runPass(browser, pass) {
     await p.close();
   }
 
+  /** User tests, 7 Nov: bidi, keys, reasons, help and live tickets (T10, T27, T30, T31, T32, T33, T34). */
+  async function pageFixes() {
+    const p = await freshPage("page");
+    const pAct = async (fn, what) => {
+      await settled(p);
+      const n0 = decisions().length;
+      await fn();
+      await waitUntil(() => decisions().length > n0, 5000, what);
+      await sleep(150);
+      return decisions().at(-1);
+    };
+
+    // T10: a number typed with spaces keeps its written order; a typed reference stays whole. The check (and
+    // the log) get the text as typed: plain spaces, a plain hyphen.
+    const id = await openFreshDraft(p);
+    {
+      const sent = p.waitForRequest((r) => r.url().endsWith("/api/check") && r.method() === "POST", { timeout: 5000 });
+      await typeAtEnd(p, " رقمك 0791 079 0226 والعملية M-30417");
+      const body = JSON.parse((await sent.catch(() => null))?.postData() || "{}");
+      const pos = await p.evaluate(() => {
+        const ta = document.getElementById("draft"), m = document.querySelector(".composer-mirror");
+        const at = (s) => {
+          const w = document.createTreeWalker(m, NodeFilter.SHOW_TEXT);
+          for (let n = w.nextNode(); n; n = w.nextNode()) {
+            const i = n.data.indexOf(s);
+            if (i >= 0) { const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + s.length); return Math.round(r.getBoundingClientRect().left); }
+          }
+          return null;
+        };
+        return { first: at("0791"), last: at("0226"), nbsp: ta.value.includes("0791 079 0226"), hyphen: ta.value.includes("M‑30417"),
+          caretAtEnd: ta.selectionStart === ta.value.length };
+      });
+      check(`T10: on ${id}, «0791 079 0226» typed into the draft reads in its written order and «M-30417» stays whole; the check gets the text as typed`,
+        pos.first != null && pos.last != null && pos.first < pos.last && pos.nbsp && pos.hyphen && pos.caretAtEnd
+        && (body.draft || "").includes("0791 079 0226") && body.draft.includes("M-30417"), JSON.stringify({ pos, draft: (body.draft || "").slice(-50) }));
+    }
+
+    // T27: an English phrase in a team note is one left-to-right island, so its words keep their order; the
+    // customer's text, the draft and the rows take each line's own direction.
+    {
+      const r = await p.evaluate(async () => {
+        const u = await import("/static/js/util.js");
+        const box = document.createElement("p");
+        box.append(u.richText("الزبون كال the account was frozen on Sunday وبعدين رقم 9776 593217"));
+        return { islands: [...box.querySelectorAll("bdi")].map((b) => b.textContent),
+          bidi: ["customer-text", "composer-input", "composer-mirror", "row-text"].map((c) => getComputedStyle(document.querySelector(`.${c}`)).unicodeBidi) };
+      });
+      check("T27: an English phrase in a note is one left-to-right island (not one per word); the customer's text, the draft and the rows take each line's own direction",
+        r.islands.join("|") === "the account was frozen on Sunday|9776 593217" && r.bidi.every((x) => x === "plaintext"), JSON.stringify(r));
+    }
+
+    // T30: C opens the correction panel on its first select; Esc there closes it, back on the pencil.
+    {
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press("c");
+      await sleep(150);
+      const opened = await p.evaluate(() => ({ panel: !!document.getElementById("fixPanel"), active: document.activeElement?.id }));
+      await p.keyboard.press("Escape");
+      await sleep(150);
+      const closed = await p.evaluate(() => ({ panel: !!document.getElementById("fixPanel"), active: document.activeElement?.id }));
+      check("T30: C opens the correction panel on its first select; Esc from the select closes it, the focus back on the pencil",
+        opened.panel && opened.active === "fixSub" && !closed.panel && closed.active === "fixToggle", JSON.stringify({ opened, closed }));
+    }
+
+    // T31: a take-over with no draft offers no reasons about a reply; with a draft it offers all of them,
+    // the new ones too. After «سجّل: استلمتها» the toast says to go on in the agents' own channel.
+    {
+      const e = run.tickets.find((r) => r.result.outcome === "escalated" && !decidedIds().has(r.ticket.id)).ticket.id;
+      await openId(p, e);
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press("t");
+      await sleep(200);
+      const chips = () => p.evaluate(() => [...document.querySelectorAll(".reason-chip")].map((c) => c.textContent));
+      const escChips = await chips();
+      await p.keyboard.press("Escape");
+      await openId(p, id);
+      await p.evaluate(() => document.activeElement?.blur());
+      await p.keyboard.press("t");
+      await sleep(200);
+      const draftChips = await chips();
+      const d = await pAct(() => p.keyboard.press("t"), "the take-over");
+      const toast = await t(p, "#status");
+      const ar = meta.reason_codes_ar;
+      check(`T31: on ${e} (no draft) the reasons leave out the reply's (no «${ar.tone}»); on ${id} all ${meta.reason_codes.length}, «${ar.dialect}» and «${ar.false_claim}» too; the toast says «كمّل ويا الزبون من قناتكم»`,
+        escChips.length > 0 && !escChips.includes(ar.tone) && escChips.includes(ar.duplicate) && escChips.includes(ar.instructions)
+        && draftChips.length === meta.reason_codes.length && draftChips.includes(ar.dialect) && draftChips.includes(ar.false_claim)
+        && d.action === "took_over" && d.ticket_id === id && toast.includes("كمّل ويا الزبون من قناتكم"), JSON.stringify({ escChips, draftChips, toast }));
+    }
+
+    // T32: the «?» sheet says how the page works and brings the first-visit card back. T33: the mode is not
+    // among the saved preferences.
+    {
+      await p.click("#helpBtn");
+      const how = await p.evaluate(() => [...document.querySelectorAll("#sheet .how li strong")].map((x) => x.textContent));
+      await p.click("#introAgain");
+      await sleep(200);
+      const card = await p.evaluate(() => ({ shown: document.getElementById("intro").checkVisibility(), sheet: document.getElementById("sheet").open,
+        active: document.activeElement?.id, saved: JSON.parse(localStorage.getItem("support-viewer-prefs-v2") || "{}") }));
+      check("T32: the «?» sheet says how the page works (tabs, ticks, forward, undo) and brings the first-visit card back; T33: no mode is saved",
+        how.join("|") === "التبويبات:|التأشير:|التحويل:|التراجع:" && card.shown && !card.sheet && card.active === "introOk"
+        && card.saved.introSeen === false && !("mode" in card.saved), JSON.stringify({ how, card }));
+      await p.click("#introOk");
+    }
+
+    // T30 / T33 / T34: in «كيف يشتغل», Ctrl+Enter runs a pasted ticket; it heads the side list with its
+    // trace; back in the inbox it is the open ticket, marked «جديدة»; the header's «كيف يشتغل» shows its trace.
+    {
+      await p.click("#modeProcess");
+      await p.waitForSelector("#ovTitle", { timeout: 10000 });
+      await p.click("#newTicket");
+      await p.fill("#newText", "حولت 25 الف لرقم غلط وما رجعت");
+      await p.press("#newText", "Control+Enter");
+      await p.waitForFunction(() => /live-/.test(document.querySelector("#pList li:first-child .prow-meta")?.textContent || "")
+        && !document.querySelector("#pList .pdot.running"), null, { timeout: 15000 }).catch(() => {});
+      const inProc = await p.evaluate(() => ({ title: document.getElementById("traceTitle")?.textContent || "",
+        first: document.querySelector("#pList li:first-child .prow-meta")?.textContent || "", dialog: document.getElementById("newDialog").open }));
+      await p.click("#modeAgent");
+      await sleep(300);
+      const inbox = await p.evaluate(() => {
+        const r = document.querySelector("#queueList [aria-selected=true]");
+        return { key: r?.dataset.key || "", isNew: r?.querySelector(".row-new")?.textContent || "", title: document.getElementById("ticketTitle")?.textContent || "" };
+      });
+      const short = inbox.key.slice(-6);
+      await p.click("#modeProcess");
+      await p.waitForSelector("#traceTitle", { timeout: 5000 }).catch(() => {});
+      const trace = await t(p, "#traceTitle");
+      check("T30 / T33 / T34: Ctrl+Enter runs a pasted ticket; it heads «كيف يشتغل»'s list; back in the inbox it is the open ticket, «جديدة»; the header's «كيف يشتغل» shows its trace",
+        !inProc.dialog && inProc.title.includes("live-") && inProc.first.includes("live-") && inbox.key.startsWith("live-") && inbox.isNew === "جديدة"
+        && inbox.title.includes(short) && trace.includes(short), JSON.stringify({ inProc, inbox, trace }));
+      await p.click("#modeAgent");
+    }
+    await cspOf(p, "page");
+    await p.close();
+
+    // T33: a mode saved by an older page is not read: the page starts in «وضع الموظف».
+    const old = await freshPage("old-prefs", (x) => x.addInitScript(() => localStorage.setItem("support-viewer-prefs-v2",
+      JSON.stringify({ mode: "process", singleKeys: true, whyOpen: false, source: null, introSeen: true }))));
+    check("T33: a saved «كيف يشتغل» from an older page is not kept: the page starts in «وضع الموظف»",
+      (await old.evaluate(() => document.body.dataset.mode)) === "agent" && (await old.getAttribute("#modeAgent", "aria-pressed")) === "true");
+    await old.close();
+  }
+
   async function phoneFixes() {
     const p = await freshPage("phone-fixes");
     if (await p.evaluate(() => document.body.dataset.screen === "ticket")) await p.locator("#agentMain .back-btn").first().click();
@@ -888,6 +1036,67 @@ async function runPass(browser, pass) {
     await sleep(300);
     const bh = await p.evaluate(() => [document.getElementById("actionBar").getBoundingClientRect().height, parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar-h"))]);
     check("A11Y-1: --bar-h follows the phone action bar", Math.abs(bh[0] - bh[1]) <= 2, JSON.stringify(bh));
+
+    // T22 (user tests, 7 Nov): a ticket opened from the queue is a history entry holding its id only; the
+    // back gesture comes back to the queue, on the page; «القائمة» goes back through that entry too.
+    {
+      const hist = await p.evaluate(() => ({ state: JSON.stringify(history.state), url: location.href, screen: document.body.dataset.screen }));
+      await p.goBack();
+      await sleep(300);
+      const back = await p.evaluate(() => ({ screen: document.body.dataset.screen, url: location.href, queue: document.getElementById("queueList")?.checkVisibility() }));
+      await p.locator("#queueList [role=option]").first().click();
+      await sleep(300);
+      await p.locator("#agentMain .back-btn").first().click();
+      await sleep(300);
+      const byBtn = await p.evaluate(() => ({ screen: document.body.dataset.screen, state: history.state }));
+      check("T22: on a phone a ticket is a history entry with its id only; back (the gesture or «القائمة») returns to the queue, on the page",
+        hist.screen === "ticket" && /^\{"ticket":"[\w.:-]+"\}$/.test(hist.state) && back.screen === "queue" && back.queue && back.url === hist.url
+        && byBtn.screen === "queue" && byBtn.state === null, JSON.stringify({ hist, back, byBtn }));
+    }
+
+    // T23: the toast sits at the top, under the header, never over the tick or the action bar.
+    {
+      await p.locator("#queueList [role=option]").first().click();
+      await sleep(300);
+      const pos = await p.evaluate(async () => {
+        (await import("/static/js/ui.js")).showToast("تجربة");
+        await new Promise((r) => setTimeout(r, 300));
+        const t = document.getElementById("toast").getBoundingClientRect(), b = document.getElementById("actionBar").getBoundingClientRect();
+        return { top: Math.round(t.top), bottom: Math.round(t.bottom), head: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--top-h")), bar: Math.round(b.top) };
+      });
+      check("T23: on a phone the toast is at the top under the header, far from the action bar", pos.top >= pos.head && pos.top <= pos.head + 16 && pos.bottom < pos.bar - 100,
+        JSON.stringify(pos));
+      await p.click("#toastClose");
+    }
+
+    // T36: the viewport shrinks with the on-screen keyboard; on a short screen the action bar steps into
+    // the flow while the draft has the focus, and the new-ticket dialog keeps «شغّلها» in view.
+    {
+      const metaVp = await p.getAttribute('meta[name="viewport"]', "content");
+      await p.locator("#agentMain .back-btn").first().click();
+      await p.click("#tab-drafted");
+      await p.locator("#queueList [role=option]").first().click();
+      await sleep(300);
+      await p.setViewportSize({ width: 360, height: 380 });
+      await sleep(200);
+      const hasDraft = await p.locator("#draft").count();
+      if (hasDraft) await p.focus("#draft");
+      await sleep(100);
+      const typing = await p.evaluate(() => getComputedStyle(document.getElementById("actionBar")).position);
+      await p.evaluate(() => document.activeElement?.blur());
+      await sleep(100);
+      const resting = await p.evaluate(() => getComputedStyle(document.getElementById("actionBar")).position);
+      await p.locator("#agentMain .back-btn").first().click();
+      await sleep(200);
+      await p.click("#newTicket");
+      await sleep(200);
+      const dlg = await p.evaluate(() => { const b = document.getElementById("newRun").getBoundingClientRect(); return { bottom: Math.round(b.bottom), top: Math.round(b.top), h: innerHeight }; });
+      await p.click("#newCancel");
+      await p.setViewportSize(pass.viewport);
+      check("T36: interactive-widget=resizes-content; at 360 × 380 the action bar is in the flow while the draft has the focus (fixed otherwise), and «شغّلها» is in view in the dialog",
+        /interactive-widget=resizes-content/.test(metaVp) && hasDraft > 0 && typing === "static" && resting === "fixed" && dlg.top >= 0 && dlg.bottom <= dlg.h,
+        JSON.stringify({ metaVp, hasDraft, typing, resting, dlg }));
+    }
     await cspOf(p, "phone-fixes");
     await p.close();
   }
@@ -1081,7 +1290,14 @@ async function runPass(browser, pass) {
       await sleep(400);
       check("flagged: approving before the tick does nothing", decisions().length === n0 && (await selected()) === k2);
       const toastOn = () => page.evaluate(() => document.getElementById("toast").classList.contains("is-shown"));
-      check("flagged: the refusal says what to tick", (await toastOn()) && (await text("#status")).includes("أشّر على"), await text("#status"));
+      const asked = await page.evaluate(() => {
+        const c = document.getElementById("confirmBox").getBoundingClientRect(), b = document.getElementById("actionBar").getBoundingClientRect();
+        const w = document.getElementById("approveWhy");
+        return { words: w?.textContent || "", quiet: !!w?.classList.contains("is-muted"), above: c.top >= 0 && c.bottom <= b.top + 1 };
+      });
+      // (The toast of the decision before may still be on screen: the refusal is not in it.)
+      check("flagged: the refusal says what to tick under the buttons, not in a toast, and the box is in view above the action bar (T23)",
+        !(await text("#status")).includes("أشّر على") && asked.words.includes("أشّر على") && !asked.quiet && asked.above, JSON.stringify(asked));
       await shot(page, "flagged");
       if (pass.phone) {
         await page.check("#ackBox");
@@ -1103,8 +1319,8 @@ async function runPass(browser, pass) {
       const rowNamed = await page.getByRole("option", { name: /^تحتاج تأكيد\s*،/, includeHidden: true }).and(page.locator(`#opt-${k2}`)).count();
       const nameOnly = await page.evaluate((k) => !!document.querySelector(`#opt-${k} .sr-only .row-word`) && !document.querySelector(`#opt-${k} .row-status`), k2);
       check("a flagged row's name starts with «تحتاج تأكيد», like its tab (J8; 5 Nov calm: not on screen)", rowNamed === 1 && nameOnly, `${rowNamed} ${nameOnly}`);
-      check("flagged: the refusal goes as soon as the box is ticked (polish 5)", !(await toastOn()) && !(await page.locator("#approveWhy").count()),
-        await text("#status"));
+      check("flagged: the refusal goes as soon as the box is ticked (polish 5; T23: it was never a toast)", !(await text("#status")).includes("أشّر على")
+        && !(await page.locator("#approveWhy").count()), await text("#status"));
       const d = await act(() => (pass.phone ? page.click("#approveBtn") : page.keyboard.press("Control+Enter")), "the flagged approve");
       check(`flagged approve logs «approved» for ${k2}${pass.phone ? "" : " (T21: Ctrl+Enter, Space, Ctrl+Enter; the draft as it was)"}`,
         d.action === "approved" && d.ticket_id === k2 && d.pipeline_outcome === "flagged" && d.final_sha256 === d.draft_sha256, JSON.stringify(d));
@@ -1397,7 +1613,7 @@ async function runPass(browser, pass) {
 
     // 14. The fixes from the 1 Nov review, on a fresh page of the same server (desktop passes); the
     // phone passes check the phone-only ones.
-    if (pass.phone) await phoneFixes(); else { await reviewFixes(); await flowFixes(); }
+    if (pass.phone) await phoneFixes(); else { await reviewFixes(); await flowFixes(); await pageFixes(); }
   } catch (e) {
     check("the pass ran to its end", false, e.stack || e.message);
   } finally {
@@ -1746,8 +1962,8 @@ async function runFresh(browser, pass) {
       `${[...risky].join(",")} | ${served.marked} | ${callout} | ${whyStep.slice(-200)}`);
     await pr.evaluate(() => document.activeElement?.blur());
     await pr.keyboard.press("Control+Enter");
-    await waitUntil(async () => (await t(pr, "#status")).includes("أشّر على"), 3000, "the refusal").catch(() => {});
-    const refusedWith = await t(pr, "#status");
+    await waitUntil(async () => !(await pr.getAttribute("#approveWhy", "class").catch(() => "is-muted")).includes("is-muted"), 3000, "the refusal").catch(() => {});
+    const refusedWith = await t(pr, "#approveWhy");   // T23: said under the buttons, not in a toast
     await pr.check("#ackBox");
     await sleep(100);
     check("account_risk: approve stays off until «تأكدت من هوية الزبون» is ticked, then it is on",

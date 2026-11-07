@@ -10,7 +10,7 @@ import { NetworkError, ServerError } from "./api.js";
 import { buildComposer, isBlocking, originalDraft } from "./composer.js";
 import { factLine, factsOf, textWithFacts } from "./facts.js";
 import {
-  ACTION_ICON, ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, FIELD_AR, IDENTITY_IF_REPLY_AR, NOT_NEEDED_AR,
+  ACTION_ICON, ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, DRAFT_REASONS, FIELD_AR, IDENTITY_IF_REPLY_AR, NOT_NEEDED_AR,
   PRIORITY_AR, STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL, TICK_IDENTITY_AND_REST, WHY_AR, notNeededAR,
 } from "./labels.js";
 import {
@@ -20,8 +20,8 @@ import {
 } from "./state.js";
 import { hideToastIf, setBanner, showToast, toastShows } from "./ui.js";
 import {
-  MOD, add, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, median, num, plainText, richText,
-  ticketId, ticketsAr,
+  MOD, add, coarsePointer, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, median, num, plainText, richText,
+  ticketId, ticketsAr, typingIn,
 } from "./util.js";
 
 const hooks = { toProcess: null, newTicket: null, rerun: null, cancelLive: null, reload: null };
@@ -36,6 +36,7 @@ let armed = null;
 const armedOn = (it) => !!armed && !!it && armed.u === uid(it);
 let fixOpenFor = null;   // uid of the ticket whose «صحّح» panel is open
 let refusal = null;      // {id, key, kind, reason}: the toast that refused an approve, while it still applies
+let tickAsked = null;    // the ticket whose approve was refused for its tick alone: its reason is no longer quiet
 let shownKey = null;     // the ticket drawn last: a different one starts at the top of the pane
 
 // A ticket that just came on screen can't be decided for a moment: the tap or Ctrl+Enter that decided the
@@ -66,8 +67,8 @@ const PAGE_FLAG_AR = dict({ connection_lost: "انقطع الاتصال" });
 const flagShort = (f) => String(S.meta.flag_ar[f] || PAGE_FLAG_AR[f] || f).split(/[:،]/)[0].trim();
 /** A flag as one sentence with no colon in it (WHY_AR, else the server's wording joined with «، »). */
 const flagSentence = (f) => WHY_AR[f] || `${String(S.meta.flag_ar[f] || PAGE_FLAG_AR[f] || f).replace(/\s*:\s*/g, "، ")}.`;
-/** The shortcut letters, only while single-key shortcuts are on: « (T / ف)». */
-const keys = (latin, ar) => (S.prefs.singleKeys ? ` (${latin} / ${ar})` : "");
+/** The shortcut letters, only while single-key shortcuts are on and not on a touch screen: « (T / ف)». */
+const keys = (latin, ar) => (S.prefs.singleKeys && !coarsePointer() ? ` (${latin} / ${ar})` : "");
 /** A button's pointer hint: what it does and its key (the key chips are gone from the buttons; every key
  *  is in the «?» sheet). */
 const keyTitle = (what, latin, ar) => `${what}${keys(latin, ar)}`;
@@ -196,6 +197,18 @@ function keepCaretInView() {
   if (!caret || !bar) return;
   const over = caret.bottom + 12 - bar.top;
   if (over > 0) scroller()?.scrollBy(0, over);
+}
+
+/** A point to tick appeared under the draft while the agent types (a warning in the edit): bring it into
+ *  view above the action bar, as far as the caret's line stays on screen. */
+function revealTick(box) {
+  if (!composer || document.activeElement !== composer.textarea) return;
+  const bar = $("actionBar")?.getBoundingClientRect();
+  const caret = composer.caretRect();
+  if (!bar || !caret) return;
+  const top = isPhone() ? 0 : $("main").getBoundingClientRect().top;
+  const by = Math.min(box.getBoundingClientRect().bottom + 8 - bar.top, caret.top - top - 8);
+  if (by > 0) scroller()?.scrollBy(0, by);
 }
 
 // --- the queue ---
@@ -329,6 +342,8 @@ function row(it, active) {
   },
   el("span", { class: "row-meta" }, status, e.priority || it.status !== "running" ? prioNode(e.priority) : null,
     el("span", { class: "row-id" }, ticketId(it.key)),
+    // A ticket pasted in this page, done and not decided yet: one small word, so it is found in its tab.
+    it.live && !d && it.status !== "running" ? el("span", { class: "row-new", text: "جديدة" }) : null,
     d ? el("span", { class: "row-decision", title: st.word }, icon(st.icon)) : null),
   el("span", { class: "row-text", dir: "rtl" }, digitRuns(firstWords(it.ticket.text))));
 }
@@ -390,12 +405,24 @@ export function open(key, { user = false, focus = null, focusRow = false } = {})
   renderQueue({ focusRow });
   renderTicket();
   renderWhy();
-  // On a phone the queue gives way to the ticket: focus (and scroll) moves to its heading.
-  if (user && isPhone()) { document.body.dataset.screen = "ticket"; focus = "heading"; }
+  // On a phone the queue gives way to the ticket: focus (and scroll) moves to its heading. The ticket
+  // screen is a history entry of its own (the ticket's id, never its text), so the phone's back gesture
+  // comes back to the queue instead of leaving the page.
+  if (user && isPhone()) {
+    if (document.body.dataset.screen !== "ticket") history.pushState({ ticket: key }, "");
+    document.body.dataset.screen = "ticket";
+    focus = "heading";
+  }
   if (focus === "heading") $("ticketTitle")?.focus();
 }
 
+/** «القائمة»: back through the history entry open() added, if it did (popstate then shows the queue). */
 function backToQueue() {
+  if (history.state?.ticket) history.back();
+  else showQueue();
+}
+/** The phone's queue screen (popstate, «القائمة»). */
+export function showQueue() {
   document.body.dataset.screen = "queue";
   renderQueue({ focusRow: true });
 }
@@ -425,6 +452,7 @@ export function renderTicket() {
   if (changed && whyCovers()) setWhyOpen(false);
   shownKey = key;
   if (changed && key) settle();
+  if (changed) tickAsked = null;
   if (S.agent.loading) return main.replaceChildren(ticketSkeleton());
   if (S.agent.error) return main.replaceChildren(errorState(S.agent.error));
   const items = allItems();
@@ -645,9 +673,9 @@ function refreshAfterCorrection(it) {
   renderWhy();
   rowInView(it);
 }
-/** A correction can re-sort the queue (a new priority): the open row stays in view. */
-function rowInView(it) {
-  if (!isPhone()) $(`opt-${it.key}`)?.scrollIntoView({ block: "nearest" });
+/** A correction can re-sort the queue (a new priority), a live ticket comes back: the open row stays in view. */
+export function rowInView(it) {
+  if (it && !isPhone()) $(`opt-${it.key}`)?.scrollIntoView({ block: "nearest" });
 }
 
 /** The customer's message, its facts underlined where they were written, and under it one quiet line with
@@ -790,8 +818,10 @@ function refreshGate(it) {
           el("span", { text: tickText(t) })),
         many ? null : notNeeded(t.list[0]))) : el("div", { id: "confirmBox", tabindex: "-1" });
     // Under the draft: it can grow or go without moving the draft or the caret.
+    const appeared = !box.childElementCount && t.list.length > 0;
     box.replaceWith(next);
     if (hadFocus) $(hadFocus)?.focus();
+    if (appeared) revealTick(next);
   }
   refreshActions(it);
   keepCaretInView();
@@ -816,8 +846,8 @@ function handoffSection(it) {
     const i = l.indexOf(":");
     const k = l.slice(0, i);
     return i > 0 && i < 20 ? el("div", {}, el("dt", {}, k, k === SUMMARY ? el("span", { class: "dt-tag", text: "كتبها نموذج" }) : null),
-      el("dd", { dir: "rtl" }, richText(l.slice(i + 1).trim())))
-      : el("div", {}, el("dd", { dir: "rtl" }, richText(l)));
+      el("dd", { dir: "auto" }, richText(l.slice(i + 1).trim())))
+      : el("div", {}, el("dd", { dir: "auto" }, richText(l)));
   }));
   const byModel = lines.some((l) => l.startsWith(`${SUMMARY}:`));
   // The note was written for the pipeline's type and team: after a correction it is marked as the
@@ -847,11 +877,13 @@ function reasonsBox(it) {
   const u = uid(it);
   const chosen = S.reasons.get(u) || new Set();
   const on = armedOn(it);
+  // What a reply says (its tone, a promise, a number) is a reason only where there was a draft.
+  const hadDraft = !!originalDraft(it).text;
   const d = el("details", { id: "reasonBox", class: "reasons", open: on },
     el("summary", {}, on ? "ليش استلمتها؟ " : "ليش غيّرتها؟ ", el("span", { class: "muted", text: "(اختياري)" }),
       chosen.size ? el("span", { class: "reason-count" }, " · ", num(chosen.size)) : null),
     el("div", { class: "reason-chips", role: "group", "aria-label": "الأسباب" },
-      S.meta.reason_codes.map((c) => el("button", { type: "button", class: "reason-chip", "aria-pressed": String(chosen.has(c)),
+      S.meta.reason_codes.filter((c) => hadDraft || !DRAFT_REASONS.has(c)).map((c) => el("button", { type: "button", class: "reason-chip", "aria-pressed": String(chosen.has(c)),
         onclick: (e) => {
           const set = S.reasons.get(u) || new Set();
           if (set.has(c)) set.delete(c); else set.add(c);
@@ -866,6 +898,8 @@ function refreshReasons(it) {
   if (box && reasonsShown(it) !== (box.tagName === "DETAILS")) box.replaceWith(reasonsBox(it));
 }
 
+// After a take-over: the reply is the agent's, outside this page.
+const TOOK_OVER_NEXT = "كمّل ويا الزبون من قناتكم.";
 const charsAr = (n) => countAr(n, { one: "حرف واحد تغيّر", two: "حرفين تغيّروا", few: "حروف تغيّرت", many: "حرف تغيّر" });
 /** The corrections as words: «النوع: …»، «القسم: …»، «الأولوية: P2». */
 const corrWords = (corr) => [corr.subcategory && `النوع: ${subAr(corr.subcategory)}`, corr.team && `القسم: ${teamAr(corr.team)}`,
@@ -886,6 +920,7 @@ function decidedSection(it, d) {
       d.action === "forwarded" && effective(it).team ? ` ${toTeam(teamAr(effective(it).team))}` : "", " · ", fmtSeconds(d.seconds)),
     body,
     (d.warnings_acknowledged || []).includes("account_risk") ? el("p", { class: "hint", text: "تأكدت من هوية الزبون قبل الاعتماد." }) : null,
+    d.action === "took_over" ? el("p", { class: "hint", text: TOOK_OVER_NEXT }) : null,
     reasons.length ? el("p", { class: "hint" }, "الأسباب: ", reasons.join("، ")) : null,
     corrText.length ? el("p", { class: "hint" }, "صحّحت: ", corrText.join("، ")) : null);
 }
@@ -946,7 +981,7 @@ function actionBar(it) {
       "aria-describedby": a.ok ? null : "approveWhy", onclick: () => approve() }, icon("ready"), label, kbd(`${MOD}+Enter`)),
     take(), badge,
     // Only the tick missing (it is just above): quiet. Anything else (a blocking check above all): its colour.
-    a.ok ? null : el("p", { id: "approveWhy", class: `approve-why ${a.blocked ? "is-bad" : a.needsAck ? "is-muted" : ""}` },
+    a.ok ? null : el("p", { id: "approveWhy", class: `approve-why ${a.blocked ? "is-bad" : a.needsAck && tickAsked !== it.key ? "is-muted" : ""}` },
       a.needsAck ? null : icon(a.blocked ? "lock" : "check"), a.reason));
   return bar;
 }
@@ -989,9 +1024,14 @@ async function failed(e, it) {
     ? "ما انحفظ القرار: انقطع الاتصال بالخادم." : "ما انحفظ القرار.");
 }
 
-/** Only the tick is missing: the focus goes to the box itself, so Space ticks it (never into the draft). */
-function focusWhatToCheck() {
-  ($("ackBox") || $("confirmBox"))?.focus();
+/** Only the tick is missing: no toast (on a phone it sat on the tick it asked for). Its reason under the
+ *  action buttons takes the warning colour, the box comes into view above the action bar, and the focus
+ *  goes to the tick itself, so Space ticks it (never into the draft). */
+function askForTick(it) {
+  tickAsked = it.key;
+  refreshActions(it);
+  $("confirmBox")?.scrollIntoView({ block: "nearest" });
+  ($("ackBox") || $("confirmBox"))?.focus({ preventScroll: true });
 }
 
 /** X: tick (or untick) the box under the draft from anywhere outside a text field; the focus goes to it. */
@@ -1024,8 +1064,8 @@ export async function approve() {
     const a = approval(it);
     const st = composer.state();
     if (!a.ok || !st.current) {
-      refuse(it, a.ok ? "التعديل ما انفحص بعد، جرب مرة ثانية." : a.reason);
-      if (a.needsAck) focusWhatToCheck();
+      if (a.needsAck) askForTick(it);
+      else refuse(it, a.ok ? "التعديل ما انفحص بعد، جرب مرة ثانية." : a.reason);
       return;
     }
     const record = await decide(it, st.edited ? "edited" : "approved",
@@ -1122,6 +1162,7 @@ function after(it, record, at) {
     ? ["تحوّلت ", ticketId(it.key), ` ${toTeam(teamAr(effective(it).team))}`, " · الباقي ", num(remaining)]
     : [`${ACTION_WORD[record.action]} `, ticketId(it.key), " · الباقي ", num(remaining)];
   if (note) msg.push(" · ", note);
+  if (record.action === "took_over") msg.push(el("br"), TOOK_OVER_NEXT);
   showToast(msg, () => undoKey(it.key, entry));
   S.agent.openKey = next ? next.key : null;
   startClock(next);
@@ -1166,6 +1207,21 @@ export function undoLast() {
     return undoKey(last.key, last);
   }
   undoAsked = { entry: last, toast: showToast(["آخر قرار كان على ", ticketId(last.key), ". تتراجع عنه؟"], () => undoKey(last.key, last)) };
+}
+
+/** C: open the correction panel (its first select takes the focus), or close it. */
+export function toggleFix() {
+  const b = $("fixToggle");
+  if (!b) return false;
+  b.click();
+  return true;
+}
+/** Escape: close the correction panel from inside it, or from anywhere that is not a field. */
+export function closeFix(target) {
+  const panel = $("fixPanel");
+  if (!panel || !(panel.contains(target) || !typingIn(target))) return false;
+  $("fixToggle")?.click();   // closing: the focus goes to the pencil
+  return true;
 }
 
 export function focusDraft() {
@@ -1321,6 +1377,8 @@ function allDone() {
 }
 
 export function liveUpdated(it) {
+  // Done while «كيف يشتغل» was on screen: it is the ticket the inbox opens on when the agent comes back.
+  if (it.status !== "running" && S.mode !== "agent") S.agent.openKey = it.key;
   renderQueue();
   if (S.agent.openKey !== it.key) return;
   if (it.status === "running") {

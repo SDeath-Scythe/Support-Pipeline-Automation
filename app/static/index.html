@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <meta name="color-scheme" content="light dark">
 <title>صندوق التذاكر</title>
 <link rel="stylesheet" href="/static/fonts/fonts.css">
@@ -36,7 +36,7 @@
       تذكرة جديدة
     </button>
     <span id="newTicketWhy" class="sr-only"></span>
-    <button type="button" id="helpBtn" class="btn btn-quiet icon-btn" aria-label="اختصارات لوحة المفاتيح">
+    <button type="button" id="helpBtn" class="btn btn-quiet icon-btn" aria-label="شلون تشتغل، والاختصارات">
       <kbd aria-hidden="true">?</kbd>
     </button>
   </div>
@@ -118,19 +118,29 @@
 
 <dialog id="sheet" class="dialog" aria-labelledby="sheetTitle">
   <div class="dialog-body">
-    <h2 id="sheetTitle" class="dialog-title">اختصارات لوحة المفاتيح</h2>
+    <h2 id="sheetTitle" class="dialog-title">شلون تشتغل</h2>
+    <!-- The page in four lines; the first-visit card can come back from here. -->
+    <ul class="how">
+      <li><strong>التبويبات:</strong> «تحتاج تأكيد» و«متصعّدة» و«جاهزة» بيها اللي باقي، و«خلصت» بيها اللي قررت عليها.</li>
+      <li><strong>التأشير:</strong> إذا اكو نقطة تحت المسودة، تأكد منها وأشّر عليها، وبعدين اعتمد.</li>
+      <li><strong>التحويل:</strong> المتصعّدة ماكو إلها مسودة: حوّلها للقسم، أو استلمها وكمّل ويا الزبون من قناتكم.</li>
+      <li><strong>التراجع:</strong> بعد كل قرار تطلع رسالة بيها «تراجع»، والتذكرة بـ«خلصت» بيها «تراجع» هم.</li>
+    </ul>
+    <button type="button" id="introAgain" class="link-btn">رجّع بطاقة «أول مرة هنا؟»</button>
+    <h3 class="section-title sheet-keys">اختصارات لوحة المفاتيح</h3>
     <p class="hint">تشتغل على الكيبورد العربي هم. الحرف الواحد ما يشتغل وقت الكتابة.</p>
     <table class="keys">
       <tbody>
         <tr><th scope="row"><kbd dir="ltr">J</kbd> / <kbd class="kbd-ar">ت</kbd> أو <kbd>↓</kbd></th><td>التذكرة الجاية</td></tr>
         <tr><th scope="row"><kbd dir="ltr">K</kbd> / <kbd class="kbd-ar">ن</kbd> أو <kbd>↑</kbd></th><td>التذكرة اللي قبلها</td></tr>
-        <tr><th scope="row"><kbd dir="ltr">Ctrl+Enter</kbd> أو <kbd dir="ltr">⌘+Enter</kbd></th><td>اعتمد وانتقل، حتى من داخل المسودة</td></tr>
+        <tr><th scope="row"><kbd dir="ltr">Ctrl+Enter</kbd> أو <kbd dir="ltr">⌘+Enter</kbd></th><td>اعتمد وانتقل، حتى من داخل المسودة؛ وبـ«تذكرة جديدة» شغّلها</td></tr>
         <tr><th scope="row"><kbd dir="ltr">E</kbd> / <kbd class="kbd-ar">ث</kbd></th><td>روح للمسودة</td></tr>
-        <tr><th scope="row"><kbd>Esc</kbd></th><td>اطلع من المسودة، أو سدّ «ليش؟»، أو ارجع من «استلمها بنفسي»</td></tr>
+        <tr><th scope="row"><kbd>Esc</kbd></th><td>اطلع من المسودة، أو سدّ «ليش؟» أو التصحيح، أو ارجع من «استلمها بنفسي»</td></tr>
         <tr><th scope="row"><kbd dir="ltr">T</kbd> / <kbd class="kbd-ar">ف</kbd></th><td>استلمها بنفسي</td></tr>
         <tr><th scope="row"><kbd dir="ltr">F</kbd> / <kbd class="kbd-ar">ب</kbd></th><td>حوّلها للقسم (المتصعّدة)</td></tr>
         <tr><th scope="row"><kbd dir="ltr">W</kbd> / <kbd class="kbd-ar">ص</kbd></th><td>افتح أو سدّ «ليش؟»</td></tr>
         <tr><th scope="row"><kbd dir="ltr">X</kbd> / <kbd class="kbd-ar">ء</kbd></th><td>أشّر على «تأكدت» تحت المسودة، أو شيل التأشير</td></tr>
+        <tr><th scope="row"><kbd dir="ltr">C</kbd> / <kbd class="kbd-ar">ؤ</kbd></th><td>صحّح النوع أو القسم أو الأولوية (افتح أو سدّ)</td></tr>
         <tr><th scope="row"><kbd dir="ltr">Ctrl+Z</kbd> أو <kbd dir="ltr">⌘+Z</kbd></th><td>تراجع عن قرار هالتذكرة، أو يسألك عن آخر قرار (برا المسودة)</td></tr>
         <tr><th scope="row"><kbd>1</kbd> إلى <kbd>4</kbd></th><td>التبويبات</td></tr>
         <tr><th scope="row"><kbd dir="ltr">?</kbd> / <kbd class="kbd-ar">؟</kbd></th><td>هذي القائمة (أو الزر <kbd dir="ltr">?</kbd> فوق)</td></tr>

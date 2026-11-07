@@ -125,10 +125,14 @@ def test_stylesheets_load_nothing_from_another_site():
 
 
 def test_only_preferences_go_to_local_storage():
-    """Ticket text, drafts and edits stay in memory: the one stored key holds five preferences."""
+    """Ticket text, drafts and edits stay in memory: the one stored key holds four preferences (since the
+    7 Nov user tests not the mode: every visit starts in the inbox). The phone's history entry for a ticket
+    holds its id only."""
     util = (STATIC / "js" / "util.js").read_text(encoding="utf-8")
     assert util.count("localStorage.setItem") == 1
-    assert "JSON.stringify({ mode, singleKeys, whyOpen, source, introSeen })" in util
+    assert "JSON.stringify({ singleKeys, whyOpen, source, introSeen })" in util
+    pushes = [m for f in JS for m in re.findall(r"history\.(?:push|replace)State\(([^;]*)\);", f.read_text(encoding="utf-8"))]
+    assert pushes == ['{ ticket: key }, ""']
     for f in JS:
         src = f.read_text(encoding="utf-8")
         assert "sessionStorage" not in src and "indexedDB" not in src and "document.cookie" not in src, f.name

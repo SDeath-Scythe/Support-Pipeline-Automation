@@ -155,12 +155,16 @@ export function digitRuns(s) {
 }
 
 // The draft box can't hold an island, so a space between two digits is shown as a no-break space
-// (U+00A0): its bidi class (CS) joins the groups into one number. One character for one, so the check
-// offsets stay valid; realDraft() turns it back before the text is compared, checked or saved.
+// (U+00A0): its bidi class (CS) joins the groups into one number. A hyphen between two letters or digits
+// («2497-53512», «M-30417») is shown as a non-breaking hyphen (U+2011), so a reference never splits across
+// lines. One character for one, so the check offsets stay valid; realDraft() turns them back before the
+// text is compared, checked or saved.
 const DIGIT_SPACE = /(?<=[0-9\u0660-\u0669\u06F0-\u06F9]) (?=[0-9\u0660-\u0669\u06F0-\u06F9])/g;
 const DIGIT_NBSP = /(?<=[0-9\u0660-\u0669\u06F0-\u06F9])\u00A0(?=[0-9\u0660-\u0669\u06F0-\u06F9])/g;
-export const shownDraft = (text) => String(text ?? "").replace(DIGIT_SPACE, "\u00A0");
-export const realDraft = (shown) => String(shown ?? "").replace(DIGIT_NBSP, " ");
+const WORD_HYPHEN = /(?<=[\p{L}\p{N}])-(?=[\p{L}\p{N}])/gu;
+const WORD_NBHYPHEN = /(?<=[\p{L}\p{N}])\u2011(?=[\p{L}\p{N}])/gu;
+export const shownDraft = (text) => String(text ?? "").replace(DIGIT_SPACE, "\u00A0").replace(WORD_HYPHEN, "\u2011");
+export const realDraft = (shown) => String(shown ?? "").replace(DIGIT_NBSP, " ").replace(WORD_NBHYPHEN, "-");
 
 // Direction controls (embeddings, overrides, isolates, marks) change the order text is drawn in, not the
 // order the model and the rules read. The page shows the order they read, and says how many it hid.
@@ -184,15 +188,21 @@ export const ticketsAr = (n) => countAr(n, TICKET_FORMS);
 /** The same as plain text (for an <option>, a title). */
 export const ticketsText = (n) => (n === 1 ? TICKET_FORMS.one : n === 2 ? TICKET_FORMS.two : `${n} ${n >= 3 && n <= 10 ? TICKET_FORMS.few : TICKET_FORMS.many}`);
 
-/** Text with every run of Latin letters or digits wrapped in an LTR island (for notes from the pipeline). */
+// A Latin word or number («TX-2291», «2,000,000», «(Sunday)»), and a run of them with the spaces, commas
+// and brackets between them.
+const LATIN_WORD = "\\(?[0-9A-Za-z$](?:[0-9A-Za-z$,._:/'’-]*[0-9A-Za-z$])?\\)?";
+const LATIN_RUN = new RegExp(`${LATIN_WORD}(?:[,;]?[ \\t]+${LATIN_WORD})*`, "g");
+/** Text with every run of Latin words or digits wrapped in one LTR island (for notes from the pipeline).
+ *  One island per run, not per word: islands side by side are laid out right to left, so an English
+ *  phrase split into words would read backwards. */
 export function richText(s) {
   const frag = document.createDocumentFragment();
-  const re = /[0-9A-Za-z$](?:[0-9A-Za-z$,._:/-]*[0-9A-Za-z$])?(?:\s[0-9](?:[0-9,._-]*[0-9])?)*/g;
+  const re = new RegExp(LATIN_RUN);
   let last = 0, m;
   const str = String(s ?? "");
   while ((m = re.exec(str))) {
     if (m.index > last) frag.append(str.slice(last, m.index));
-    frag.append(ltr(m[0], /^[0-9$]/.test(m[0]) ? "num" : ""));
+    frag.append(ltr(m[0], /^\(?[0-9$]/.test(m[0]) ? "num" : ""));
     last = m.index + m[0].length;
   }
   if (last < str.length) frag.append(str.slice(last));
@@ -274,14 +284,14 @@ const PREF_KEY = "support-viewer-prefs-v2";
 const PREF_KEY_V1 = "support-viewer-prefs-v1";
 // introSeen: the first-visit card («أول مرة هنا؟») was dismissed with «فهمت».
 // whyOpen: the agent opened «ليش؟» (the button or W) and left it open.
-const PREF_DEFAULTS = { mode: "agent", singleKeys: true, whyOpen: false, source: null, introSeen: false };
+// The mode is not kept: every visit starts in «وضع الموظف» (a pasted ticket then opens as a ticket, not a trace).
+const PREF_DEFAULTS = { singleKeys: true, whyOpen: false, source: null, introSeen: false };
 export function loadPrefs() {
   try {
     const now = localStorage.getItem(PREF_KEY);
     const raw = JSON.parse(now || localStorage.getItem(PREF_KEY_V1) || "{}");
     if (!now) delete raw.whyOpen;
     const out = { ...PREF_DEFAULTS };
-    if (raw.mode === "agent" || raw.mode === "process") out.mode = raw.mode;
     if (typeof raw.singleKeys === "boolean") out.singleKeys = raw.singleKeys;
     if (typeof raw.whyOpen === "boolean") out.whyOpen = raw.whyOpen;
     if (typeof raw.source === "string" && raw.source.length < 300) out.source = raw.source;
@@ -293,8 +303,8 @@ export function loadPrefs() {
 }
 export function savePrefs(prefs) {
   try {
-    const { mode, singleKeys, whyOpen, source, introSeen } = prefs;
-    localStorage.setItem(PREF_KEY, JSON.stringify({ mode, singleKeys, whyOpen, source, introSeen }));
+    const { singleKeys, whyOpen, source, introSeen } = prefs;
+    localStorage.setItem(PREF_KEY, JSON.stringify({ singleKeys, whyOpen, source, introSeen }));
   } catch { /* private window or blocked storage: the page works without it */ }
 }
 
@@ -303,6 +313,10 @@ export function reducedMotion() {
 }
 export function isPhone() {
   return matchMedia("(max-width: 720px)").matches;
+}
+/** A touch screen is the main pointer: no key hints in the page's words (the «?» sheet still lists them). */
+export function coarsePointer() {
+  return matchMedia("(pointer: coarse)").matches;
 }
 
 /** True when a key press is going into a text field (single-key shortcuts stay quiet). */

@@ -12,7 +12,7 @@ import { clearBanner, hideToast, initToast, setBanner, showToast } from "./ui.js
 import { dict, el, isPhone, loadPrefs, savePrefs, ticketId, ticketsText } from "./util.js";
 
 const $ = (id) => document.getElementById(id);
-const save = () => savePrefs({ ...S.prefs, mode: S.mode });
+const save = () => savePrefs(S.prefs);
 // «ليش؟» starts closed. It opens on load only if the agent opened it and left it open, and only where it
 // is a column of its own beside the ticket (over 1000 px): never as a drawer over the ticket, never on a
 // phone, where it is a section under the ticket.
@@ -20,7 +20,7 @@ const whyOnLoad = () => !!S.prefs.whyOpen && matchMedia("(min-width: 1001px)").m
 
 async function init() {
   S.prefs = loadPrefs();
-  S.mode = S.prefs.mode;
+  S.mode = "agent";   // every visit starts in the inbox (the mode is not kept)
   initToast();
   onTrouble(trouble);
   inbox.setWhyOpen(whyOnLoad());
@@ -88,6 +88,7 @@ function wire() {
       if (last) proc.liveEvent(it, last);
       if (it.status !== "running") {
         updateNewButton();
+        proc.refreshList();
         // Said once when it ends (never per stage), also when it is the open ticket: a screen-reader
         // user who pressed «شغّلها» learns how it ended.
         const word = it.status === "done" ? "خلصت المعالجة" : "انقطعت المعالجة";
@@ -103,7 +104,12 @@ function wire() {
   updateNewButton();
 
   $("modeAgent").addEventListener("click", () => setMode("agent"));
-  $("modeProcess").addEventListener("click", () => setMode("process"));
+  // A live ticket open in the inbox: «كيف يشتغل» opens on its trace (its side list names the live tickets).
+  $("modeProcess").addEventListener("click", async () => {
+    const it = S.mode === "agent" ? findItem(S.agent.openKey) : null;
+    await setMode("process");
+    if (it?.live && S.mode === "process") proc.showLiveFromInbox(it);
+  });
 
   const openSheet = initKeys({
     next: () => inbox.move(1),
@@ -116,6 +122,8 @@ function wire() {
     forward: () => inbox.forward(),
     toggleWhy: () => inbox.toggleWhy(),
     toggleTick: () => inbox.toggleTick(),
+    toggleFix: () => inbox.toggleFix(),
+    closeFix: (target) => inbox.closeFix(target),
     closeWhy: () => inbox.toggleWhy(false),
     whyIsDrawer: () => inbox.whyIsDrawer(),
     undo: () => inbox.undoLast(),
@@ -156,6 +164,17 @@ function wire() {
     document.body.dataset.screen = S.agent.openKey ? "ticket" : "queue";
     inbox.setWhyOpen(whyOnLoad());
   });
+  // The phone's back gesture (or «القائمة») from a ticket: the queue. Forward again from the queue: that
+  // ticket. (Entries from before a reload can hold a ticket too: back from a ticket is always the queue.)
+  addEventListener("popstate", () => {
+    if (!isPhone() || S.mode !== "agent") return;
+    const key = history.state?.ticket;
+    if (document.body.dataset.screen === "ticket") inbox.showQueue();
+    else if (key && findItem(key)) {
+      document.body.dataset.screen = "ticket";
+      inbox.open(key, { focus: "heading" });
+    }
+  });
   // Across 1000 px «ليش؟» turns from a column into a drawer over the ticket (or back): it follows the
   // agent's choice where it is a column, and closes where it would cover the ticket.
   matchMedia("(min-width: 1001px)").addEventListener("change", () => inbox.setWhyOpen(whyOnLoad()));
@@ -187,6 +206,17 @@ function initIntro() {
   place();
   matchMedia("(max-width: 720px)").addEventListener("change", place);
   card.hidden = !!S.prefs.introSeen;
+  // From the «?» sheet: the card again, where the work is (the inbox; on a phone, its queue screen).
+  $("introAgain").addEventListener("click", async () => {
+    S.prefs.introSeen = false;
+    save();
+    $("sheet").close();
+    if (S.mode !== "agent") await setMode("agent");
+    if (isPhone()) document.body.dataset.screen = "queue";
+    card.hidden = false;
+    card.scrollIntoView({ block: "nearest" });
+    $("introOk").focus({ preventScroll: true });
+  });
   $("introOk").addEventListener("click", () => {
     S.prefs.introSeen = true;
     save();
@@ -357,10 +387,10 @@ async function setMode(mode, { quiet = false } = {}) {
   $("nav").setAttribute("aria-label", mode === "agent" ? "قائمة التذاكر" : "التشغيلات والتذاكر");
   $("sourceField").hidden = mode !== "agent";
   document.title = mode === "agent" ? "صندوق التذاكر" : "كيف يشتغل النظام";
-  if (!quiet) save();
   if (S.meta && mode === "process") await proc.renderProcess();
   if (S.meta && mode === "agent") {
     renderAgent();
+    inbox.rowInView(findItem(S.agent.openKey));   // a live ticket that finished meanwhile is the open one
     if (!quiet) startClock(findItem(S.agent.openKey));
   }
 }
