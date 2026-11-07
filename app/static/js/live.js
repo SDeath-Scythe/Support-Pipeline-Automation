@@ -11,6 +11,9 @@ export function setLiveHooks(h) { Object.assign(hooks, h); }
 
 const controllers = new Set();
 const BUSY_AR = "اكو تذكرة دتنعالج هسه، انتظر لما تخلص.";
+/** Said whenever a pasted ticket goes to a model (not with the system off, or replaying the cache). */
+const ABROAD_AR = "النص ينرسل لمزوّد نموذج خارجي برا العراق، فالصق بس التذاكر المسموح بإرسالها.";
+const LIVE_ID = /^live-\d{14}-[0-9a-f]{6}$/;
 /** LLM_CACHE_ONLY=1 (the author's demo): what a pasted ticket gets. Said in a banner and in the dialog. */
 export const CACHE_AR = "التذكرة تاخذ أجوبة النموذج المحفوظة من قبل، بدون أي استدعاء، فالمراحل تخلص بلحظة. تذكرة ما إلها أجوبة محفوظة تروح لموظف.";
 addEventListener("pagehide", () => {
@@ -37,6 +40,7 @@ export async function streamTicket(text, { onEvent, signal }) {
   let got = false;
   try {
     await readEvents(resp, (e) => {
+      if (e.live_id) return;   // the server's id for the run: a set's ticket keeps its own
       if (e.stage === "result") got = true;
       if (e.status === "error" && e.data?.kind === "BudgetExceeded") {
         S.liveBlocked = e.data.error || "وصل التشغيل لحد الصرف.";
@@ -110,9 +114,9 @@ export function initNewTicket() {
       note.append(el("strong", { text: st.reason }), ...(turnOn ? [el("br"), richText(turnOn)] : []));
     } else if (S.liveBusy) note.append(el("strong", { text: BUSY_AR }));
     else if (S.meta.mode === "off") note.append(el("strong", { text: "النظام موقف: " }), "التذكرة ما تنرسل لأي نموذج، وتروح لموظف مباشرة.");
-    else if (S.meta.mode === "classify_only") note.append(el("strong", { text: "المسودات موقفة: " }), "النظام يصنّفها ويوجّهها بس، والرد عليك.");
+    else if (S.meta.mode === "classify_only") note.append(el("strong", { text: "المسودات موقفة: " }), "النظام يصنّفها ويوجّهها بس، والرد عليك.", el("br"), ABROAD_AR);
     else if (S.meta.cache_only) note.append(el("strong", { text: "إعادة من الكاش: " }), CACHE_AR);
-    else note.append("التذكرة تمر بالمراحل كلها وتطلع بالقائمة. ", el("strong", { text: "التذاكر الجديدة ما تنحفظ: " }), "إذا حدّثت الصفحة تروح.");
+    else note.append("التذكرة تمر بالمراحل كلها وتطلع بالقائمة. ", el("strong", { text: "التذاكر الجديدة ما تنحفظ: " }), "إذا حدّثت الصفحة تروح.", el("br"), ABROAD_AR);
     note.classList.toggle("hint-warn", !st.ok);
     run.toggleAttribute("disabled", !st.ok);
     // Nothing can run: no box that looks ready for typing but takes none.
@@ -124,22 +128,26 @@ export function initNewTicket() {
   };
 }
 
-/** Start the stream first, so a refusal is shown in the dialog; then add the row (ids live-1, live-2, ...)
- *  and read its events. */
+/** Start the stream first, so a refusal is shown in the dialog; then add the row under the id the server
+ *  gave the run (its first event: live-<UTC time>-<6 hex>, the decision log's ticket id) and read the rest. */
 async function probeAndRun(text, accepted) {
-  const key = `live-${S.liveSeq + 1}`;
   const ctl = new AbortController();
   const resp = await openStream(text, ctl.signal);   // throws on a refusal
-  accepted();
-  S.liveSeq++;
   controllers.add(ctl);
-  const item = { key, run: "live", live: true, order: -S.liveSeq, ticket: { id: key, text }, events: [], result: null, status: "running", ctl };
-  S.live.unshift(item);
-  S.liveBusy = true;
-  hooks.started?.(item);
+  let item = null;
+  const start = (key) => {
+    if (!LIVE_ID.test(key || "")) throw new NetworkError("no run id");
+    accepted();
+    S.liveSeq++;
+    item = { key, run: "live", live: true, order: -S.liveSeq, ticket: { id: key, text }, events: [], result: null, status: "running", ctl };
+    S.live.unshift(item);
+    S.liveBusy = true;
+    hooks.started?.(item);
+  };
   let got = false;
   try {
     await readEvents(resp, (e) => {
+      if (!item) return start(e.live_id);
       item.events.push(stampOwn(item.events.at(-1), e));
       if (e.stage === "result") { item.result = e.data; got = true; }
       if (e.status === "error" && e.data?.kind === "BudgetExceeded") {
@@ -148,13 +156,17 @@ async function probeAndRun(text, accepted) {
       }
       hooks.updated?.(item);
     });
+    if (!item) throw new NetworkError("no run id");
     item.status = got ? "done" : "lost";
   } catch (e) {
+    if (!item) { ctl.abort(); throw e; }   // nothing on screen yet: the dialog says it
     item.status = got ? "done" : e?.name === "AbortError" ? "cancelled" : "lost";
   } finally {
     controllers.delete(ctl);
-    S.liveBusy = false;
-    hooks.updated?.(item);
+    if (item) {
+      S.liveBusy = false;
+      hooks.updated?.(item);
+    }
   }
 }
 

@@ -15,7 +15,7 @@ export const S = {
   mode: "agent",
   agent: { source: null, run: null, items: [], loading: false, error: null, tab: null, openKey: null },
   live: [],             // tickets pasted in this page (run "live"), newest first
-  liveSeq: 0,
+  liveSeq: 0,           // the order of live rows (their ids come from the server)
   liveBusy: false,      // the server runs one live ticket at a time
   liveBlocked: null,    // Arabic reason once the spending cap was reached
   decisions: new Map(), // ticket key → the decision that stands (not undone), for the run on screen and live

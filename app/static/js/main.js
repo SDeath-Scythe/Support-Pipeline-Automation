@@ -9,7 +9,7 @@ import * as proc from "./process.js";
 import { OUTCOME_SHORT } from "./labels.js";
 import { S, findItem, mostUrgent, pauseClock, restoreDecisions, startClock, tabOf, uid } from "./state.js";
 import { clearBanner, hideToast, initToast, setBanner, showToast } from "./ui.js";
-import { dict, el, isPhone, loadPrefs, savePrefs, ticketsText } from "./util.js";
+import { dict, el, isPhone, loadPrefs, savePrefs, ticketId, ticketsText } from "./util.js";
 
 const $ = (id) => document.getElementById(id);
 const save = () => savePrefs({ ...S.prefs, mode: S.mode });
@@ -92,7 +92,7 @@ function wire() {
         // user who pressed «شغّلها» learns how it ended.
         const word = it.status === "done" ? "خلصت المعالجة" : "انقطعت المعالجة";
         const out = OUTCOME_SHORT[it.result?.outcome] || (it.status === "done" ? "" : "متصعّدة");
-        showToast([`${word}: `, el("bdi", { dir: "ltr", class: "mono", text: it.key }), out ? ` · ${out}` : ""]);
+        showToast([`${word}: `, ticketId(it.key), out ? ` · ${out}` : ""]);
       }
     },
     budget: (msg) => { inbox.setBudgetBanner(msg); updateNewButton(); },
@@ -230,6 +230,8 @@ function updateNewButton() {
 }
 
 function modeBanners() {
+  // Not real data (REAL_DATA unset): a quiet word in the header, not a banner.
+  $("devBadge").hidden = S.meta.real_data !== false;
   if (S.meta.mode === "off") setBanner("mode", { kind: "warn", title: "النظام موقف:", text: "أي تذكرة جديدة تروح لموظف بدون نموذج." });
   else if (S.meta.mode === "classify_only") setBanner("mode", { kind: "warn", title: "المسودات موقفة.", text: "النظام يصنّف التذاكر ويوجّهها بس، والرد على الموظف." });
   if (S.meta.cache_only && S.meta.live.available) setBanner("cache", { kind: "info", title: "إعادة من الكاش.", text: CACHE_AR });

@@ -9,7 +9,7 @@ import { QUICK_S, S, restoreDecisions, summarize } from "./state.js";
 import { showToast } from "./ui.js";
 import {
   add, digitRuns, dict, el, fmtInt, ltr, median, mono, num, openDialog, plainText, reducedMotion, richText, stampOwn,
-  ticketsAr, westernDigits,
+  ticketId, ticketsAr, westernDigits,
 } from "./util.js";
 
 const hooks = { toAgent: null, savePrefs: null, loadOnPick: null };
@@ -294,7 +294,7 @@ function buildView(ticket, origin) {
       el("div", { class: "stage-body" })));
   }
   $("processMain").replaceChildren(el("article", { class: "trace", "aria-labelledby": "traceTitle" },
-    el("h2", { id: "traceTitle", class: "trace-title", tabindex: "-1" }, ticket.id ? ["التذكرة ", mono(ticket.id)] : "تذكرة جديدة",
+    el("h2", { id: "traceTitle", class: "trace-title", tabindex: "-1" }, ticket.id ? ["التذكرة ", ticketId(ticket.id)] : "تذكرة جديدة",
       el("span", { class: "trace-origin", text: ` · ${origin}` })),
     el("div", { class: "slip", dir: "rtl" }, digitRuns(plainText(ticket.text).text)),
     list,

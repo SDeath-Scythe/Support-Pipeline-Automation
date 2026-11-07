@@ -162,6 +162,8 @@ body.keys-off .kbd-single { display: none !important; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand-mark { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); box-shadow: 6px 6px 0 -2px var(--ok); }
 .brand-name { font-weight: 700; font-size: 17px; line-height: 1.4; }
+/* REAL_DATA unset: quiet, beside the name. */
+.dev-badge { font-size: 12px; line-height: 1.5; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); white-space: nowrap; }
 .modes { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); }
 .mode-btn { border: 0; background: transparent; padding: 6px 14px; border-radius: 7px; cursor: pointer; font-weight: 500; color: var(--muted); min-height: 34px; }
 .mode-btn[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); font-weight: 600; }
@@ -749,6 +751,8 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   /* The ticket screen keeps the header to one row: the mode switch and the picker are on the queue
      screen, one tap away («القائمة»). */
   body[data-mode="agent"][data-screen="ticket"] .modes, body[data-mode="agent"][data-screen="ticket"] .source-field { display: none; }
+  /* No room beside the name and the actions on a phone: the new-ticket dialog still says where text goes. */
+  .dev-badge { display: none; }
   .top-actions, .source-field:not([hidden]) + .top-actions { margin-inline-start: auto; }
   .banner { padding: 10px 16px; }
   .kbd-hint { display: none; }

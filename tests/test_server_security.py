@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import random
+import re
 import socket
 import threading
 import time
@@ -161,7 +162,9 @@ def test_live_run_streams_events_then_end(srv, monkeypatch):
     status, headers, body = call(srv, "POST", "/api/stream", {"text": "  حولت فلوس وما وصلت  "})
     assert status == 200 and headers["Content-Type"].startswith("text/event-stream")
     events, ended = sse(body)
-    assert [e["stage"] for e in events] == ["received", "classify", "result"] and ended
+    # The server's id for the run comes first: live-<UTC yyyymmddHHMMSS>-<6 hex>.
+    assert re.fullmatch(r"live-\d{14}-[0-9a-f]{6}", events[0]["live_id"]) and set(events[0]) == {"live_id"}
+    assert [e["stage"] for e in events[1:]] == ["received", "classify", "result"] and ended
     assert seen["text"] == "حولت فلوس وما وصلت" and callable(seen["should_stop"]) and seen["should_stop"]() is False
 
 
@@ -527,8 +530,36 @@ def _decision(**over):
     return body
 
 
-def test_decision_is_logged_with_hashes_and_never_the_text(srv, tmp_path):
-    status, _, body = call(srv, "POST", "/api/decision", _decision())
+# What the stub pipeline serves for a pasted ticket unless a test says otherwise.
+SERVED = {"outcome": "drafted", "flags": ["draft:promise"], "draft_ar": DRAFT, "team": "transfers", "priority": "P2",
+          "extraction": {"subcategory": "not_received"}}
+
+
+@pytest.fixture
+def live(srv, monkeypatch):
+    """Paste a ticket: a stub pipeline ends it with SERVED (changed by `over`). Returns the server's id."""
+    def make(text="حولت فلوس وما وصلت", **over):
+        result = {**SERVED, **over}
+
+        def run(t, emit=lambda e: None, should_stop=None):
+            emit(_event("received", {"chars": len(t)}))
+            emit(_event("result", result))
+
+        monkeypatch.setattr(server, "process", run)
+        for _ in range(250):   # the last run's worker frees the live slot just after its stream ends
+            status, _, body = call(srv, "POST", "/api/stream", {"text": text})
+            if status != 429:
+                break
+            time.sleep(0.02)
+        events, ended = sse(body)
+        assert status == 200 and ended
+        return events[0]["live_id"]
+    return make
+
+
+def test_decision_is_logged_with_hashes_and_never_the_text(srv, tmp_path, live):
+    n1 = live(text="  حولت ٥٠ الف وما وصلت  ")
+    status, _, body = call(srv, "POST", "/api/decision", _decision(ticket_id=n1))
     assert status == 200
     reply = json.loads(body)
     assert reply["ok"] is True and len(reply["id"]) == 32
@@ -540,7 +571,7 @@ def test_decision_is_logged_with_hashes_and_never_the_text(srv, tmp_path):
     assert len(lines) == 1
     rec = json.loads(lines[0])
     assert rec["id"] == reply["id"] and rec["ts"].endswith("Z") and rec["reviewer"] == "agent-1"
-    assert rec["run"] == "live" and rec["ticket_id"] == "n1" and rec["action"] == "edited"
+    assert rec["run"] == "live" and rec["ticket_id"] == n1 and rec["action"] == "edited"
     assert rec["pipeline_outcome"] == "drafted" and rec["flags"] == ["draft:promise"]
     assert rec["reason_codes"] == ["promise", "missing_question"] and rec["seconds"] == 42.5
     assert rec["corrected"] == {"priority": "P1"} and rec["undoes"] is None
@@ -549,14 +580,17 @@ def test_decision_is_logged_with_hashes_and_never_the_text(srv, tmp_path):
     assert rec["final_sha256"] == hmac.new(server._HASH_KEY, FINAL.encode(), hashlib.sha256).hexdigest()
     assert rec["final_sha256"] != hashlib.sha256(FINAL.encode()).hexdigest()
     assert rec["edit_chars"] > 0
+    # The pasted ticket as the pipeline cleaned it (Arabic digits made Latin), keyed the same way.
+    cleaned = server.clean("حولت ٥٠ الف وما وصلت")
+    assert "50" in cleaned and rec["ticket_sha256"] == hmac.new(server._HASH_KEY, cleaned.encode(), hashlib.sha256).hexdigest()
     assert set(rec["prompt_sha256"]) == {"classifier", "drafter"} and rec["models"]["classifier"]
     assert not {"draft_text", "final_text", "text"} & rec.keys()
 
     # An undo must name a decision on the same ticket.
-    status, _, body = call(srv, "POST", "/api/decision", _decision(action="undone", undoes=reply["id"], ticket_id="n2"))
+    status, _, body = call(srv, "POST", "/api/decision", _decision(action="undone", undoes=reply["id"], ticket_id=live()))
     assert status == 400 and json.loads(body)["field"] == "undoes"
     # Undo it: a second line pointing at the first.
-    status, _, body = call(srv, "POST", "/api/decision", _decision(action="undone", undoes=reply["id"],
+    status, _, body = call(srv, "POST", "/api/decision", _decision(ticket_id=n1, action="undone", undoes=reply["id"],
                                                                    draft_text=None, final_text=None))
     assert status == 200
     lines = (tmp_path / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
@@ -612,9 +646,9 @@ def test_new_decision_fields_are_checked(srv, tmp_path, over, field):
     assert not (tmp_path / "decisions.jsonl").exists()
 
 
-def test_visits_and_acknowledged_warnings_are_logged_as_kinds(srv, tmp_path):
+def test_visits_and_acknowledged_warnings_are_logged_as_kinds(srv, tmp_path, live):
     status, _, _ = call(srv, "POST", "/api/decision",
-                        _decision(visits=3, warnings_acknowledged=["promise", "promise", "draft_for_other_type"]))
+                        _decision(ticket_id=live(), visits=3, warnings_acknowledged=["promise", "promise", "draft_for_other_type"]))
     assert status == 200
     rec = json.loads((tmp_path / "decisions.jsonl").read_text(encoding="utf-8"))
     assert rec["visits"] == 3 and rec["warnings_acknowledged"] == ["promise", "draft_for_other_type"]
@@ -623,16 +657,17 @@ def test_visits_and_acknowledged_warnings_are_logged_as_kinds(srv, tmp_path):
 
 @pytest.mark.parametrize("reply", ["دزلنا الرمز اللي وصلك حتى نتابع", "شنو الرمز اللي وصلك؟"])
 @pytest.mark.parametrize("action", ["approved", "edited"])
-def test_an_approval_that_asks_for_a_code_is_refused_409(srv, tmp_path, reply, action):
+def test_an_approval_that_asks_for_a_code_is_refused_409(srv, tmp_path, live, reply, action):
     """SEC-1 (1 Nov review): a stale /api/check answer let the page post a reply that asks for the code.
     The server runs the blocking checks itself; nothing is logged."""
-    status, _, body = call(srv, "POST", "/api/decision", _decision(action=action, draft_text=reply, final_text=reply))
+    n1 = live(draft_ar=reply)
+    status, _, body = call(srv, "POST", "/api/decision", _decision(ticket_id=n1, action=action, draft_text=reply, final_text=reply))
     assert status == 409
     j = json.loads(body)
     assert j["conflict"] == "blocked" and "رمز" in j["error"] and reply not in j["error"]
     assert not (tmp_path / "decisions.jsonl").exists()
     # taking it over or forwarding it is still recorded (no reply goes anywhere)
-    assert call(srv, "POST", "/api/decision", _decision(action="took_over", final_text=None))[0] == 200
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=n1, action="took_over", draft_text=reply, final_text=None))[0] == 200
 
 
 @pytest.mark.parametrize("reply, why", [
@@ -642,21 +677,22 @@ def test_an_approval_that_asks_for_a_code_is_refused_409(srv, tmp_path, reply, a
     ("هلا بيك، الرمز اللي وصلك هو 5521 لا تشاركه", "رمز"),
 ])
 @pytest.mark.parametrize("action", ["approved", "edited"])
-def test_an_approval_that_tips_off_or_repeats_a_number_is_refused_409(srv, tmp_path, monkeypatch, reply, why, action):
+def test_an_approval_that_tips_off_or_repeats_a_number_is_refused_409(srv, tmp_path, monkeypatch, live, reply, why, action):
     """hold_reason and sensitive_number block an approval with no flag set (adopted on 5 Nov), at the
     server as on the page; nothing is logged and the reply's text is not echoed."""
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    status, _, body = call(srv, "POST", "/api/decision", _decision(action=action, draft_text=reply, final_text=reply))
+    n1 = live(draft_ar=reply)
+    status, _, body = call(srv, "POST", "/api/decision", _decision(ticket_id=n1, action=action, draft_text=reply, final_text=reply))
     assert status == 409
     j = json.loads(body)
     assert j["conflict"] == "blocked" and why in j["error"] and reply not in j["error"]
     assert not (tmp_path / "decisions.jsonl").exists()
-    assert call(srv, "POST", "/api/decision", _decision(action="took_over", final_text=None))[0] == 200
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=n1, action="took_over", draft_text=reply, final_text=None))[0] == 200
 
 
 def test_a_second_decision_on_a_saved_run_ticket_is_refused_409(srv, fake_runs):
     """F8 (1 Nov review): two tabs could both approve one ticket; an undo in one then showed it open."""
-    first = _decision(run="exp/dev/rec", ticket_id="dev-0001", action="approved", final_text=DRAFT)
+    first = _decision(run="exp/dev/rec", ticket_id="dev-0001", action="edited", draft_text=None, final_text=FINAL)
     status, _, body = call(srv, "POST", "/api/decision", first)
     assert status == 200
     a = json.loads(body)["id"]
@@ -669,54 +705,184 @@ def test_a_second_decision_on_a_saved_run_ticket_is_refused_409(srv, fake_runs):
     assert status == 409 and json.loads(body)["conflict"] == "undo_stale"
     # decided again after the undo
     assert call(srv, "POST", "/api/decision", first)[0] == 200
-    assert [d["action"] for d in server.read_decisions("exp/dev/rec")] == ["approved", "undone", "approved"]
+    assert [d["action"] for d in server.read_decisions("exp/dev/rec")] == ["edited", "undone", "edited"]
 
 
-def test_the_identity_tick_is_logged_as_a_kind(srv, tmp_path):
+def test_the_identity_tick_is_logged_as_a_kind(srv, tmp_path, live):
     """5 Nov review: «تأكدت من هوية الزبون» was refused as an acknowledged kind, so the log could not show it."""
-    status, _, _ = call(srv, "POST", "/api/decision", _decision(flags=["account_risk"], warnings_acknowledged=["account_risk"]))
+    n1 = live(flags=["account_risk"], outcome="flagged")
+    status, _, _ = call(srv, "POST", "/api/decision", _decision(ticket_id=n1, flags=["account_risk"], warnings_acknowledged=["account_risk"]))
     assert status == 200
     rec = json.loads((tmp_path / "decisions.jsonl").read_text(encoding="utf-8"))
     assert rec["flags"] == ["account_risk"] and rec["warnings_acknowledged"] == ["account_risk"]
 
 
-@pytest.mark.parametrize("over", [
-    {"flags": ["account_risk"]},                                                   # the pipeline's flag
-    {"flags": ["account_risk", "draft:promise"], "warnings_acknowledged": ["promise"]},
-    {"flags": [], "corrected": {"subcategory": "sim_change"}},                     # the agent's correction
-    {"flags": ["recheck_used_second"], "corrected": {"subcategory": "blocked_account", "team": "accounts"}},
+@pytest.mark.parametrize("served, over", [
+    (["account_risk"], {}),                                                         # the pipeline's flag
+    (["account_risk", "draft:promise"], {"warnings_acknowledged": ["promise"]}),
+    (["account_risk"], {"flags": []}),                                              # left out of the request
+    ([], {"corrected": {"subcategory": "sim_change"}}),                             # the agent's correction
+    (["recheck_used_second"], {"corrected": {"subcategory": "blocked_account", "team": "accounts"},
+                               "warnings_acknowledged": ["recheck_used_second"]}),
 ])
 @pytest.mark.parametrize("action", ["approved", "edited"])
 def test_an_approval_of_a_blocked_account_or_a_sim_change_without_the_identity_tick_is_refused_409(
-        srv, tmp_path, over, action):
+        srv, tmp_path, live, served, over, action):
     """5 Nov review: a hand-made request (or a stale page) could approve without the identity tick. Nothing
-    is logged; with the tick it is; taking the ticket over needs none (no reply is approved)."""
-    status, _, body = call(srv, "POST", "/api/decision", _decision(action=action, **over))
+    is logged; with the tick it is; taking the ticket over needs none (no reply is approved). The flag is
+    the one the server served, whatever the request says (user tests, 7 Nov)."""
+    final = {"final_text": DRAFT} if action == "approved" else {}
+    ids = [live(flags=served, outcome="flagged" if served else "drafted") for _ in range(3)]
+    status, _, body = call(srv, "POST", "/api/decision", _decision(ticket_id=ids[0], action=action, **final, **over))
     assert status == 409
     j = json.loads(body)
     assert j["conflict"] == "identity" and "«تأكدت من هوية الزبون»" in j["error"]
     assert not (tmp_path / "decisions.jsonl").exists()
     ticked = {**over, "warnings_acknowledged": [*over.get("warnings_acknowledged", []), "account_risk"]}
-    assert call(srv, "POST", "/api/decision", _decision(action=action, **ticked))[0] == 200
-    assert call(srv, "POST", "/api/decision", _decision(action="took_over", final_text=None, **over))[0] == 200
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=ids[1], action=action, **final, **ticked))[0] == 200
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=ids[2], action="took_over", final_text=None, **over))[0] == 200
+
+
+def _saved_draft(ticket_id, run="saved/test2/final"):
+    rows = server.with_current_gold(server.run_file(run))["tickets"]
+    return next(r for r in rows if r["ticket"]["id"] == ticket_id)["result"].get("draft_ar")
 
 
 def test_a_saved_run_ticket_needs_the_tick_even_when_the_request_leaves_the_flag_out(srv, tmp_path):
     """On a saved run the server reads the ticket itself: t2-0007 (a SIM change, drafted on 30 Oct, served
     with account_risk since 5 Nov) is refused without the tick whatever flags the request sends."""
     body = _decision(run="saved/test2/final", ticket_id="t2-0007", action="approved", pipeline_outcome="drafted",
-                     flags=[], reason_codes=[], corrected={}, draft_text=DRAFT, final_text=DRAFT)
+                     flags=[], reason_codes=[], corrected={}, draft_text=_saved_draft("t2-0007"), final_text=_saved_draft("t2-0007"))
     status, _, raw = call(srv, "POST", "/api/decision", body)
     assert status == 409 and json.loads(raw)["conflict"] == "identity"
-    assert server.run_account_risk_ids("saved/test2/final") == {"t2-0007", "t2-0016", "t2-0029", "t2-0048", "t2-0054", "t2-0080"}
-    assert call(srv, "POST", "/api/decision", {**body, "ticket_id": "t2-0002"})[0] == 200    # a ready one needs none
+    risky = {r["ticket"]["id"] for r in server.with_current_gold(server.run_file("saved/test2/final"))["tickets"]
+             if "account_risk" in r["result"]["flags"]}
+    assert risky == {"t2-0007", "t2-0016", "t2-0029", "t2-0048", "t2-0054", "t2-0080"}
+    assert all("account_risk" in server.served_ticket("saved/test2/final", i)["flags"] for i in risky)
+    ready = {**body, "ticket_id": "t2-0002", "draft_text": _saved_draft("t2-0002"), "final_text": _saved_draft("t2-0002")}
+    assert call(srv, "POST", "/api/decision", ready)[0] == 200    # a ready one needs none
     assert call(srv, "POST", "/api/decision", {**body, "warnings_acknowledged": ["account_risk"]})[0] == 200
+    rec = server.read_decisions("saved/test2/final")[-1]
+    assert rec["flags"] == ["account_risk"] and rec["pipeline_outcome"] == "flagged"   # as served, not as sent
 
 
-def test_live_tickets_are_not_compared_across_pages(srv):
-    """«live-1» after a reload is another ticket: a second decision on it is allowed."""
-    for _ in range(2):
-        assert call(srv, "POST", "/api/decision", _decision(ticket_id="live-1", action="took_over", final_text=None))[0] == 200
+SAVED = "saved/test2/final"
+
+
+def _saved_body(ticket_id, **over):
+    draft = _saved_draft(ticket_id)
+    return {**_decision(run=SAVED, ticket_id=ticket_id, action="approved", pipeline_outcome="drafted", flags=[],
+                        reason_codes=[], corrected={}, draft_text=draft, final_text=draft), **over}
+
+
+@pytest.mark.parametrize("ticket_id", ["t2-0025", "t2-0045"])   # fraud escalations, no draft
+@pytest.mark.parametrize("action", ["approved", "edited"])
+def test_an_escalated_ticket_cannot_be_approved_whatever_the_request_says_409(srv, tmp_path, ticket_id, action):
+    """User tests, 7 Nov (T03): t2-0025 was logged as approved / drafted / no flags because the request said so.
+    The outcome and flags are the served ones; an escalation is only forwarded or taken over."""
+    status, _, raw = call(srv, "POST", "/api/decision", _saved_body(ticket_id, action=action, draft_text=None, final_text=FINAL))
+    assert status == 409 and json.loads(raw)["conflict"] == "escalated"
+    assert not (tmp_path / "decisions.jsonl").exists()
+    assert call(srv, "POST", "/api/decision", _saved_body(ticket_id, action="forwarded", draft_text=None, final_text=None))[0] == 200
+    rec = server.read_decisions(SAVED)[-1]
+    assert rec["pipeline_outcome"] == "escalated" and rec["flags"] == ["fraud"] and rec["draft_sha256"] is None
+
+
+@pytest.mark.parametrize("action", ["approved", "edited"])
+def test_a_correction_to_a_type_that_is_never_drafted_cannot_be_approved_409(srv, tmp_path, live, action):
+    n1 = live()
+    final = DRAFT if action == "approved" else FINAL
+    body = _decision(ticket_id=n1, action=action, final_text=final, corrected={"subcategory": "suspected_scam"})
+    status, _, raw = call(srv, "POST", "/api/decision", body)
+    assert status == 409 and json.loads(raw)["conflict"] == "escalated"
+    assert call(srv, "POST", "/api/decision", {**body, "action": "took_over", "final_text": None})[0] == 200
+
+
+def test_a_ticket_or_a_draft_the_server_did_not_serve_is_refused_400(srv, tmp_path, live):
+    """User tests, 7 Nov (T03): t2-9999 and live-1 were logged though no such ticket was served."""
+    for body in ({**_saved_body("t2-0002"), "ticket_id": "t2-9999"}, _decision(ticket_id="live-1"),
+                 _decision(run=SAVED, ticket_id=live())):      # a live id is not a saved run's ticket
+        status, _, raw = call(srv, "POST", "/api/decision", body)
+        assert status == 400 and json.loads(raw)["field"] == "ticket_id"
+    n1 = live()
+    for over, field in (({"draft_text": "مسودة ثانية"}, "draft_text"),                       # not the served draft
+                        ({"action": "approved", "final_text": FINAL}, "final_text")):     # an edit called an approval
+        status, _, raw = call(srv, "POST", "/api/decision", _decision(ticket_id=n1, **over))
+        assert status == 400 and json.loads(raw)["field"] == field
+    assert not (tmp_path / "decisions.jsonl").exists()
+
+
+def test_a_live_decision_is_checked_against_what_was_served(srv, tmp_path, live):
+    """The live registry: outcome, flags and the draft's hash are the ones the run served; the request's
+    are not believed. A forward of a live escalation gets its served flags too."""
+    n1 = live(outcome="flagged", flags=["missing:reference", "draft:promise"])
+    status, _, _ = call(srv, "POST", "/api/decision", _decision(ticket_id=n1, pipeline_outcome="drafted", flags=[],
+                                                                  warnings_acknowledged=["missing:reference", "promise"]))
+    assert status == 200
+    rec = server.read_decisions("live")[-1]
+    assert rec["pipeline_outcome"] == "flagged" and rec["flags"] == ["missing:reference", "draft:promise"]
+    assert rec["draft_sha256"] == hmac.new(server._HASH_KEY, DRAFT.encode(), hashlib.sha256).hexdigest()
+    e1 = live(outcome="escalated", flags=["fraud"], draft_ar=None, extraction={"subcategory": "suspected_scam"})
+    status, _, raw = call(srv, "POST", "/api/decision", _decision(ticket_id=e1, draft_text=None, pipeline_outcome="drafted", flags=[]))
+    assert status == 409 and json.loads(raw)["conflict"] == "escalated"
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=e1, action="forwarded", draft_text=None, final_text=None))[0] == 200
+    assert server.read_decisions("live")[-1]["flags"] == ["fraud"]
+
+
+def test_a_live_run_cut_short_can_be_taken_over_but_not_approved(srv, live):
+    """A run whose result has not come yet (the agent cancelled it): the page shows it escalated."""
+    run_id = server.live_started("تذكرة")
+    body = _decision(ticket_id=run_id, draft_text=None, flags=["cancelled", "fraud"])
+    assert json.loads(call(srv, "POST", "/api/decision", body)[2])["conflict"] == "escalated"
+    assert call(srv, "POST", "/api/decision", {**body, "action": "took_over", "final_text": None})[0] == 200
+    rec = server.read_decisions("live")[-1]
+    assert rec["pipeline_outcome"] == "escalated" and rec["flags"] == ["cancelled"]
+
+
+def test_a_second_decision_on_a_live_ticket_is_refused_409(srv, live):
+    """User tests, 7 Nov (T11): every live ticket was «live-1». Now each run has its own id from the
+    server, so a second decision on one is refused like on a saved run."""
+    a, b = live(), live()
+    assert a != b
+    took = _decision(ticket_id=a, action="took_over", final_text=None)
+    assert call(srv, "POST", "/api/decision", took)[0] == 200
+    status, _, raw = call(srv, "POST", "/api/decision", took)
+    assert status == 409 and json.loads(raw)["conflict"] == "decided"
+    assert call(srv, "POST", "/api/decision", {**took, "ticket_id": b})[0] == 200
+
+
+def test_the_live_registry_keeps_hashes_only_and_a_bounded_number(srv, live, monkeypatch):
+    monkeypatch.setattr(server, "LIVE_KEEP", 3)
+    ids = [live(text=f"تذكرة رقم {i}") for i in range(5)]
+    with server._live_lock:
+        kept = dict(server._live)
+    assert list(kept)[-3:] == ids[-3:] and ids[0] not in kept and len(kept) <= 3
+    assert "تذكرة" not in json.dumps(kept, ensure_ascii=False) and DRAFT not in json.dumps(kept, ensure_ascii=False)
+
+
+def test_every_confirm_kind_the_page_ticks_is_accepted_and_nothing_free_form(srv, live):
+    """User tests, 7 Nov (T28): a missing reference and the type after a disagreement were ticked but not
+    logged. The kinds are an allow-list; /api/meta gives it to the page."""
+    kinds = json.loads(call(srv, "GET", "/api/meta")[2])["ack_kinds"]
+    assert kinds == list(server.ACK_KINDS)
+    for k in ("missing:reference", "missing:amount", "missing:date", "missing:reference:not_needed", "recheck_used_second",
+              "invalid_category", "ref_not_in_text", "account_risk", "promise", "draft_for_other_type"):
+        assert k in kinds, k
+    for k in ("asks_secret", "hold_reason", "sensitive_number", "draft:promise", "missing:anything", "missing:reference:x"):
+        assert k not in kinds, k
+    acked = ["missing:reference", "recheck_used_second", "missing:amount:not_needed"]
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=live(), warnings_acknowledged=acked))[0] == 200
+    assert server.read_decisions("live")[-1]["warnings_acknowledged"] == acked
+    status, _, raw = call(srv, "POST", "/api/decision", _decision(ticket_id=live(), warnings_acknowledged=["missing:pin"]))
+    assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged"
+
+
+def test_reason_codes_include_the_ones_user_tests_asked_for(srv, live):
+    meta = json.loads(call(srv, "GET", "/api/meta")[2])
+    for code in ("duplicate", "dialect", "false_claim", "instructions"):
+        assert code in meta["reason_codes"] and meta["reason_codes_ar"][code]
+    assert meta["reason_codes_ar"]["missing_question"] == "ناقصة سؤال للزبون"
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=live(), reason_codes=["dialect", "false_claim"]))[0] == 200
 
 
 def test_standing_matches_the_page(srv):
@@ -739,23 +905,27 @@ def test_decision_needs_token_and_json(srv, tmp_path):
     assert not (tmp_path / "decisions.jsonl").exists()
 
 
-def test_decisions_are_filtered_by_run(srv, fake_runs):
+def test_decisions_are_filtered_by_run(srv, fake_runs, live):
     ids = []
-    for run, tid in (("live", "n1"), ("exp/dev/rec", "dev-0001"), ("live", "n2")):
-        status, _, body = call(srv, "POST", "/api/decision", _decision(run=run, ticket_id=tid))
+    n1, n2 = live(), live()
+    for run, tid in (("live", n1), ("exp/dev/rec", "dev-0001"), ("live", n2)):
+        draft = DRAFT if run == "live" else None
+        status, _, body = call(srv, "POST", "/api/decision", _decision(run=run, ticket_id=tid, draft_text=draft))
         assert status == 200
         ids.append(json.loads(body)["id"])
-    live = json.loads(call(srv, "GET", "/api/decisions?run=live")[2])["decisions"]
-    assert [d["ticket_id"] for d in live] == ["n1", "n2"] and [d["id"] for d in live] == [ids[0], ids[2]]
+    got = json.loads(call(srv, "GET", "/api/decisions?run=live")[2])["decisions"]
+    assert [d["ticket_id"] for d in got] == [n1, n2] and [d["id"] for d in got] == [ids[0], ids[2]]
     other = json.loads(call(srv, "GET", "/api/decisions?run=exp/dev/rec")[2])["decisions"]
     assert [d["id"] for d in other] == [ids[1]]
     assert json.loads(call(srv, "GET", "/api/decisions?run=nothing")[2]) == {"decisions": []}
     assert call(srv, "GET", "/api/decisions")[0] == 400
 
 
-def test_concurrent_decisions_never_interleave(srv, tmp_path):
+def test_concurrent_decisions_never_interleave(srv, tmp_path, live):
+    ids = [live() for _ in range(20)]
+
     def post(i):
-        call(srv, "POST", "/api/decision", _decision(ticket_id=f"n{i}"))
+        call(srv, "POST", "/api/decision", _decision(ticket_id=ids[i]))
 
     threads = [threading.Thread(target=post, args=(i,)) for i in range(20)]
     for t in threads:
@@ -763,11 +933,11 @@ def test_concurrent_decisions_never_interleave(srv, tmp_path):
     for t in threads:
         t.join()
     lines = (tmp_path / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
-    assert sorted(json.loads(line)["ticket_id"] for line in lines) == sorted(f"n{i}" for i in range(20))
+    assert sorted(json.loads(line)["ticket_id"] for line in lines) == sorted(ids)
 
 
-def test_decision_log_is_readable_by_its_owner_only(srv, tmp_path):
-    assert call(srv, "POST", "/api/decision", _decision())[0] == 200
+def test_decision_log_is_readable_by_its_owner_only(srv, tmp_path, live):
+    assert call(srv, "POST", "/api/decision", _decision(ticket_id=live()))[0] == 200
     if os.name == "posix":
         assert (tmp_path / "decisions.jsonl").stat().st_mode & 0o777 == 0o600
 

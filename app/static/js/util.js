@@ -43,6 +43,9 @@ export function ltr(text, cls = "") {
   return el("bdi", { dir: "ltr", class: cls || null, text: String(text) });
 }
 export const mono = (text) => ltr(text, "mono");
+/** A ticket's id as the page shows it. A live run's id (live-<UTC time>-<6 hex>, the decision log's) is
+ *  shortened to «live-» and its 6 hex digits. */
+export const ticketId = (key) => mono(String(key).replace(/^live-\d{14}-(?=[0-9a-f]{6}$)/, "live-"));
 export const num = (text) => ltr(text, "num");
 
 // Line icons (24 px grid, drawn with currentColor). Built with createElementNS, never from a string.

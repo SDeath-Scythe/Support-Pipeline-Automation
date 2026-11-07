@@ -20,8 +20,8 @@ import {
 } from "./state.js";
 import { hideToastIf, setBanner, showToast } from "./ui.js";
 import {
-  MOD, add, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, median, mono, num, plainText, richText,
-  ticketsAr,
+  MOD, add, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, median, num, plainText, richText,
+  ticketId, ticketsAr,
 } from "./util.js";
 
 const hooks = { toProcess: null, newTicket: null, rerun: null, cancelLive: null, reload: null };
@@ -276,7 +276,7 @@ function row(it, active) {
     "aria-current": open ? "true" : null, tabindex: active ? "0" : "-1", dataset: { key: it.key },
   },
   el("span", { class: "row-meta" }, status, e.priority || it.status !== "running" ? prioNode(e.priority) : null,
-    el("span", { class: "row-id" }, mono(it.key)),
+    el("span", { class: "row-id" }, ticketId(it.key)),
     d ? el("span", { class: "row-decision", title: st.word }, icon(st.icon)) : null),
   el("span", { class: "row-text", dir: "rtl" }, digitRuns(firstWords(it.ticket.text))));
 }
@@ -413,7 +413,7 @@ function ticketView(it) {
   const back = el("button", { type: "button", class: "btn btn-quiet back-btn", onclick: backToQueue }, icon("back"), "القائمة");
   // The id is small: what the ticket is about is the summary line under it.
   add(art, el("div", { class: "ticket-bar" }, back,
-    el("h2", { id: "ticketTitle", class: "ticket-title", tabindex: "-1" }, el("span", { class: "sr-only", text: "تذكرة " }), mono(it.key)),
+    el("h2", { id: "ticketTitle", class: "ticket-title", tabindex: "-1" }, el("span", { class: "sr-only", text: "تذكرة " }), ticketId(it.key)),
     titleChips(it)));
 
   if (running) {
@@ -644,11 +644,12 @@ function confirmTargets(it, st) {
  *  both use it, so they never name different ticks. */
 const tickText = (t) => (t.list.length === 1 ? t.list[0].done : t.list[0]?.id === "account_risk" ? TICK_IDENTITY_AND_REST : TICK_ALL);
 
-/** What the agent ticked and approves anyway: warning kinds, a draft for another type, and the identity
- *  check (the decision log keeps them as kinds, never text; the server wants account_risk). */
+/** Every point the agent ticked and approves anyway: the identity check, the pipeline's points (a missing
+ *  field, the type after a disagreement), warning kinds and a draft for another type. The decision log keeps
+ *  them as kinds, never text, from the server's allow-list (meta.ack_kinds); the server wants account_risk. */
 function acknowledged(t) {
-  return t.list.map((x) => x.id).filter((id) => id.startsWith("draft:") || id === "draft_for_other_type" || id === "account_risk")
-    .map((id) => id.replace(/^draft:/, ""));
+  const known = new Set(S.meta.ack_kinds || []);
+  return t.list.map((x) => x.id.replace(/^draft:/, "")).filter((id) => known.has(id));
 }
 
 function approval(it) {
@@ -981,8 +982,8 @@ function after(it, record, at) {
   const remaining = openItems().length;
   const entry = { id: record.id, key: it.key, run: it.run };
   const msg = record.action === "forwarded"
-    ? ["تحوّلت ", mono(it.key), ` ${toTeam(teamAr(effective(it).team))}`, " · الباقي ", num(remaining)]
-    : [`${ACTION_WORD[record.action]} `, mono(it.key), " · الباقي ", num(remaining)];
+    ? ["تحوّلت ", ticketId(it.key), ` ${toTeam(teamAr(effective(it).team))}`, " · الباقي ", num(remaining)]
+    : [`${ACTION_WORD[record.action]} `, ticketId(it.key), " · الباقي ", num(remaining)];
   if (next && S.agent.tab !== tab) msg.push(" · ", movedNote(tab, next, list));
   showToast(msg, () => undoKey(it.key, entry));
   S.agent.openKey = next ? next.key : null;
@@ -1018,7 +1019,7 @@ export async function undoKey(key, entry = null) {
   }
   S.agent.tab = tabOf(it);
   open(key, { focus: "heading" });
-  showToast(["رجعت ", mono(key), " للقائمة"]);
+  showToast(["رجعت ", ticketId(key), " للقائمة"]);
 }
 
 /** Ctrl/Cmd+Z: take back the last decision made in this page (on the run on screen, or a live ticket). */

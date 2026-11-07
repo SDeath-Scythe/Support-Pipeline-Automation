@@ -154,7 +154,7 @@ async function runPass(browser, pass) {
   async function watch(page, label) {
     page.on("console", (m) => {
       if (m.type() !== "error" && m.type() !== "warning") return;
-      if (allowRefusals > 0 && /Failed to load resource: the server responded with a status of (413|409)/.test(m.text())) { allowRefusals--; return; }
+      if (allowRefusals > 0 && /Failed to load resource: the server responded with a status of (400|409|413)/.test(m.text())) { allowRefusals--; return; }
       problems.push(`${label} console ${m.type()}: ${m.text()}`);
     });
     page.on("pageerror", (e) => problems.push(`${label} page error: ${e.message}`));
@@ -190,7 +190,8 @@ async function runPass(browser, pass) {
     await fn();
     await waitUntil(() => decisions().length > n0, 5000, what);
     const d = decisions().at(-1);
-    await waitUntil(async () => (await statusN()) > s0 && (await text("#status")).includes(d.ticket_id), 5000, `the page to show ${what}`);
+    const shown = d.ticket_id.replace(/^live-\d{14}-/, "live-");   // a live run's id is shown short (T11)
+    await waitUntil(async () => (await statusN()) > s0 && (await text("#status")).includes(shown), 5000, `the page to show ${what}`);
     return d;
   };
   const approveKey = () => (pass.phone ? page.click("#approveBtn") : page.keyboard.press("Control+Enter"));
@@ -620,18 +621,28 @@ async function runPass(browser, pass) {
       check("SEC-1: text typed while the check ran is not in the approved reply", true);
     }
     // SEC-1 (server) and F8: the log refuses an approval that asks for the code, and a second decision.
-    const free = run.tickets.map((r) => r.ticket.id).filter((i) => !decidedIds().has(i)).at(-1);
+    const free = run.tickets.filter((r) => r.result.outcome !== "escalated").map((r) => r.ticket.id).filter((i) => !decidedIds().has(i)).at(-1);
     const post = (body) => p.evaluate(async (b) => {
       const token = document.querySelector('meta[name="viewer-token"]').content;
       const r = await fetch("/api/decision", { method: "POST", headers: { "X-Viewer-Token": token, "Content-Type": "application/json" }, body: JSON.stringify(b) });
       return [r.status, await r.json()];
     }, body);
     const base = { run: RUN, ticket_id: free, pipeline_outcome: "drafted", flags: [], reason_codes: [], seconds: 9, corrected: {} };
-    allowRefusals = 2;   // the two 409s below are asked for
-    const [st1] = await post({ ...base, action: "approved", draft_text: "هلا", final_text: "هلا، دزلنا الرمز اللي وصلك" });
+    allowRefusals = 5;   // the refusals below (409 and 400) are asked for
+    const [st1] = await post({ ...base, action: "edited", final_text: "هلا، دزلنا الرمز اللي وصلك" });
     const [st2] = await post({ ...base, action: "took_over" });
     const [st3, j3] = await post({ ...base, action: "took_over" });
     check("SEC-1 / F8: the server refuses a secret request (409) and a second decision on one ticket (409)", st1 === 409 && st2 === 200 && st3 === 409 && j3.conflict === "decided", `${st1} ${st2} ${st3}`);
+    // T03 (user tests, 7 Nov): a ticket the run does not have, a draft it did not serve, and an escalation
+    // approved by a hand-made request are refused; nothing is logged.
+    const esc = run.tickets.find((r) => r.result.outcome === "escalated" && !decidedIds().has(r.ticket.id))?.ticket.id;
+    const nLog = decisions().length;
+    const [st4, j4] = await post({ ...base, ticket_id: "t2-9999", action: "took_over" });
+    const [st5, j5] = await post({ ...base, ticket_id: esc, action: "edited", final_text: "هلا بيك" });
+    const [st6, j6] = await post({ ...base, ticket_id: free, action: "took_over", draft_text: "مسودة ما انعرضت" });
+    check("T03: the server refuses an unknown ticket (400), an approved escalation (409) and a draft it did not serve (400)",
+      st4 === 400 && j4.field === "ticket_id" && st5 === 409 && j5.conflict === "escalated" && st6 === 400 && j6.field === "draft_text"
+      && decisions().length === nLog, `${st4} ${j4.field} ${st5} ${j5.conflict} ${st6} ${j6.field}`);
     await sleep(100);
     allowRefusals = 0;
 
@@ -662,6 +673,11 @@ async function runPass(browser, pass) {
     await p.click("#newRun");
     await p.waitForFunction(() => document.querySelector('[id^="opt-live-"]') && !document.querySelector('[id^="opt-live-"].st-running'), null, { timeout: 15000 });
     await sleep(300);
+    // T11: the server names the run (live-<UTC time>-<6 hex>); the page shows «live-» and the 6 hex digits.
+    const liveKey = await p.evaluate(() => document.querySelector('[id^="opt-live-"]').dataset.key);
+    const liveShown = await t(p, `[id="opt-${liveKey}"] .row-id`);
+    check("T11: a pasted ticket has the server's id, shown short in its row and title", /^live-\d{14}-[0-9a-f]{6}$/.test(liveKey)
+      && liveShown === `live-${liveKey.slice(-6)}` && (await t(p, "#ticketTitle")).includes(liveShown), `${liveKey} | ${liveShown}`);
     check("A11Y-3: after «شغّلها» focus is on the new ticket and its end is announced", (await active(p)) === "ticketTitle"
       && (await t(p, "#status")).includes("خلصت المعالجة"), `${await active(p)} | ${await t(p, "#status")}`);
     check("L2: a ticket with no team: take over is the main action and the summary says nothing read it",
@@ -1121,16 +1137,17 @@ async function runPass(browser, pass) {
       await page.click("#newTicket");
       await page.fill("#newText", "حولت خمسين الف لاخوي من البارحة وما وصلت، رقم العملية 4471-9032");
       await page.click("#newRun");
-      await page.waitForFunction(() => document.querySelector("#opt-live-1") && !document.querySelector("#opt-live-1.st-running"), null, { timeout: 15000 });
-      check("the live ticket ends escalated", await page.evaluate(() => document.querySelector("#opt-live-1").classList.contains("st-escalated")));
+      await page.waitForFunction(() => document.querySelector('[id^="opt-live-"]') && !document.querySelector('[id^="opt-live-"].st-running'), null, { timeout: 15000 });
+      const liveKey = await page.evaluate(() => document.querySelector('[id^="opt-live-"]').dataset.key);
+      check("the live ticket ends escalated", await page.evaluate(() => document.querySelector('[id^="opt-live-"]').classList.contains("st-escalated")));
       const offWord = meta.flag_ar.pipeline_off.split(/[:،]/)[0].trim();
-      check(`the live ticket says why: «${offWord}»`, (await selected()) === "live-1" && (await text("#agentMain")).includes(offWord), (await text("#agentMain")).slice(0, 200));
+      check(`the live ticket says why: «${offWord}»`, (await selected()) === liveKey && (await text("#agentMain")).includes(offWord), (await text("#agentMain")).slice(0, 200));
       await shot(page, "live");
       // the first press offers the optional reasons, the second records
       const d = await act(async () => {
         if (pass.phone) { await page.click("#takeBtn"); await page.click("#takeBtn"); } else { await page.keyboard.press("t"); await page.keyboard.press("t"); }
       }, "the live take-over");
-      check("taking over the live ticket logs run «live» with flag pipeline_off", d.run === "live" && d.ticket_id === "live-1" && d.action === "took_over"
+      check("taking over the live ticket logs run «live» with flag pipeline_off", d.run === "live" && d.ticket_id === liveKey && d.action === "took_over"
         && d.pipeline_outcome === "escalated" && (d.flags || []).includes("pipeline_off"), JSON.stringify(d));
     }
 
@@ -1283,6 +1300,8 @@ async function runFresh(browser, pass) {
     check("/api/meta: the API backend, full mode, live runs off for want of a key", meta.backend === "api" && meta.mode === "full"
       && meta.live.available === false && meta.live.cause === "no_key", JSON.stringify({ backend: meta.backend, mode: meta.mode, live: meta.live }));
     check("no kill-switch banner (PIPELINE_MODE is not set)", await p.evaluate(() => document.getElementById("banners").hidden));
+    check("T17: REAL_DATA unset: the header says «وضع التطوير», quietly (not on a phone: no room)", meta.real_data === false && await p.isVisible("#devBadge")
+      && (await t(p, "#devBadge")) === "وضع التطوير", String(meta.real_data));
     check("the new-ticket button is visibly off (dashed) and says why (J7)", (await p.getAttribute("#newTicket", "class")).includes("is-unavailable")
       && (await t(p, "#newTicketWhy")) === meta.live.reason_ar && (await p.getAttribute("#newTicket", "title")) === meta.live.reason_ar
       && (await p.evaluate(() => getComputedStyle(document.getElementById("newTicket")).borderStyle)) === "dashed", await t(p, "#newTicketWhy"));
@@ -1480,7 +1499,19 @@ async function runFresh(browser, pass) {
     check("cache-only: a banner, the dialog and the overview's header say it replays stored replies, and each model stage «من الكاش» (J4)",
       banner.includes("إعادة من الكاش") && cacheNote.includes("إعادة من الكاش") && liveLine.includes("إعادة من الكاش")
       && cls.includes("من الكاش") && !(await t(pc, "#st-gate .state")).includes("الكاش"), `${banner} | ${cacheNote} | ${cls}`);
+    check("T17: replaying the cache, the dialog does not say the text goes abroad (nothing is sent)", !cacheNote.includes("برا العراق"), cacheNote);
     await done(pc, "cache-only");
+    // T17: live runs on and real (REAL_DATA=1): the dialog says the text goes to a model provider abroad;
+    // no development badge.
+    const pl = await open(pass.viewport, "light", "live-on", null,
+      json("**/api/meta", (j) => { j.live = { available: true, reason_ar: null }; j.real_data = true; }));
+    await pl.click("#introOk");
+    await pl.click("#newTicket");
+    const liveNote = await t(pl, "#newNote");
+    check("T17: with live runs on, the dialog says the text goes to an outside model provider abroad; REAL_DATA=1 has no badge",
+      liveNote.includes("مزوّد نموذج خارجي برا العراق") && liveNote.includes("المسموح بإرسالها") && !(await pl.isVisible("#devBadge")), liveNote);
+    await pl.keyboard.press("Escape");
+    await done(pl, "live-on");
     // RR-3: the run note with one escalation, and with a reason only some of them share.
     const keepEsc = (keep, extra) => json("**/api/run?name=*", (j) => {
       let n = 0;
@@ -1635,7 +1666,7 @@ async function runFresh(browser, pass) {
       } else if (st.draft && !st.ack && took < 1) {
         took++;
         await p.click("#takeBtn");
-        await p.locator(".reason-chip", { hasText: "ناقصه سؤال للزبون" }).click();
+        await p.locator(".reason-chip", { hasText: "ناقصة سؤال للزبون" }).click();
         await p.click("#takeBtn");
       } else if (st.draft && !st.ack && fixed < 1) {
         fixed++;
@@ -1661,6 +1692,13 @@ async function runFresh(browser, pass) {
       && (await t(p, "#queueTitle")).replace(/\s+/g, " ").includes("خلصت 80 من 80") && sum.includes("قررت على 80 تذكرة")
       && sum.includes("انحسمت بأقل من 3 ثواني"), `${decisions().length} | ${sum.slice(0, 160)}`);
     check(`each move to another tab was said in the toast (${moved} times)`, moved >= 2, String(moved));
+    // T28 (user tests, 7 Nov): each approved flagged ticket logs the points ticked for it, the missing
+    // field and the type after a disagreement included, as kinds.
+    const points = decisions().filter((d) => ["approved", "edited"].includes(d.action) && d.pipeline_outcome === "flagged");
+    const unlogged = points.filter((d) => d.flags.some((f) => (f === "recheck_used_second" || f.startsWith("missing:"))
+      && !d.warnings_acknowledged.includes(f)));
+    check(`T28: ${points.length} approved flagged tickets log every point ticked (missing field, type)`,
+      points.length > 0 && unlogged.length === 0, JSON.stringify(unlogged.slice(0, 3)));
     check(`a tab that ran out was said with «ماكو بعد», «خلصت» kept for decisions (${ranOut} times) (J8)`, ranOut >= 1
       && !(await t(p, "#status")).includes("خلصت تذاكر"), String(ranOut));
     await demo(p, "inbox-done");
