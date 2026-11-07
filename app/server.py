@@ -153,9 +153,9 @@ BLOCKED_AR = {"asks_secret": "الرد يطلب رمز أو كلمة سر من �
 # institution's own procedure; recheck_used_second the type), a missing field the reply asks for
 # (missing:<field>), one the agent marks as not needed (missing:<field>:not_needed), and a second request
 # in a drafted ticket that no team is routed to (second_request: the agent read what the reply says of
-# it). An allow-list. The draft warnings behind flags (draft_check.FLAG_KINDS) are in it whether or not
-# their flag is on now: a run saved with the flag on still has them. A quiet flag (run.QUIET_FLAGS) is
-# shown, never ticked, so it is not.
+# it). An allow-list. A draft warning behind a flag (draft_check.FLAG_KINDS; none since the 7 Nov ones
+# were adopted) is in it whether or not its flag is on now: a run saved with the flag on still has it. A
+# quiet flag (run.QUIET_FLAGS) is shown, never ticked, so it is not.
 _ACK_FIELDS = tuple(drf.FIELD_AR)
 ACK_KINDS = tuple(dict.fromkeys(
     [k for k in draft_check.KINDS + draft_check.FLAG_KINDS if k not in BLOCKING_CHECKS]
@@ -536,8 +536,8 @@ def meta() -> dict:
 
 def checks_active() -> list[str]:
     """The draft_check kinds that run now, for the page's "nothing found" line: every KINDS rule
-    (hold_reason and sensitive_number since 5 Nov, when they stopped being flags), and each warning
-    behind a flag (FLAG_KINDS) while its flag is on."""
+    (hold_reason and sensitive_number since 5 Nov, the five user-test warnings since 7 Nov, when they
+    stopped being flags), and each warning behind a flag (FLAG_KINDS) while its flag is on."""
     return list(draft_check.kinds_on())
 
 

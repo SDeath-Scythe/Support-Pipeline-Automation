@@ -229,7 +229,8 @@ def test_check_returns_exactly_what_the_pipeline_computes(srv, monkeypatch):
             assert out == {"findings": draft_check.findings(draft, allowed, drf.facts_text(sub))}
     status, out = check(srv, {"draft": "هلا بيك، راح نرجعلك 75 الف خلال يومين. card", "allowed_text": allowed,
                               "subcategory": None})
-    assert status == 200 and [f["kind"] for f in out["findings"]] == ["stray_latin", "promise", "unknown_number"]
+    assert status == 200 and [f["kind"] for f in out["findings"]] == ["stray_latin", "promise", "unknown_number",
+                                                                      "amount_not_in_ticket"]
 
 
 def test_check_allows_a_time_only_from_the_policy_facts(srv, monkeypatch):
@@ -410,11 +411,20 @@ def test_recomputed_spans_are_cached_until_the_file_or_the_flags_change(old_runs
     assert len(calls) == 3
 
 
+# The saved test2 run's drafts on which the warnings adopted on 7 Nov fire when its spans are recomputed.
+SAVED_NEW_WARNINGS = {"t2-0004": ["amount_not_in_ticket"], "t2-0013": ["amount_not_in_ticket"],
+                      "t2-0058": ["amount_not_in_ticket"], "t2-0017": ["ask_missing", "dialect_words"],
+                      "t2-0056": ["ask_missing"], "t2-0019": ["dialect_words"], "t2-0069": ["dialect_words"]}
+SAVED_NEW_WARNINGS_KINDS = ("claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket")
+
+
 def test_committed_final_run_gets_spans_that_agree_with_its_saved_checks(srv):
+    """The spans are recomputed with today's rules: the rules the run was saved with find what it saved, and the
+    warnings adopted on 7 Nov add findings on seven drafts. The outcome and flags stay as saved."""
     status, _, raw = call(srv, "GET", "/api/run?name=saved/test2/final")
     assert status == 200
     run = json.loads(raw)
-    drafts = 0
+    drafts, added = 0, {}
     for row in run["tickets"]:
         done = [e for e in row["events"] if e["stage"] == "draft" and e["status"] == "done"]
         if not done:
@@ -423,11 +433,14 @@ def test_committed_final_run_gets_spans_that_agree_with_its_saved_checks(srv):
         drafts += 1
         data = done[0]["data"]
         assert data["check_spans_recomputed"] is True
-        assert [s["kind"] for s in data["check_spans"]] == data["checks"], row["ticket"]["id"]
+        kinds = [s["kind"] for s in data["check_spans"]]
+        assert [k for k in kinds if k not in SAVED_NEW_WARNINGS_KINDS] == data["checks"], row["ticket"]["id"]
+        if len(kinds) > len(data["checks"]):
+            added[row["ticket"]["id"]] = [k for k in kinds if k in SAVED_NEW_WARNINGS_KINDS]
         assert row["result"]["draft_checks"] == data["check_spans"] and row["result"]["draft_checks_recomputed"]
         for s in data["check_spans"]:
             assert data["reply"][s["start"]:s["end"]] == s["text"]
-    assert drafts == 74 and len(run["tickets"]) == 80
+    assert drafts == 74 and len(run["tickets"]) == 80 and added == SAVED_NEW_WARNINGS
 
 
 # --- the 5 Nov review: saved runs get the account_risk flag as run.py gives it now ---
@@ -506,28 +519,25 @@ def test_meta_names_the_blocking_checks_and_explains_every_kind(srv):
     meta = json.loads(raw)
     assert status == 200
     assert meta["blocking_checks"] == ["asks_secret", "hold_reason", "sensitive_number"]
-    # the warnings behind flags have their wording too: a run saved with the flag on still shows them
-    assert list(meta["check_ar"]) == list(draft_check.KINDS + draft_check.FLAG_KINDS)
+    # any warning behind a flag would have its wording too (a run saved with the flag on still shows it); none since 7 Nov
+    assert list(meta["check_ar"]) == list(draft_check.KINDS + draft_check.FLAG_KINDS) and draft_check.FLAG_KINDS == ()
     for kind, text in meta["check_ar"].items():
         assert text == FLAG_AR[f"draft:{kind}"] and "\n" not in text and any("؀" <= ch <= "ۿ" for ch in text)
-    # every rule runs (hold_reason and sensitive_number since 5 Nov), so «ما لكينا» may name them all; with no
-    # flag on, no warning under test runs, so it names none of them
-    assert meta["checks_active"] == list(draft_check.KINDS) == ["stray_latin", "promise", "asks_secret", "unknown_number",
-                                                                  "hold_reason", "sensitive_number"]
+    # every rule runs (hold_reason and sensitive_number since 5 Nov, the user-test warnings since 7 Nov), so
+    # «ما لكينا» names them all
+    assert meta["checks_active"] == list(draft_check.KINDS) == [
+        "stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number",
+        "claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket"]
     assert meta["flag_ar"]["account_risk"].startswith("حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون")
     assert meta["quiet_flags"] == ["instructions_in_ticket"]
 
 
-@pytest.mark.parametrize("fixes, added", [
-    ("claims_done,dialect_words", ["claims_done", "dialect_words"]),
-    ("ask_missing,repeated_text", ["repeated_text", "ask_missing"]),
-    ("amount_own_words", ["amount_not_in_ticket"]),
-    ("secret_in_ticket", []),
-])
-def test_checks_active_adds_a_flagged_warning_only_while_its_flag_is_on(srv, monkeypatch, fixes, added):
+@pytest.mark.parametrize("fixes", ["", "summary_qualifiers"])
+def test_checks_active_is_every_rule_whatever_flag_is_on(srv, monkeypatch, fixes):
+    """The 7 Nov warnings were adopted, so no flag adds or removes a draft check; summary_qualifiers is not one."""
     monkeypatch.setenv("PIPELINE_FIXES", fixes)
     meta = json.loads(call(srv, "GET", "/api/meta")[2])
-    assert meta["checks_active"] == list(draft_check.KINDS) + added
+    assert meta["checks_active"] == list(draft_check.KINDS)
 
 
 # --- the shared facts helper (draft.py) ---
@@ -570,7 +580,8 @@ def test_main_refuses_an_unknown_fix_flag(monkeypatch, capsys):
     assert stop.value.code == 1 and "hold_reasn" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("name", ["hold_reason", "sensitive_number", "escalate_account_risk"])
+@pytest.mark.parametrize("name", ["hold_reason", "sensitive_number", "escalate_account_risk", "dialect_words",
+                                  "draft_rules_ut"])
 def test_main_refuses_an_adopted_flag_and_says_what_became_of_it(name, monkeypatch, capsys):
     monkeypatch.setenv("PIPELINE_FIXES", name)
     monkeypatch.delenv("REAL_DATA", raising=False)

@@ -1,5 +1,5 @@
-"""Code rules that read the customer's text for a risk the models can miss. Each is behind a flag in
-fixes.py (off by default); run.py decides what a match does.
+"""Code rules that read the customer's text for a risk the models can miss. Each was a flag in fixes.py
+until 7 Nov, when they became the normal code; run.py decides what a match does.
 
 The rules read the ticket folded (clean.fold: ASCII digits, no harakat or invisible characters, Persian
 letters as Arabic), so «الرمز السرّي» or a zero-width space inside a word reads as the plain word. Line

@@ -1,7 +1,7 @@
 """Test candidate fixes with and without them on the same tickets, and write up the results.
 
     python scripts/experiment.py run default               # the pipeline as it is (no flags)
-    python scripts/experiment.py run F22                   # a new fix's flag on (codes in CODES)
+    python scripts/experiment.py run F34                   # a fix's flag on (codes in CODES)
     python scripts/experiment.py run baseline --nocache --label baseline-rep1   # noise check
     python scripts/experiment.py report F2+F3              # judge drafts, score, compare with baseline
     python scripts/experiment.py judge-noise baseline      # grade the same drafts twice
@@ -32,12 +32,9 @@ from pipeline.gate import _key  # noqa: E402
 from pipeline.requirements import REFERENCE_ALTERNATIVES, REFERENCE_NOT_NEEDED  # noqa: E402
 
 # Short codes for the flags in pipeline/fixes.py, e.g. "F22": "some_fix". The adopted fixes (F2-F21, see
-# docs/experiments/LOG.md) are the normal code and the rest were deleted (30 Oct). F22-F25 are the draft warnings
-# opened after the 7 Nov user tests, F26-F31 the pipeline rules and F32-F34 the prompt changes opened after the same tests.
-CODES: dict[str, str] = {"F22": "claims_done", "F23": "repeated_text", "F24": "ask_missing", "F25": "dialect_words",
-                         "F26": "fraud_secondary", "F27": "secret_in_ticket", "F28": "strip_format_chars",
-                         "F29": "device_lost", "F30": "complaint_risk", "F31": "instructions_in_ticket",
-                         "F32": "draft_rules_ut", "F33": "amount_own_words", "F34": "summary_qualifiers"}
+# docs/experiments/LOG.md) are the normal code and the rest were deleted (30 Oct). F22-F33, opened after the
+# 7 Nov user tests, became the normal code the same day; F34 is still under test.
+CODES: dict[str, str] = {"F34": "summary_qualifiers"}
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"
 JUDGE_PROMPT = (ROOT / "scripts/prompts/judge_draft.md").read_text(encoding="utf-8")

@@ -4,6 +4,32 @@ Method: [README.md](README.md). Per-config pages and the summary table: [fixes_3
 
 All numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. Gold labels for `fixes_30` were model-written, and the draft judge is a model, so treat single-ticket differences with care.
 
+## 7 Nov: Twelve of the thirteen user-test flags become the normal code
+
+**What was adopted** (`src/pipeline/fixes.py`, `ADOPTED`). The six code rules on the customer's text: `fraud_secondary`, `secret_in_ticket`, `strip_format_chars`, `device_lost`, `complaint_risk` and `instructions_in_ticket`. They found no false alarm on dev, test2, mvp_test, adversarial_14 or edge_cases, and they fix the reported cases. Four draft warnings: `claims_done`, `repeated_text` and `dialect_words` (0 or near 0 false alarms on 2,531 saved drafts), and `ask_missing` (14 of 15 saved hits true). `amount_own_words`, with the narrowed check, which no longer fires on a faithful digit form (12 saved tickets read: all were note conversions or amounts computed by the model). And the revised `draft_rules_ut`, which replaced `draft_system.md`. On the same 60 dev drafts, graded twice, asks_right was 55/55 against 53/53 with no flag, bad drafts 3/3 against 4/4, and its code gains held. The warnings ask for a tick, and none blocks an approval.
+
+**Not adopted.** `summary_qualifiers` stays a flag. Over three replicates it had 0 first-person slips, but 1 English word in 54 lines, and the rule asked for 0.
+
+**Code rules and warnings, cache-only.** The adopted code ran on the saved drafts, with the old drafter inputs. The baseline is 3b37091 with no flag.
+
+| Set | Review rate | Fraud recall | Type used, priority | Tickets moved, by rule (fired) |
+|---|---|---|---|---|
+| dev 233 | 53 → 68 | 17/17 → 17/17 | 231, 231 → same | dialect_words 8 (9), ask_missing 4 (7), amount_not_in_ticket 3 (3), amount_disagreed 1 (dev-0138); quiet instructions_in_ticket (5) |
+| test2 80 | 21 → 27 | 6/6 → 6/6 | 78, 79 → same | amount_not_in_ticket 3 (3), dialect_words 2 (3), ask_missing 1 (2); instructions_in_ticket (2) |
+| mvp_test 78 | 27 → 28 | 6/6 → 6/6 | 77, 77 → same | amount_not_in_ticket 1 (1); dialect_words (1) and ask_missing (1) on flagged tickets; instructions_in_ticket (2) |
+| adversarial_14 | 4 → 5 | – | 14 → same | complaint_risk 1 (a11); instructions_in_ticket (3) |
+
+On these sets, `fraud_secondary`, `secret_in_ticket`, `device_lost`, `other_phone`, `bidi_controls`, `claims_done` and `repeated_text` fired on no ticket. Teams did not move. complaint_risk also fired on dev-0231, which was already flagged.
+
+**Drafts from the adopted drafter (live).** test2 and mvp_test were re-drafted with the classifications from the cache, at $0.3055. The warnings on 146 drafts: ask_missing 4 (merchant 2, agent_location 1, reference_lost 1), dialect_words 1 («بينما»), amount_not_in_ticket 0, claims_done 0, repeated_text 0. The same checks on the 143 old drafts found amount_not_in_ticket 4, ask_missing 3 and dialect_words 4. Avoid-list words went from 4 to 0, address terms from 6 to 0, and the mean length from 217.9 to 191.3 characters. Three drafts put words in «» (two status words, and the amount «مليونين»). The review rate went from 21 to 22 of 80 on test2. On mvp_test it went from 24 to 26 of 75, leaving out the 3 tickets that were cache misses in the baseline. The cli judge graded 40 drafts, picked with seed 7 from the 143 tickets drafted in both runs:
+
+| Grading | Mean | Bad | asks_right | grounded | Score up / down |
+|---|---|---|---|---|---|
+| 1 | 4.375 → 4.55 | 2 → 1 | 34 → 35 | 38 → 39 | 8 / 1 |
+| 2 (salt g2) | 4.325 → 4.525 | 1 → 1 | 34 → 35 | 39 → 39 | 11 / 3 |
+
+**The saved run the viewer serves** (`docs/runs/test2/final.json`, not regenerated). The server recomputes its draft-check spans with today's rules. 7 drafted tickets and t2-0017 now show a new warning: amount_not_in_ticket on t2-0004, t2-0013 and t2-0058; ask_missing on t2-0056; dialect_words on t2-0019 and t2-0069; ask_missing and dialect_words on t2-0017. Their outcome and flags stay as saved, so the tab counts do not move (15 / 6 / 59, as since the 5 Nov account_risk recompute). The text rules are not recomputed, so t2-0030 and t2-0041 do not show the quiet instructions_in_ticket note.
+
 ## 7 Nov: The code-request check and an unrelated «ما» (no model calls)
 
 **The problem.** While the inbox tour was being recorded, «وما نگدر دزلنا الرمز اللي وصلك» ("and we can't; send us the code you got") was typed into a draft. `asks_secret`, the blocking rule against a draft that asks the customer for a code, OTP, PIN, password or CVV, did not flag it, in the page or at the server. The same request with nothing before it was flagged.

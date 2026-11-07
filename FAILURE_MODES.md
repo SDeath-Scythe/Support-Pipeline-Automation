@@ -126,7 +126,7 @@ Every change was tested with and without it on the same tickets (README.md:46). 
   - A fraud ticket's second issue is cleared in code, not in the prompt (F14b, LOG:382).
   - **Account risk, 5 Nov.** The old flag was changed into `account_risk` and adopted (CONTEXT.md, section 4). The ticket keeps its draft, the inbox shows «حساب مقفول أو تبديل شريحة. تأكد من هوية الزبون حسب الإجراءات قبل لا تعتمد، ولا تكتب بالرد إنه صار أي تغيير على الحساب.», and approve stays off until the agent ticks «تأكدت من هوية الزبون» ("I confirmed the customer's identity") (`run.py`, `ACCOUNT_RISK`; `app/static/js/labels.js`, `CONFIRM_AR`; `tests/test_pipeline_safety.py::test_account_risk_flags_the_draft_and_never_escalates`, `::test_account_risk_reads_the_type_after_the_recheck_not_the_first_label`; smoke: "account_risk: approve stays off until «تأكدت من هوية الزبون» is ticked, then it is on").
 - **What remains:**
-  - A fraud ticket worded like an ordinary login problem could get a draft. The 34-of-34 result comes from synthetic data. Until it is measured, three things protect the customer: the drafter is told never to ask for a code (`src/pipeline/prompts/draft_system.md:12`), a person reads every draft, and nothing is sent automatically (README.md:5).
+  - A fraud ticket worded like an ordinary login problem could get a draft. The 34-of-34 result comes from synthetic data. Until it is measured, three things protect the customer: the drafter is told never to ask for a code (`src/pipeline/prompts/draft_system.md:15`), a person reads every draft, and nothing is sent automatically (README.md:5).
   - **Proposed measurement, for the author to approve:** a probe set of about 20 fraud tickets worded as login, code or account problems, run once on the API. At $0.0027 per ticket (LOG:225), that is about $0.05 *(inference)*. It would show how often the first model labels such a ticket as an ordinary type at 0.75 or more. The author decides whether to run it, before the heldout2 run.
   - A possible fix, not built: a narrow fraud-cue rule (a code given to a caller, a charge the customer did not make) that forces the blind re-check and never escalates by itself. Like every change, it would go behind a flag and be measured with and without on dev.
   - **Where `account_risk` gives no reminder:** a ticket whose re-check moved the type away (mvp-0046). Since the 5 Nov review, choosing the first model's `sim_change` in the inbox adds the identity tick, and a blocked account or a SIM change that escalates for another reason has the reminder in its team note (LOG, 5 Nov, "Review").
@@ -199,7 +199,7 @@ Three sources: the adversarial tickets of 29 Oct, the 1 Nov security review, and
   - Two misses are known (LOG, 7 Nov entry; LOG:206), checked again with no model call: a request five or more words before the secret with other words between («دزلنا بعد ما تشوف الرسالة الرمز اللي وصلك»), and a time written in words («خلال اربعة وعشرين ساعة»). Both also pass in the inbox: `/api/check` runs the same rules and finds neither, so an edit with the first can be approved with no warning. The 7 Nov entry lists the other phrasings still missed (the code asked for as "the same number", Egyptian forms, English in the passive). «دزلنا آخر اربع ارقام من الرقم السري», the example here until 7 Nov, is caught now.
   - Three of the six draft rules block: the code request, tipping off and a repeated number. A promise, a number not in the ticket or stray Latin letters is a warning: the agent ticks that they read it and may approve. The log keeps the kinds ticked, not the text (`app/server.py:145-148`, `ACK_KINDS`; LOG:74).
   - The two newer rules have never fired on a saved draft, so how often they raise a false alarm on real drafts is unknown. «رفعنا بلاغ» is one known case: the agent must reword it before approving.
-  - The rules are a backstop. The drafter prompt forbids asking for a code (`draft_system.md:12`), and a person reads every draft. Whether they read it closely is failure mode 11.
+  - The rules are a backstop. The drafter prompt forbids asking for a code (`draft_system.md:15`), and a person reads every draft. Whether they read it closely is failure mode 11.
 
 ### 7. Instructions planted in a ticket
 
@@ -218,7 +218,7 @@ Three sources: the adversarial tickets of 29 Oct, the 1 Nov security review, and
   The injections are simple, single-line and written by models. No red-team exercise by a person is recorded.
 - **Why:**
   - Priority and routing are rules on the model's type and amount (`src/pipeline/route.py:15-29`, `route`), so a planted "P1" has nothing to act on directly. It can still pull the type, as in t2-0041.
-  - Both prompts tell the model that the ticket is data (`src/pipeline/prompts/classify_system.md:5-6`; `draft_system.md:13`).
+  - Both prompts tell the model that the ticket is data (`src/pipeline/prompts/classify_system.md:5-6`; `draft_system.md:16`).
   - The model still reads the planted sentence as part of the ticket. Both type misses were injection tickets whose types have no required field (see failure mode 2).
 - **How it was found:** Planted injections were an edge case in the dataset from the start (data/README.md:19). The adversarial set of 29 Oct added six more kinds (AUDIT:27-47). The forged tag was found by reading the prompt code in the 1 Nov review (LOG:111).
 - **What was done:**

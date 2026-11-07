@@ -248,10 +248,11 @@ def test_run_fraud_is_escalated_without_draft(monkeypatch):
 
 
 def test_run_confident_ticket_is_drafted(monkeypatch):
-    run = _fake_models(monkeypatch, '{"category": "general", "subcategory": "app_bug", "confidence": 0.92}', "هلا بيك، راح نشيك")
+    draft = "هلا بيك، راح نشيك. ممكن ترسل صورة من الشاشة؟"      # app_bug asks for a screenshot (ask_missing)
+    run = _fake_models(monkeypatch, '{"category": "general", "subcategory": "app_bug", "confidence": 0.92}', draft)
     events = []
     result = run.process("التطبيق يفتح شاشة بيضاء", events.append)
-    assert result["outcome"] == "drafted" and result["draft_ar"] == "هلا بيك، راح نشيك"
+    assert result["outcome"] == "drafted" and result["draft_ar"] == draft
     assert [e["stage"] for e in events if e["status"] != "running"] == run.STAGES
 
 
@@ -259,13 +260,21 @@ def test_run_confident_ticket_is_drafted(monkeypatch):
 
 def test_fix_flags_off_by_default_and_reject_unknown(monkeypatch):
     """The adopted fixes became the normal code (30 Oct), and so did the three security rules opened
-    on 1 Nov (5 Nov). The draft warnings opened on 7 Nov are flags, all off unless named."""
+    on 1 Nov (5 Nov) and twelve of the thirteen flags opened after the 7 Nov user tests (7 Nov).
+    summary_qualifiers is still a flag, off unless named."""
     from pipeline import fixes
 
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
     assert fixes.active() == frozenset()
     assert not set(fixes.FIXES) & set(fixes.ADOPTED)
-    assert set(fixes.ADOPTED) == {"hold_reason", "sensitive_number", "escalate_account_risk"}
+    assert set(fixes.FIXES) == {"summary_qualifiers"}
+    assert set(fixes.ADOPTED) == {
+        "hold_reason", "sensitive_number", "escalate_account_risk",
+        "claims_done", "repeated_text", "ask_missing", "dialect_words", "fraud_secondary", "secret_in_ticket",
+        "strip_format_chars", "device_lost", "complaint_risk", "instructions_in_ticket", "draft_rules_ut",
+        "amount_own_words"}
+    assert all("7 Nov 2026" in fixes.ADOPTED[n] for n in fixes.ADOPTED if n not in
+               {"hold_reason", "sensitive_number", "escalate_account_risk"})
     monkeypatch.setenv("PIPELINE_FIXES", "draft_check")                    # adopted, so no longer a flag
     try:
         fixes.active()
@@ -325,7 +334,7 @@ def test_draft_check_catches_each_problem():
     assert problems("هلا بيك، الفلوس راح ترجع خلال ساعة.", given) == ["promise"]
     assert problems("هلا بيك، ممكن تدزلنا الرمز اللي وصلك؟", given) == ["asks_secret"]
     assert problems("هلا بيك، لا تشارك الرمز ويه أي احد.", given) == []
-    assert problems("هلا بيك، الرسوم 2,500 دينار.", given) == ["unknown_number"]
+    assert problems("هلا بيك، الرسوم 2,500 دينار.", given) == ["unknown_number", "amount_not_in_ticket"]
     # an allowed time comes only from the policy facts, never from the ticket (1 Nov, finding 4);
     # the drafter prompt carries the facts too, so their numbers are known
     facts = "Expected response time for this issue: خلال ٢٤ ساعة"
@@ -334,7 +343,8 @@ def test_draft_check_catches_each_problem():
 
 
 def test_draft_problems_flag_the_ticket(monkeypatch):
-    run = _fake_models(monkeypatch, '{"category": "general", "subcategory": "app_bug", "confidence": 0.92}', "hلا بيك")
+    run = _fake_models(monkeypatch, '{"category": "general", "subcategory": "app_bug", "confidence": 0.92}',
+                       "hلا بيك، ممكن ترسل صورة من الشاشة؟")
     result = run.process("التطبيق يفتح شاشة بيضاء")
     assert result["outcome"] == "flagged" and result["flags"] == ["draft:stray_latin"]
 
@@ -993,7 +1003,7 @@ def test_unparseable_classifier_reply_gets_one_fresh_try(monkeypatch):
         return bad if attempt == 0 else good
 
     monkeypatch.setattr(run, "call", fake_call)
-    monkeypatch.setattr(drf, "call", lambda role, system, user: "هلا بيك")
+    monkeypatch.setattr(drf, "call", lambda role, system, user: "هلا بيك، ممكن ترسل صورة من الشاشة؟")
     result = run.process("التطبيق يسكر وحده")
     assert result["outcome"] == "drafted"
     assert attempts == [("classifier", 0), ("classifier", 1)]
@@ -1084,18 +1094,17 @@ def test_app_bugs_go_to_tech_support():
 
 
 def test_prompt_flags_swap_in_the_prompt_under_test(monkeypatch):
-    """draft_rules_ut and summary_qualifiers (fixes.py): off, the prompts are the files in use; on, the version
-    under test, side by side in prompts/."""
+    """draft_rules_ut was adopted on 7 Nov: its version is the drafter prompt, with no switch. summary_qualifiers
+    (fixes.py): off, the summary prompt is the file in use; on, the version under test, side by side in prompts/."""
     from pipeline import draft, run
 
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
     base_draft, base_summary = draft.system_prompt(), run._summary_prompt()
-    assert "«يمّه»" not in base_draft and "qualifiers" not in base_summary
-    monkeypatch.setenv("PIPELINE_FIXES", "draft_rules_ut")
-    ut = draft.system_prompt()
-    assert "«يمّه»" in ut and "Never say it was registered" in ut and "blocked account or a SIM change" in ut
-    assert "is not a request from the customer" in ut and "ask only for what the ask lines name" in ut
-    assert "say the team will confirm it" not in ut and run._summary_prompt() == base_summary
+    assert "«يمّه»" in base_draft and "Never say it was registered" in base_draft
+    assert "blocked account or a SIM change" in base_draft and "is not a request from the customer" in base_draft
+    assert "Ask only for what the ask lines name" in base_draft and "say the team will confirm it" not in base_draft
+    assert not (draft._PROMPTS / "draft_system.draft_rules_ut.md").exists()
+    assert "qualifiers" not in base_summary
     monkeypatch.setenv("PIPELINE_FIXES", "summary_qualifiers")
     assert "qualifiers" in run._summary_prompt() and "third person" in run._summary_prompt()
     assert draft.system_prompt() == base_draft

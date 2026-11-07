@@ -17,11 +17,13 @@ from bisect import bisect_left, bisect_right
 from . import fixes
 from .clean import CREDENTIAL, clean, fold, sensitive_numbers
 
-KINDS = ("stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number")
-# Warnings under test, each behind the flag of the same name in fixes.py: off, they never appear.
-FLAG_KINDS = ("claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket")
-# A kind whose flag has another name (the flag also changes the drafter's prompt, draft.py).
-_FLAG_OF = {"amount_not_in_ticket": "amount_own_words"}
+# The last five are the warnings from the 7 Nov user tests, flags until they were adopted the same day.
+KINDS = ("stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason", "sensitive_number",
+         "claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket")
+# Warnings under test, each behind the flag of the same name in fixes.py: off, they never appear. None now.
+FLAG_KINDS: tuple[str, ...] = ()
+# A kind whose flag has another name.
+_FLAG_OF: dict[str, str] = {}
 
 # Arabic letters only: not punctuation ("،" "؟" "؛"), digits or tatweel ("بالـcard"), which can
 # sit next to an English word the customer used (the API pilot flagged "declined،").
@@ -1372,7 +1374,7 @@ def _sensitive_number(norm: str, pos: list[int]) -> tuple[int, int] | None:
     return _raw(pos, spans[0][0], spans[0][1]) if spans else None
 
 
-# --- warnings under test (fixes.py flags of the same name) ---
+# --- the warnings from the 7 Nov user tests (flags until they were adopted the same day) ---
 
 # claims_done: the draft says something is already done that the tool cannot have done: «تم إرجاع المبلغ»,
 # «رجعنالك المبلغ», «سجلنا شكواك», «شكواك فسجلناها», «تم تغيير الرقم», «فتحنا الحساب». Forwarding is what the tool does,
@@ -1525,7 +1527,7 @@ def _dialect_words(norm: str, pos: list[int]) -> tuple[int, int] | None:
     return None
 
 
-# amount_not_in_ticket (flag amount_own_words): an amount in the draft, a number with its money word («1000 دولار»,
+# amount_not_in_ticket (from amount_own_words): an amount in the draft, a number with its money word («1000 دولار»,
 # «50 ألف»), that the ticket writes neither as a number nor in number words in the same unit: «50,000 دينار» for
 # «خمسين الف» is the customer's amount, but «عشر ورقات» read as 1,000 USD is the classifier's conversion.
 _DRAFT_AMOUNT = re.compile(r"(\$\s*)?(\d[\d,٬]*(?:\.\d+)?)\s*(?:(مليون|ملايين)|([أا]لف|آلاف|الاف))?\s*"
@@ -1663,7 +1665,7 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
     `allowed_text` is everything the drafter was given (the ticket, extracted fields and known facts):
     words and numbers from it may appear in the draft. `facts_text` is the policy facts alone: a time
     («خلال يومين») is allowed only from there. Every rule always runs (hold_reason and sensitive_number
-    since 5 Nov, when they stopped being flags).
+    since 5 Nov, and the five warnings from the user tests since 7 Nov, when they stopped being flags).
     """
     norm, pos = _normalise(draft)
     # Same length, so spans still map: a courtesy clause between commas is blanked unless it names a secret
@@ -1678,18 +1680,12 @@ def findings(draft: str, allowed_text: str, facts_text: str = "") -> list[dict]:
         "unknown_number": _unknown_number(norm, pos, allowed_text),
         "hold_reason": _hold_reason(norm, pos),
         "sensitive_number": _sensitive_number(norm, pos),
+        "claims_done": _claims_done(norm, pos),
+        "repeated_text": _repeated_text(norm, pos),
+        "ask_missing": _ask_missing(draft, allowed_text),
+        "dialect_words": _dialect_words(norm, pos),
+        "amount_not_in_ticket": _amount_not_in_ticket(norm, pos, allowed_text),
     }
-    on = fixes.active()
-    if "claims_done" in on:
-        spans["claims_done"] = _claims_done(norm, pos)
-    if "repeated_text" in on:
-        spans["repeated_text"] = _repeated_text(norm, pos)
-    if "ask_missing" in on:
-        spans["ask_missing"] = _ask_missing(draft, allowed_text)
-    if "dialect_words" in on:
-        spans["dialect_words"] = _dialect_words(norm, pos)
-    if _FLAG_OF["amount_not_in_ticket"] in on:
-        spans["amount_not_in_ticket"] = _amount_not_in_ticket(norm, pos, allowed_text)
     out = [{"kind": k, "start": s[0], "end": s[1], "text": draft[s[0]:s[1]]} for k, s in spans.items() if s]
     for f in out:
         if f["kind"] == "sensitive_number":

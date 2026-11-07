@@ -10,7 +10,6 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from . import fixes
 from .clean import neutralise_tags
 from .config import load_yaml, taxonomy
 from .draft_check import amount_written
@@ -39,11 +38,11 @@ def _read(name: str) -> str:
 
 
 def system_prompt() -> str:
-    """The drafter's instructions; the draft_rules_ut flag (fixes.py) swaps in the version under test."""
-    return _read("draft_system.draft_rules_ut.md" if fixes.enabled("draft_rules_ut") else "draft_system.md")
+    """The drafter's instructions (the draft_rules_ut version since 7 Nov)."""
+    return _read("draft_system.md")
 
 
-# amount_own_words: the amount as the customer wrote it, when it is not a number in the ticket («عشر ورقات»).
+# The amount as the customer wrote it, when it is not a number in the ticket («عشر ورقات»).
 # A run of number words with a money word in it; «ورقة» (a 100 USD note) is how the classifier reads it, not
 # something the customer wrote, so the draft quotes the words instead of the converted number.
 _NUM_WORD = (r"(?:و|ب|وب)?(?:واحد|وحدة|ثنين|اثنين|ثنتين|ثلاث|ثلاثة|تلاث|تلاثة|اربع|أربع|اربعة|أربعة|خمس|خمسة|ست|ستة|"
@@ -63,15 +62,15 @@ def own_words(text: str) -> str | None:
 
 
 def amount_line(cleaned_text: str, ex: Extraction) -> str | None:
-    """The drafter's amount line. With amount_own_words on, an amount the ticket doesn't write as a number
-    is given as the customer's own words to quote (or, if they can't be found, as an instruction to use them)."""
+    """The drafter's amount line. An amount the ticket doesn't write as a number is given as the customer's
+    own words to quote (or, if they can't be found, as an instruction to use them): amount_own_words, 7 Nov."""
     if ex.amount_iqd is not None:
         n, currency, line = ex.amount_iqd, "iqd", f"Amount: {ex.amount_iqd:,} IQD"
     elif ex.amount_usd is not None:
         n, currency, line = ex.amount_usd, "usd", f"Amount: {ex.amount_usd} USD"
     else:
         return None
-    if not fixes.enabled("amount_own_words") or amount_written(cleaned_text, n, currency):
+    if amount_written(cleaned_text, n, currency):
         return line
     words = own_words(cleaned_text)
     if words:

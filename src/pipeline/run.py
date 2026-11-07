@@ -47,8 +47,8 @@ ACCOUNT_RISK = ("blocked_account", "sim_change")
 
 STAGES = ["received", "clean", "classify", "gate", "recheck", "route", "draft", "result"]
 
-# Flags from the code rules on the customer's text (ticket_rules.py, each behind its fixes.py flag), added
-# to every outcome. A quiet one is shown but doesn't move a drafted ticket to «تحتاج تأكيد».
+# Flags from the code rules on the customer's text (ticket_rules.py; flags until 7 Nov), added to every
+# outcome. A quiet one is shown but doesn't move a drafted ticket to «تحتاج تأكيد».
 QUIET_FLAGS = ("instructions_in_ticket",)
 # device_lost: a lost or stolen phone with the wallet open on it goes where fraud goes.
 SECURITY_TEAM, SECURITY_PRIORITY = "fraud", "P1"
@@ -69,7 +69,7 @@ FLAG_AR = {
     "draft:unknown_number": "المسودة بيها رقم مو موجود بالتذكرة أو المعلومات",
     "draft:hold_reason": "المسودة تذكر تحقيق أو اشتباه أو بلاغ: لا تعتمدها، ممنوع نخبر الزبون",
     "draft:sensitive_number": "المسودة تكرر رقم بطاقة أو رمز: احذفه قبل الاعتماد",
-    # The warnings behind flags (fixes.py), shown only while their flag is on.
+    # The draft warnings from the 7 Nov user tests (adopted the same day).
     "draft:claims_done": "المسودة تگول شي انسوى وإحنا ما سويناه: تأكد قبل الاعتماد",
     "draft:repeated_text": "المسودة بيها ترحيب أو جملة مكررة",
     "draft:ask_missing": "المسودة ما تسأل عن كل اللي ناقص",
@@ -77,7 +77,7 @@ FLAG_AR = {
     "draft:amount_not_in_ticket": "المبلغ اللي بالمسودة مو مثل ما كتبه الزبون: قارنه بالرسالة",
     "account_risk": "حساب مقفول أو تبديل شريحة: تأكد من هوية الزبون حسب الإجراءات قبل الاعتماد، "
                     "ولا تكتب بالرد إنه صار أي تغيير على الحساب",
-    # The code rules on the customer's text, shown while their flag (fixes.py) is on.
+    # The code rules on the customer's text (ticket_rules.py).
     "secret_in_ticket": "الزبون كتب رقم بطاقة أو رمز سري: نبّهه يغيّر الرمز ويوقف البطاقة، ولا تكرر الرقم بالرد",
     "bidi_controls": "بالرسالة رموز مخفية تغيّر ترتيب الكتابة: قارن المبلغ والأرقام بالرسالة",
     "amount_disagreed": "النموذجين قروا مبلغ مختلف: تأكد من المبلغ بالرسالة",
@@ -128,35 +128,32 @@ class _Cancelled(BaseException):
 
 
 def _clean_changes(raw: str) -> dict[str, int]:
-    changes = {
+    return {
         "arabic_digits": sum(1 for ch in raw if ch.translate(_DIGITS) != ch),
         "tatweel": raw.count(_TATWEEL),
         "extra_spaces": len(re.findall(r"\s{2,}|\n", raw)) + (raw != raw.strip()),
+        "format_chars": sum(1 for ch in raw if unicodedata.category(ch) == "Cf"),
     }
-    if fixes.enabled("strip_format_chars"):
-        changes["format_chars"] = sum(1 for ch in raw if unicodedata.category(ch) == "Cf")
-    return changes
 
 
 def _text_flags(raw: str, text: str) -> list[str]:
-    """The flags the code rules raise on the customer's text (ticket_rules.py), for the fixes switched on."""
-    on = fixes.active()
+    """The flags the code rules raise on the customer's text (ticket_rules.py)."""
     flags = []
-    if "secret_in_ticket" in on and (sensitive_numbers(text) or ticket_rules.secret_spans(raw)):
+    if sensitive_numbers(text) or ticket_rules.secret_spans(raw):
         flags.append("secret_in_ticket")
-    if "strip_format_chars" in on and ticket_rules.BIDI_CONTROLS.search(raw):
+    if ticket_rules.BIDI_CONTROLS.search(raw):
         flags.append("bidi_controls")
-    if "device_lost" in on and ticket_rules.other_phone(raw):
+    if ticket_rules.other_phone(raw):
         flags.append("other_phone")
-    if "complaint_risk" in on and ticket_rules.complaint_risk(raw):
+    if ticket_rules.complaint_risk(raw):
         flags.append("complaint_risk")
-    if "instructions_in_ticket" in on and ticket_rules.instructions_in_ticket(raw):
+    if ticket_rules.instructions_in_ticket(raw):
         flags.append("instructions_in_ticket")
     return flags
 
 
 def _fraud_view(ex: Extraction) -> Extraction | None:
-    """fraud_secondary: an answer whose second type is fraud (always escalated), turned around so the fraud
+    """An answer whose second type is fraud (always escalated), turned around so the fraud
     type is the topic and the answer's own type its second request. None for any other answer."""
     tax = taxonomy()
     main, sec = tax.subcategories.get(ex.subcategory), tax.subcategories.get(ex.secondary_subcategory or "")
@@ -348,10 +345,8 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         text = clean(raw_text)
         ctx["text"] = text
         send("clean", "done", {"text": text, "changes": _clean_changes(raw_text)})
-        on = fixes.active()
         ctx["text_flags"] = _text_flags(raw_text, text)
-        if "secret_in_ticket" in on:
-            ctx["secret_spans"] = ticket_rules.secret_spans(raw_text)
+        ctx["secret_spans"] = ticket_rules.secret_spans(raw_text)
 
         # A very long ticket is not sent to a model: it costs more and is the usual shape of an
         # attempt to bury instructions. A person reads it.
@@ -378,9 +373,9 @@ def process(raw_text: str, emit: Emit = lambda e: None,
             "subcategory": sub.label if sub else ex.subcategory,
         }
         send("classify", "done", info)
-        # fraud_secondary: a fraud second type is handled as fraud (the gate escalates it); its own type
-        # stays in the team note as the second request.
-        view = _fraud_view(ex) if "fraud_secondary" in on else None
+        # A fraud second type is handled as fraud (the gate escalates it); its own type stays in the team
+        # note as the second request.
+        view = _fraud_view(ex)
         if view is not None:
             ex, sub = view, tax.subcategories.get(view.subcategory)
             ctx["ex"] = ex
@@ -394,7 +389,7 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         ctx["confidence"] = gate.confidence
 
         # device_lost: whoever has the phone has the wallet. The fraud team takes it now, with no draft.
-        if "device_lost" in on and ticket_rules.device_lost(raw_text):
+        if ticket_rules.device_lost(raw_text):
             send("recheck", "skipped", {"why": FLAG_AR["device_lost"]})
             ctx.update(team=SECURITY_TEAM, priority=SECURITY_PRIORITY)
             send("route", "done", {"team": SECURITY_TEAM, "team_ar": tax.teams[SECURITY_TEAM]["label_ar"],
@@ -427,9 +422,9 @@ def process(raw_text: str, emit: Emit = lambda e: None,
             agree = ex2.subcategory == ex.subcategory
             info2.update(agree=agree, first=ex.subcategory, second=ex2.subcategory)
             send("recheck", "done", info2)
-            if "strip_format_chars" in on and _amounts_differ(ex, ex2):
+            if _amounts_differ(ex, ex2):
                 ctx["late_flags"].append("amount_disagreed")
-            view2 = _fraud_view(ex2) if "fraud_secondary" in on else None
+            view2 = _fraud_view(ex2)
             if view2 is not None:      # the re-check's second type is fraud: handled as fraud, as above
                 flags.append("fraud")
                 ctx["second"] = view2

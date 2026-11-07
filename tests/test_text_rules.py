@@ -14,6 +14,15 @@ def no_fixes(monkeypatch):
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
 
 
+# The warnings adopted on 7 Nov read the wording («يرجى» is dialect_words) and amounts; a test of one of the
+# earlier rules checks those rules' kinds only.
+NEW_WARNINGS = {"claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket"}
+
+
+def rule_problems(text: str, allowed: str, facts: str = "") -> list[str]:
+    return [k for k in problems(text, allowed, facts) if k not in NEW_WARNINGS]
+
+
 # --- asks_secret ---
 
 # Security finding 3: each of these asks the customer for a secret and was missed before 1 Nov.
@@ -664,13 +673,13 @@ RED_TEAM_3_WARNINGS = [
 @pytest.mark.parametrize("text", MISSED + ALSO_ASKS + MISSED_IN_REVIEW + AFTER_ANOTHER_NEGATION + RED_TEAM_ASKS
                          + RED_TEAM_2_ASKS)
 def test_asks_secret_is_caught(text):
-    assert problems(text, "… " + text) == ["asks_secret"]
+    assert rule_problems(text, "… " + text) == ["asks_secret"]
 
 
 @pytest.mark.parametrize("text", DOES_NOT_ASK + WARNINGS_IN_REVIEW + NEGATED_REQUEST + RED_TEAM_WARNINGS
                          + RED_TEAM_2_WARNINGS)
 def test_a_warning_or_a_mention_is_not_asking(text):
-    assert problems(text, "… " + text) == []
+    assert rule_problems(text, "… " + text) == []
 
 
 # Some of these also hold a time («خلال ساعة»), a promise kind of its own, so only asks_secret is checked.
@@ -926,7 +935,7 @@ def test_reassurance_and_a_negated_promise_are_not_promises(text):
 ])
 def test_an_amount_in_thousands_or_millions_is_a_known_number(draft, given):
     assert problems(draft, given) == []
-    assert problems(draft.replace("50 ", "60 ").replace("٥٠", "٦٠").replace("1.5", "2.5"), given) == ["unknown_number"]
+    assert rule_problems(draft.replace("50 ", "60 ").replace("٥٠", "٦٠").replace("1.5", "2.5"), given) == ["unknown_number"]
 
 
 # --- hold_reason (tipping-off) and sensitive_number: always on since 5 Nov ---
@@ -959,12 +968,12 @@ NOT_HOLD = ["وصلنا بلاغك عن تحويل 50 الف",          # the cu
 
 @pytest.mark.parametrize("text", HOLD)
 def test_hold_reason_is_caught(text):
-    assert problems(text, text) == ["hold_reason"]
+    assert rule_problems(text, text) == ["hold_reason"]
 
 
 @pytest.mark.parametrize("text", NOT_HOLD)
 def test_hold_reason_leaves_ordinary_words(text):
-    assert problems(text, text) == []
+    assert rule_problems(text, text) == []
 
 
 SENSITIVE = [
@@ -1020,8 +1029,8 @@ def test_findings_point_at_the_draft_text():
     given = "<ticket>\nشحنت رصيد ٥ الاف وما وصل\n</ticket>\nAmount: 5,000 IQD\nKnown facts: none"
     text = ("hلا بيك، القسم يرد خلال يومـين. ممكن تدزلنا الرمز اللي وصلك؟ "
             "الرسوم ٢,٥٠٠ دينار. حسابك تحت التحـقيق. لا تكتب PIN 4321 لأحد.")
-    found = findings(text, given)
-    assert [f["kind"] for f in found] == list(draft_check.KINDS) == problems(text, given)
+    found = [f for f in findings(text, given) if f["kind"] not in NEW_WARNINGS]
+    assert [f["kind"] for f in found] == list(draft_check.KINDS[:6]) == rule_problems(text, given)
     spans = {f["kind"]: f["text"] for f in found}
     assert spans == {"stray_latin": "hلا", "promise": "خلال يومـين", "asks_secret": "تدزلنا الرمز",
                      "unknown_number": "٢,٥٠٠", "hold_reason": "التحـقيق", "sensitive_number": "****"}
@@ -1148,11 +1157,10 @@ def test_known_facts_are_the_lines_the_drafter_gets(monkeypatch):
     assert "Known facts: " + "; ".join(facts) in draft.user_prompt("…", _ex(), "transfers")
 
 
-# --- warnings behind flags (fixes.py), opened after the 7 Nov user tests ---
+# --- the draft warnings from the 7 Nov user tests (flags until they were adopted the same day) ---
 
-def _flagged(monkeypatch, flag: str, text: str, allowed: str = "") -> list[str]:
-    monkeypatch.setenv("PIPELINE_FIXES", flag)
-    return [k for k in problems(text, allowed or "… " + text) if k == flag]
+def _flagged(monkeypatch, kind: str, text: str, allowed: str = "") -> list[str]:
+    return [k for k in problems(text, allowed or "… " + text) if k == kind]
 
 
 @pytest.mark.parametrize("text", [
@@ -1162,8 +1170,6 @@ def _flagged(monkeypatch, flag: str, text: str, allowed: str = "") -> list[str]:
 ])
 def test_claims_done_flags_a_claim_the_tool_cannot_have_done(monkeypatch, text):
     assert _flagged(monkeypatch, "claims_done", text) == ["claims_done"]
-    monkeypatch.delenv("PIPELINE_FIXES")
-    assert "claims_done" not in problems(text, "… " + text)
 
 
 @pytest.mark.parametrize("text", [
@@ -1221,20 +1227,21 @@ def _prompt(ticket: str, ask: str, maybe: str = "") -> str:
     ("راح يراجع قسم التحويلات الموضوع.", "… no prompt", []),
 ])
 def test_ask_missing_names_the_fields_the_draft_does_not_ask_for(monkeypatch, draft, allowed, fields):
-    monkeypatch.setenv("PIPELINE_FIXES", "ask_missing")
     assert draft_check.ask_missing_fields(draft, allowed) == fields
     found = [f for f in findings(draft, allowed) if f["kind"] == "ask_missing"]
     assert ([f["fields"] for f in found] == [fields]) if fields else not found
-    monkeypatch.delenv("PIPELINE_FIXES")
-    assert not [f for f in findings(draft, allowed) if f["kind"] == "ask_missing"]
 
 
-def test_no_flag_no_new_warning_kind():
-    text = "هلا بيك، تم إرجاع المبلغ عشان. هلا بيك، تم إرجاع المبلغ عشان."
-    assert not set(problems(text, _prompt("دفعت فاتورة", "", "نوع الفاتورة"))) & set(draft_check.FLAG_KINDS)
+def test_the_new_warnings_run_with_no_flag():
+    """Adopted on 7 Nov: with PIPELINE_FIXES empty each warning runs (that none blocks an approval is
+    test_server_security's)."""
+    text = "هلا بيك، تم إرجاع المبلغ عشان. هلا بيك، تم إرجاع المبلغ عشان. حولت 1000 دولار."
+    found = problems(text, _prompt("دفعت فاتورة عشر ورقات", "", "نوع الفاتورة"))
+    assert set(found) == NEW_WARNINGS | {"unknown_number"}                  # 1000 is in neither the ticket nor a line
+    assert NEW_WARNINGS <= set(draft_check.KINDS) and draft_check.FLAG_KINDS == ()
 
 
-# --- ticket_rules.py: the code rules on the customer's text (fixes.py flags from the 7 Nov user tests) ---
+# --- ticket_rules.py: the code rules on the customer's text (from the 7 Nov user tests, adopted the same day) ---
 
 @pytest.mark.parametrize("text, rule, want", [
     ("ضاع موبايلي والمحفظة بيه مفتوحة", "device_lost", True),
@@ -1285,13 +1292,11 @@ def test_secret_spans_are_utf16_offsets_into_the_text_the_page_shows():
     assert secret_spans("رقم العملية 7720145 والمبلغ 50000") == []
 
 
-# --- amount_own_words: an amount the ticket wrote in words (fixes.py; t2-0058 «عشر ورقات» became «1000 دولار») ---
+# --- amount_own_words (adopted 7 Nov): an amount the ticket wrote in words (t2-0058 «عشر ورقات» became «1000 دولار») ---
 
 def test_amount_not_in_ticket_warns_on_a_converted_amount(monkeypatch):
     allowed = "<ticket>\nدزيت عشر ورقات لصديقي وما وصلت\n</ticket>\n\nAmount: 1,000 USD"
     draft_text = "هلا بيك، فهمنا إنك حولت 1000 دولار لصديقك."
-    assert problems(draft_text, allowed) == []                       # off: the extracted amount is allowed
-    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
     found = findings(draft_text, allowed)
     assert [(f["kind"], f["text"]) for f in found] == [("amount_not_in_ticket", "1000 دولار")]
     assert problems("فهمنا إنك دزيت عشر ورقات لصديقك.", allowed) == []      # the customer's words
@@ -1307,7 +1312,6 @@ def test_amount_not_in_ticket_warns_on_a_converted_amount(monkeypatch):
     ("رقم العملية 4471 والمبلغ 50 الف", "رقم العملية 4471"),      # a number with no money word
 ])
 def test_amount_not_in_ticket_allows_an_amount_the_ticket_wrote(monkeypatch, ticket, said):
-    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
     assert "amount_not_in_ticket" not in problems(said, f"<ticket>\n{ticket}\n</ticket>")
 
 
@@ -1328,7 +1332,6 @@ def test_amount_not_in_ticket_allows_an_amount_the_ticket_wrote(monkeypatch, tic
     ("7awalt 50 alf l a5oya", "حولت 50,000 دينار"),
 ])
 def test_amount_not_in_ticket_allows_a_direct_reading_of_the_customers_number_words(monkeypatch, ticket, said):
-    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
     assert "amount_not_in_ticket" not in problems(said, f"<ticket>\n{ticket}\n</ticket>")
 
 
@@ -1342,7 +1345,6 @@ def test_amount_not_in_ticket_allows_a_direct_reading_of_the_customers_number_wo
     ("دزيت لاخوي ميت الف مرتين بالغلط", "حولت 200,000 دينار"),
 ])
 def test_amount_not_in_ticket_still_warns_on_a_conversion_or_an_amount_from_nowhere(monkeypatch, ticket, said):
-    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
     assert "amount_not_in_ticket" in problems(said, f"<ticket>\n{ticket}\n</ticket>")
 
 
@@ -1360,8 +1362,6 @@ def test_word_amounts_reads_the_customers_number_words(text, amounts):
 def test_drafter_gets_the_customers_words_for_an_amount_not_written_as_a_number(monkeypatch):
     usd = Extraction(category="transfers", subcategory="not_received", amount_usd=1000, confidence=0.9)
     text = "دزيت عشر ورقات لصديقي امس وما وصلتله"
-    assert "Amount: 1000 USD" in draft.user_prompt(text, usd, "transfers")
-    monkeypatch.setenv("PIPELINE_FIXES", "amount_own_words")
     prompt = draft.user_prompt(text, usd, "transfers")
     assert "1000" not in prompt and "the customer wrote «عشر ورقات»" in prompt
     iqd = Extraction(category="transfers", subcategory="not_received", amount_iqd=50000, confidence=0.9)

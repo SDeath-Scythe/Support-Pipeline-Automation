@@ -29,8 +29,8 @@ _SYSTEM_REASONS = {
     "budget_reached": "وصل التشغيل لحد الصرف المسموح، فما كملت المعالجة",
 }
 
-# A line each for what the code rules found in the customer's text (run.py; their fixes.py flags), after
-# the reasons. With none of those flags, the note is as before.
+# A line each for what the code rules found in the customer's text (run.py, ticket_rules.py), after
+# the reasons. When they find nothing, the note has no such line.
 NOTE_AR = {
     "secret_in_ticket": "رمز سري: الزبون كتب رقم بطاقة أو رمز سري بالرسالة. نبّهه يغيّر الرمز ويوقف البطاقة، "
                         "ولا تكرر الرقم بالرد",

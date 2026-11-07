@@ -40,7 +40,7 @@ def fake(monkeypatch):
     from pipeline import run
 
     seen: list[str] = []
-    replies = {"classifier": APP_BUG, "rechecker": APP_BUG, "drafter": "هلا بيك، راح نشيك",
+    replies = {"classifier": APP_BUG, "rechecker": APP_BUG, "drafter": "هلا بيك، راح نشيك. ممكن ترسل صورة من الشاشة؟",
                "summary": "التطبيق يفتح شاشة بيضاء", "fee": '{"fee_iqd": null}'}
 
     def fake_call(role, system, user, attempt=0):
@@ -496,10 +496,11 @@ def test_fraud_is_still_escalated_with_no_draft(fake, first):
     ("sensitive_number", "هلا بيك، لا تشارك رمز التحقق 482913 ويا أحد"),
 ])
 def test_hold_reason_and_sensitive_number_always_flag_the_draft(fake, kind, draft):
-    fake.replies["drafter"] = draft
+    fake.replies["drafter"] = draft + "، ممكن ترسل صورة من الشاشة؟"     # app_bug asks for a screenshot
     events = []
     result = fake.run.process(TICKET + "، ووصلني رمز 482913", events.append)   # the number is the customer's
-    assert result["outcome"] == "flagged" and result["flags"] == [f"draft:{kind}"]
+    # A code after its word in the ticket is also secret_in_ticket (adopted 7 Nov).
+    assert result["outcome"] == "flagged" and result["flags"] == [f"draft:{kind}", "secret_in_ticket"]
     assert [f["kind"] for f in result["draft_checks"]] == [kind]
     done = next(e for e in events if e["stage"] == "draft" and e["status"] == "done")
     assert done["data"]["checks"] == [kind] and done["data"]["check_spans"] == result["draft_checks"]
@@ -509,7 +510,7 @@ def test_hold_reason_and_sensitive_number_always_flag_the_draft(fake, kind, draf
 # --- contract J: draft checks get the policy facts, not the ticket ---
 
 def test_draft_spans_reach_the_event_and_the_result(fake):
-    fake.replies["drafter"] = "hلا بيك"
+    fake.replies["drafter"] = "hلا بيك، ممكن ترسل صورة من الشاشة؟"
     events = []
     result = fake.run.process(TICKET, events.append)
     done = next(e for e in events if e["stage"] == "draft" and e["status"] == "done")
@@ -914,7 +915,7 @@ def test_run_batch_refuses_a_bad_budget(monkeypatch, tmp_path):
     assert not out.exists()
 
 
-# --- contract K: the pipeline rules opened after the 7 Nov user tests (fixes.py flags, off by default) ---
+# --- contract K: the pipeline rules from the 7 Nov user tests (flags until they were adopted the same day) ---
 
 CARD_PIN = ("مساء الخير، الصراف الآلي بلع بطاقتي اليوم.\nرقم البطاقة 6273 9501 8342 7767 والرقم السري مالتي 4829 "
             "حتى تتأكدون انها الي.")
@@ -931,16 +932,19 @@ def _with_secondary(sub, secondary, conf, cat):
     return json.dumps({"category": cat, "subcategory": sub, "secondary_subcategory": secondary, "confidence": conf})
 
 
-@pytest.mark.parametrize("text", [CARD_PIN, LOST_PHONE, REGULATOR, PLANTED, HIDDEN])
-def test_with_no_flag_the_new_rules_change_nothing(fake, text):
-    fake.replies["classifier"] = _with_secondary("app_bug", "unauthorized_charge", 0.92, "general")
+@pytest.mark.parametrize("text, outcome, flags", [
+    (CARD_PIN, "flagged", ["secret_in_ticket"]), (LOST_PHONE, "escalated", ["device_lost", "other_phone"]),
+    (REGULATOR, "flagged", ["complaint_risk"]), (PLANTED, "drafted", ["instructions_in_ticket"]),
+    (HIDDEN, "flagged", ["bidi_controls"]), (TICKET, "drafted", [])])
+def test_the_new_rules_run_with_no_flag_set(fake, text, outcome, flags):
+    """Adopted on 7 Nov: each rule runs with PIPELINE_FIXES empty, and a plain ticket gets none of them."""
     events = []
     result = fake.run.process(text, events.append)
-    assert result["outcome"] == "drafted" and result["flags"] == [] and "secret_spans" not in result
+    assert result["outcome"] == outcome and result["flags"] == flags
+    assert ("secret_spans" in result) == (text == CARD_PIN)
     clean_ev = next(e for e in events if e["stage"] == "clean")
-    assert set(clean_ev["data"]["changes"]) == {"arabic_digits", "tatweel", "extra_spaces"}
-    if text == HIDDEN:
-        assert "​" in clean_ev["data"]["text"]
+    assert set(clean_ev["data"]["changes"]) == {"arabic_digits", "tatweel", "extra_spaces", "format_chars"}
+    assert "​" not in clean_ev["data"]["text"]
 
 
 def test_every_new_result_flag_has_its_arabic_note_and_a_team_note_line():
@@ -957,9 +961,6 @@ def test_every_new_result_flag_has_its_arabic_note_and_a_team_note_line():
 def test_fraud_secondary_escalates_a_fraud_second_type_from_the_first_model(fake, monkeypatch):
     """L13: a lost card and an ATM withdrawal the customer didn't make came back as a card delivery, P3."""
     fake.replies["classifier"] = _with_secondary("delivery_or_activation", "unauthorized_charge", 0.95, "cards")
-    assert fake.run.process("ضاعت بطاقتي امس، واليوم شفت سحب 200 الف من صراف آلي آني ما رحتله")["outcome"] == "drafted"
-    fake.seen.clear()
-    monkeypatch.setenv("PIPELINE_FIXES", "fraud_secondary")
     result = fake.run.process("ضاعت بطاقتي امس، واليوم شفت سحب 200 الف من صراف آلي آني ما رحتله")
     assert result["outcome"] == "escalated" and result["flags"] == ["fraud"]
     assert (result["team"], result["priority"]) == ("fraud", "P1") and "draft_ar" not in result
@@ -971,7 +972,6 @@ def test_fraud_secondary_escalates_a_fraud_second_type_from_the_first_model(fake
 
 def test_fraud_secondary_escalates_a_fraud_second_type_from_the_recheck(fake, monkeypatch):
     """t04: the first model's answer had no fraud second type here; the re-check's did."""
-    monkeypatch.setenv("PIPELINE_FIXES", "fraud_secondary")
     fake.replies["classifier"] = _reply("blocked_account", 0.70)
     fake.replies["rechecker"] = _with_secondary("blocked_account", "suspected_scam", 0.90, "account_access")
     result = fake.run.process("حسابي انقفل بعد ما واحد اتصل بيه")
@@ -982,7 +982,6 @@ def test_fraud_secondary_escalates_a_fraud_second_type_from_the_recheck(fake, mo
 
 
 def test_fraud_secondary_leaves_other_second_types_alone(fake, monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "fraud_secondary")
     fake.replies["classifier"] = _with_secondary("app_bug", "fees_limits_question", 0.92, "general")
     result = fake.run.process(TICKET)
     assert result["outcome"] == "drafted" and result["flags"] == []
@@ -991,11 +990,10 @@ def test_fraud_secondary_leaves_other_second_types_alone(fake, monkeypatch):
 def test_secret_in_ticket_flags_the_draft_and_points_at_the_secrets_in_the_shown_text(fake, monkeypatch):
     from pipeline.ticket_rules import shown_text
 
-    monkeypatch.setenv("PIPELINE_FIXES", "secret_in_ticket")
     text = "😡 ‫" + CARD_PIN          # an emoji is two UTF-16 units; the direction control is not shown
     result = fake.run.process(text)
-    assert result["outcome"] == "flagged" and result["flags"] == ["secret_in_ticket"]
-    assert result["notes_ar"] == [fake.run.FLAG_AR["secret_in_ticket"]]
+    assert result["outcome"] == "flagged" and result["flags"] == ["secret_in_ticket", "bidi_controls"]
+    assert result["notes_ar"] == [fake.run.FLAG_AR["secret_in_ticket"], fake.run.FLAG_AR["bidi_controls"]]
     shown = shown_text(text).encode("utf-16-le")
     found = [shown[2 * s:2 * e].decode("utf-16-le") for s, e in result["secret_spans"]]
     assert found == ["6273 9501 8342 7767", "4829"]
@@ -1004,7 +1002,6 @@ def test_secret_in_ticket_flags_the_draft_and_points_at_the_secrets_in_the_shown
 def test_secret_in_ticket_adds_a_line_to_the_team_note_of_an_escalation(fake, monkeypatch):
     from pipeline.handoff import NOTE_AR
 
-    monkeypatch.setenv("PIPELINE_FIXES", "secret_in_ticket")
     fake.replies["classifier"] = _reply("not_received", 0.40, cat="transfers")
     result = fake.run.process("راتبي ما نزل، واذا تحتاجون الرمز السري مالي هو 7392")
     assert result["outcome"] == "escalated" and result["flags"][-1] == "secret_in_ticket"
@@ -1014,7 +1011,6 @@ def test_secret_in_ticket_adds_a_line_to_the_team_note_of_an_escalation(fake, mo
 @pytest.mark.parametrize("text", ["رمز التحقق ما يوصلني من الصبح", "حولت 50000 دينار ورقم العملية 7720145",
                                   "رقمي 07701234567 والرمز ما اجاني"])
 def test_secret_in_ticket_does_not_fire_without_a_secret(fake, monkeypatch, text):
-    monkeypatch.setenv("PIPELINE_FIXES", "secret_in_ticket")
     result = fake.run.process(text)
     assert result["flags"] == [] and "secret_spans" not in result
 
@@ -1024,20 +1020,16 @@ def test_strip_format_chars_cleans_counts_and_flags_direction_controls(fake, mon
 
     fake.replies["classifier"] = json.dumps({"category": "general", "subcategory": "app_bug", "reference": "8841902",
                                              "confidence": 0.92})
-    assert fake.run.process(HIDDEN)["flags"] == ["ref_not_in_text"]            # before: the reference was split
-    monkeypatch.setenv("PIPELINE_FIXES", "strip_format_chars")
     assert clean("88​41​902 ﻿ا‌ب") == "8841902 اب"
     events = []
     result = fake.run.process(HIDDEN, events.append)
     clean_ev = next(e for e in events if e["stage"] == "clean")
     assert clean_ev["data"]["changes"]["format_chars"] == 4 and "​" not in clean_ev["data"]["text"]
-    assert result["outcome"] == "flagged" and result["flags"] == ["bidi_controls"]
+    assert result["outcome"] == "flagged" and result["flags"] == ["bidi_controls"]      # the split reference matches
     assert not any("​" in e["data"].get("user_prompt", "") for e in events)
 
 
 def test_reference_check_reads_a_reference_split_by_zero_width_spaces(monkeypatch):
-    assert not gate.reference_in_text("8841902", "رقم العملية 88​41​902")
-    monkeypatch.setenv("PIPELINE_FIXES", "strip_format_chars")
     assert gate.reference_in_text("8841902", "رقم العملية 88​41​902")
 
 
@@ -1045,13 +1037,11 @@ def test_unknown_number_reads_a_number_split_by_zero_width_spaces(monkeypatch):
     from pipeline import draft_check
 
     draft, allowed = "رقم العملية 8841902 وصلنا", "رقم العملية 88​41​902"
-    assert draft_check.problems(draft, allowed) == ["unknown_number"]
-    monkeypatch.setenv("PIPELINE_FIXES", "strip_format_chars")
     assert draft_check.problems(draft, allowed) == []
+    assert draft_check.problems("رقم العملية 8841903 وصلنا", allowed) == ["unknown_number"]
 
 
 def test_amount_disagreed_when_the_two_models_read_different_amounts(fake, monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "strip_format_chars")
     first = {"category": "general", "subcategory": "app_bug", "confidence": 0.70}
     fake.replies["classifier"] = json.dumps({**first, "amount_iqd": 52000})
     fake.replies["rechecker"] = json.dumps({**first, "confidence": 0.9, "amount_iqd": 250000})
@@ -1065,10 +1055,7 @@ def test_device_lost_goes_to_the_fraud_team_with_no_draft(fake, monkeypatch):
     """1794025315585: a lost phone with the wallet open on it came back as a blocked account with a draft."""
     from pipeline.handoff import IDENTITY_AR
 
-    fake.replies["classifier"] = _reply("blocked_account", 0.75)
-    assert fake.run.process(LOST_PHONE)["flags"] == ["account_risk"]
-    fake.seen.clear()
-    monkeypatch.setenv("PIPELINE_FIXES", "device_lost")
+    fake.replies["classifier"] = _reply("blocked_account", 0.75)     # before 7 Nov: account_risk, with a draft
     result = fake.run.process(LOST_PHONE)
     assert result["outcome"] == "escalated" and result["flags"] == ["device_lost", "other_phone"]
     assert (result["team"], result["priority"]) == ("fraud", "P1") and "drafter" not in fake.seen
@@ -1081,24 +1068,21 @@ def test_device_lost_goes_to_the_fraud_team_with_no_draft(fake, monkeypatch):
 @pytest.mark.parametrize("text", ["ضاع موبايلي وطلعت شريحة جديدة وما يوصلني الرمز",
                                   "المحفظة مفتوحة بس ما اكدر احول", "حولت من رقم اخوي 50 الف"])
 def test_device_lost_needs_both_a_lost_phone_and_an_open_wallet(fake, monkeypatch, text):
-    monkeypatch.setenv("PIPELINE_FIXES", "device_lost")
     result = fake.run.process(text)
     assert result["outcome"] == "drafted" and result["flags"] == []
 
 
 def test_complaint_risk_flags_without_changing_the_priority(fake, monkeypatch):
-    before = fake.run.process(REGULATOR)
-    monkeypatch.setenv("PIPELINE_FIXES", "complaint_risk")
+    before = fake.run.process(TICKET)                    # the same type, with no threat
     result = fake.run.process(REGULATOR)
     assert result["outcome"] == "flagged" and result["flags"] == ["complaint_risk"]
     assert (result["team"], result["priority"]) == (before["team"], before["priority"])
 
 
 def test_instructions_in_ticket_is_quiet(fake, monkeypatch):
-    monkeypatch.setenv("PIPELINE_FIXES", "instructions_in_ticket")
     result = fake.run.process(PLANTED)
     assert result["outcome"] == "drafted" and result["flags"] == ["instructions_in_ticket"]
-    fake.replies["drafter"] = "hلا بيك"                  # another flag still moves it to «تحتاج تأكيد»
+    fake.replies["drafter"] = "hلا بيك، ممكن ترسل صورة من الشاشة؟"                  # another flag still moves it to «تحتاج تأكيد»
     result = fake.run.process(PLANTED)
     assert result["outcome"] == "flagged" and result["flags"] == ["draft:stray_latin", "instructions_in_ticket"]
 
@@ -1137,9 +1121,12 @@ def test_the_budget_message_shows_a_small_cap(monkeypatch):
 
 
 @pytest.mark.parametrize("name", NEW_FLAGS)
-def test_the_new_flags_are_off_by_default_and_named_in_experiment_codes(name):
+def test_the_new_rules_are_adopted_and_left_the_experiment_codes(name, monkeypatch):
     from pipeline import fixes
 
-    assert name in fixes.FIXES and name not in fixes.active()
+    assert name in fixes.ADOPTED and "7 Nov 2026" in fixes.ADOPTED[name] and name not in fixes.FIXES
+    monkeypatch.setenv("PIPELINE_FIXES", name)
+    with pytest.raises(ValueError, match="normal code"):
+        fixes.active()
     codes = (ROOT / "scripts/experiment.py").read_text(encoding="utf-8").split("CODES: dict[str, str] = ")[1].split("}")[0]
-    assert f'"{name}"' in codes
+    assert f'"{name}"' not in codes

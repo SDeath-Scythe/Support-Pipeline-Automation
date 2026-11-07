@@ -54,9 +54,9 @@ export const FIELD_AR = dict({
 export const CHECK_SHORT_AR = dict({
   stray_latin: "حروف إنكليزية", promise: "وعد بنتيجة أو وقت", asks_secret: "طلب رمز أو كلمة سر",
   unknown_number: "رقم مو بالتذكرة", hold_reason: "ذكر تحقيق أو اشتباه أو بلاغ", sensitive_number: "تكرار رقم بطاقة أو رمز",
-  // The warnings behind flags (draft_check.FLAG_KINDS): they run only while their flag is on.
+  // The warnings from the 7 Nov user tests (always on since then).
   claims_done: "تگول شي انسوى", repeated_text: "ترحيب أو جملة مكررة", ask_missing: "ما تسأل عن كل اللي ناقص",
-  dialect_words: "كلمة مو عراقية", amount_not_in_ticket: "مبلغ ما كاتبه الزبون بالأرقام",
+  dialect_words: "كلمة مو عراقية", amount_not_in_ticket: "مبلغ مو مثل ما كتبه الزبون",
 });
 
 // What the agent checks before approving: what to look at ("ask"), and what the tick says once they
