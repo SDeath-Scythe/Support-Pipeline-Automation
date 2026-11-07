@@ -39,6 +39,10 @@ export const STAGE_DOING = dict({
 });
 export const STAGE_ORDER = ["received", "clean", "classify", "gate", "recheck", "route", "draft", "result"];
 
+// The reasons (server REASON_CODES) that are about a reply: offered only on a ticket that had a draft.
+export const DRAFT_REASONS = new Set(["tone", "dialect", "asks_unneeded", "promise", "false_claim", "wrong_number",
+  "missing_question", "shop_or_agent_name"]);
+
 // What the drafter is asked to request (draft.FIELD_AR).
 export const FIELD_AR = dict({
   reference: "رقم العملية", amount: "المبلغ", date: "تاريخ ووقت العملية", recipient_number: "رقم المستلم",
@@ -68,11 +72,19 @@ export const CONFIRM_AR = dict({
   "draft:unknown_number": { ask: "راجع الأرقام اللي بالمسودة", done: "راجعت الأرقام، وهي صحيحة" },
   draft_for_other_type: { ask: "المسودة انكتبت لنوع ثاني، راجع إنها تناسب النوع اللي اخترته",
     done: "راجعت إن المسودة تناسب النوع اللي اخترته" },
+  // Only the team changed: the same point (logged as draft_for_other_type), said about the team.
+  draft_for_other_team: { ask: "المسودة انكتبت لقسم ثاني، راجع إنها تناسب القسم اللي اخترته",
+    done: "راجعت إن المسودة تناسب القسم اللي اخترته" },
+  // The customer asked a second thing (extraction.secondary_subcategory): nobody is routed to it.
+  second_request: { ask: "بالتذكرة طلب ثاني محد مستلمه، راجع شنو يكول الرد عنه", done: "راجعت شنو يكول الرد عن الطلب الثاني" },
   // A blocked account or a SIM change (run.py ACCOUNT_RISK): the draft stays; identity comes first. No
   // "before" here: the box is titled «قبل لا تعتمد:» when it lists more than one point.
   account_risk: { ask: "تأكد من هوية الزبون حسب الإجراءات", done: "تأكدت من هوية الزبون" },
 });
 export const CONFIRM_OTHER = { ask: "اقرا الملاحظة اللي فوق", done: "قريت الملاحظة" };
+// A missing field the agent marked as not needed for this ticket (logged as missing:<field>:not_needed).
+export const NOT_NEEDED_AR = "ما يحتاج بهالتذكرة";
+export const notNeededAR = (field) => ({ ask: `${field}: ${NOT_NEEDED_AR}`, done: `راجعت: ${field} ${NOT_NEEDED_AR}` });
 // The one tick when the identity check is among several points: it names the attestation first.
 export const TICK_IDENTITY_AND_REST = "تأكدت من هوية الزبون وراجعت باقي النقاط";
 export const TICK_ALL = "راجعت كل النقاط فوق";

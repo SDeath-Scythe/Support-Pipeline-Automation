@@ -107,10 +107,19 @@ export function factLine(facts, scope) {
       btn.addEventListener("click", () => scope.querySelector(`[data-fact="${i}"]`)?.scrollIntoView({ block: "nearest" }));
       return el("li", { class: "fact" }, btn);
     }));
-  // The other way round: the underline in the text lights its value in the line.
+  // The other way round: the underline in the text lights its value in the line. A touch screen has no
+  // hover: a tap on the underline shows the value just after it (the line can be off screen, under the
+  // action bar), until the next tap. The line says the same to a screen reader.
   scope.querySelectorAll("[data-fact]").forEach((m) => {
     m.addEventListener("mouseenter", () => light(m.dataset.fact, true));
     m.addEventListener("mouseleave", () => light(m.dataset.fact, false));
+    m.addEventListener("click", () => {
+      const shown = m.nextElementSibling?.classList.contains("fact-pop");
+      scope.querySelectorAll(".fact-pop").forEach((n) => n.remove());
+      if (shown) return;
+      const f = facts[m.dataset.fact];
+      m.after(el("span", { class: "fact-pop", "aria-hidden": "true", dir: "rtl" }, f.words ? `${f.label}: ` : `${f.label} `, f.value()));
+    });
   });
   return line;
 }

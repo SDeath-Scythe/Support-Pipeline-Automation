@@ -24,9 +24,13 @@ export function showToast(content, onUndo = null) {
   arm();
   return ++shown;
 }
+/** Whether message `id` is still on screen (no newer message replaced it). */
+export function toastShows(id) {
+  return id === shown && toast().classList.contains("is-shown");
+}
 /** Hide the toast only if it still shows message `id` (a newer message stays). */
 export function hideToastIf(id) {
-  if (id === shown && toast().classList.contains("is-shown")) hideToast();
+  if (toastShows(id)) hideToast();
 }
 function arm() {
   clearTimeout(timer);

@@ -162,6 +162,8 @@ body.keys-off .kbd-single { display: none !important; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand-mark { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); box-shadow: 6px 6px 0 -2px var(--ok); }
 .brand-name { font-weight: 700; font-size: 17px; line-height: 1.4; }
+/* REAL_DATA unset: quiet, beside the name. */
+.dev-badge { font-size: 12px; line-height: 1.5; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); white-space: nowrap; }
 .modes { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); }
 .mode-btn { border: 0; background: transparent; padding: 6px 14px; border-radius: 7px; cursor: pointer; font-weight: 500; color: var(--muted); min-height: 34px; }
 .mode-btn[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); font-weight: 600; }
@@ -275,6 +277,11 @@ body[data-mode="process"] .intro { display: none; }
 .row-decision .icon { width: 16px; height: 16px; }
 .st-done .row-text { color: var(--muted); }
 .row-text { font-size: 15px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--ink); }
+/* Customer text, drafts and replies: each paragraph takes the direction of its own first letter, so an
+   English line reads left to right (its full stop at its end) inside the right-to-left page. */
+.row-text, .customer-text, .composer-mirror, .composer-input, .decided-text { unicode-bidi: plaintext; }
+/* A ticket pasted in this page, done and not decided yet. */
+.row-new { font-size: 12px; font-weight: 600; line-height: 1.7; padding: 0 7px; border-radius: 999px; background: var(--accent-tint); color: var(--accent); }
 .queue-empty { padding: 24px 16px; color: var(--muted); display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 
 .prio { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; font-weight: 500; line-height: 1.7; padding: 0 7px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
@@ -345,6 +352,8 @@ body[data-mode="process"] .intro { display: none; }
 /* A reference or phone moves to the next line whole (it still wraps inside if longer than a line). */
 .fact-mark[dir="ltr"] { unicode-bidi: isolate; display: inline-block; max-width: 100%; }
 .fact-mark.is-hot { background: var(--accent-tint); outline: 2px solid var(--accent); outline-offset: 1px; }
+/* A tapped underline's value, just after it (facts.js). */
+.fact-pop { display: inline-block; margin-inline: 4px; padding: 0 8px; border-radius: 6px; background: var(--ink); color: var(--bg); font-size: 13px; line-height: 1.7; white-space: nowrap; }
 /* The facts as one quiet line under the message, written the normal way. A value lights its underline. */
 .facts { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; font-size: 14px; line-height: 1.75; color: var(--muted); }
 .fact { display: inline-flex; align-items: baseline; gap: 2px; }
@@ -392,6 +401,10 @@ body[data-mode="process"] .intro { display: none; }
 .confirm-list { list-style: disc; padding-inline-start: 44px; display: flex; flex-direction: column; gap: 2px; font-size: 15px; }
 .confirm-check { display: inline-flex; gap: 10px; align-items: center; font-weight: 600; cursor: pointer; min-height: 32px; }
 .confirm-check input { width: 20px; height: 20px; accent-color: var(--warn); }
+.confirm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.not-needed[aria-pressed="true"] { font-weight: 600; text-decoration: none; }
+/* «روح لـ…»: a more urgent ticket waits in another tab. Quiet, above the ticket. */
+.urgent-note { font-size: 14px; color: var(--ink-2); margin: 0 0 8px; }
 
 /* the composer: a mirror behind a transparent textarea, with the same box and type */
 .composer { display: flex; flex-direction: column; gap: 8px; }
@@ -570,6 +583,10 @@ body[data-mode="process"] .intro { display: none; }
 .toast :focus-visible { outline-color: var(--bg); }
 
 .dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; background: var(--surface); color: var(--ink); box-shadow: var(--shadow); width: min(560px, calc(100vw - 32px)); }
+/* A short screen (a phone's keyboard open): the body scrolls inside the dialog and its buttons stay in view. */
+.dialog[open] { display: flex; flex-direction: column; max-height: calc(100dvh - 16px); }
+.dialog .dialog-body { overflow-y: auto; min-height: 0; }
+.dialog .dialog-actions { position: sticky; bottom: -20px; margin-bottom: -20px; padding-block: 8px 20px; background: var(--surface); }
 .dialog::backdrop { background: rgb(10 15 25 / 45%); }
 .dialog-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
 .dialog-title { font-size: 19px; font-weight: 600; }
@@ -584,6 +601,9 @@ body[data-mode="process"] .intro { display: none; }
 .keys th, .keys td { text-align: start; padding: 6px 8px; border-bottom: 1px solid var(--line); font-weight: 400; }
 .keys th { white-space: nowrap; width: 46%; }
 .switch-row { display: flex; gap: 10px; align-items: center; font-weight: 500; min-height: 40px; }
+/* The «?» sheet: the page in four lines, then the keys. */
+.how { display: flex; flex-direction: column; gap: 4px; font-size: 15px; line-height: 1.7; }
+.sheet-keys { margin-top: 8px; }
 .switch-row input { width: 20px; height: 20px; accent-color: var(--accent); }
 
 /* --- process mode --- */
@@ -749,6 +769,8 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   /* The ticket screen keeps the header to one row: the mode switch and the picker are on the queue
      screen, one tap away («القائمة»). */
   body[data-mode="agent"][data-screen="ticket"] .modes, body[data-mode="agent"][data-screen="ticket"] .source-field { display: none; }
+  /* No room beside the name and the actions on a phone: the new-ticket dialog still says where text goes. */
+  .dev-badge { display: none; }
   .top-actions, .source-field:not([hidden]) + .top-actions { margin-inline-start: auto; }
   .banner { padding: 10px 16px; }
   .kbd-hint { display: none; }
@@ -781,7 +803,9 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   .actionbar .btn { min-height: 44px; }
   .actionbar .btn-primary { flex: 1; justify-content: center; }
   .no-send { margin-inline-start: 0; flex-basis: 100%; justify-content: center; order: 4; }
-  .toast { inset-inline: 16px; bottom: calc(var(--bar-h) + 12px); max-width: none; flex-wrap: nowrap; }
+  /* At the top, under the header: at the bottom it sat on the tick and the reasons above the action bar. */
+  .toast { inset-inline: 16px; top: calc(var(--top-h) + 8px); bottom: auto; max-width: none; flex-wrap: nowrap; transform: translateY(-8px); opacity: 0; transition: transform .2s ease, opacity .2s, visibility .2s; }
+  .toast.is-shown { transform: none; opacity: 1; }
   #toastUndo kbd { display: none; }   /* no keyboard shortcut hint on a phone: the toast stays short */
   body[data-mode="process"] .pane-nav { border-bottom: 1px solid var(--line); }
   body[data-mode="process"] .plist { max-height: 45vh; overflow-y: auto; }
@@ -789,6 +813,24 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   html { scroll-padding-bottom: calc(var(--bar-h) + 16px); scroll-padding-top: 8px; }
   .stage { padding-inline-start: 36px; }
   table.grid { font-size: 13px; }
+}
+
+/* A short screen (landscape, or a phone's keyboard open): while the agent types in the draft, the action
+   bar goes back into the flow under the draft, so the draft keeps the room. */
+@media (max-height: 500px) {
+  .ticket:has(.composer:focus-within) .actionbar { position: static; box-shadow: none; }
+  body[data-mode="agent"][data-screen="ticket"] .pane-main:has(.composer:focus-within) { padding-bottom: 16px; }
+}
+
+/* A touch screen as the main pointer: no key hints on the buttons, and the small controls get a hit area of
+   at least 44 px (the drawn size stays). */
+@media (pointer: coarse) {
+  .kbd-hint, #toastUndo kbd { display: none; }
+  .fact-tip { position: relative; }
+  .fact-tip::after { content: ""; position: absolute; inset: -12px; }
+  .checks-ok { min-height: 44px; }
+  .fix-toggle { min-width: 44px; min-height: 44px; }
+  .fact-mark { cursor: pointer; }
 }
 
 @media (prefers-reduced-motion: reduce) {

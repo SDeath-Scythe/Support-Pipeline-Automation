@@ -39,6 +39,7 @@ import threading
 import time
 import traceback
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -50,6 +51,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from pipeline import classify as cls  # noqa: E402
 from pipeline import draft as drf  # noqa: E402
 from pipeline import draft_check, fixes, handoff  # noqa: E402
+from pipeline.clean import clean  # noqa: E402
 from pipeline.config import CONFIG_DIR, limits, models, pipeline_mode, taxonomy  # noqa: E402
 from pipeline.config import thresholds as load_thresholds  # noqa: E402
 from pipeline.llm import (BackendError, api_key, assert_real_data_safe, backend, budget_usd, cache_only,  # noqa: E402
@@ -113,18 +115,21 @@ ERR_AR = {
     "undo_stale": "هالقرار مو آخر قرار على التذكرة، فما ينلغى. حدّث القائمة",
     "blocked": "{why}، فما ينعتمد. صلّح الرد أول",
     "identity": "ما أشّرت على «تأكدت من هوية الزبون»، فما ينعتمد",
+    "escalated": "هالتذكرة متصعّدة، فما ينعتمد إلها رد: حوّلها أو استلمها",
 }
 
 # The agent's decision on a ticket (POST /api/decision), and why a draft needed changing.
 DECISION_ACTIONS = ("approved", "edited", "took_over", "forwarded", "undone")
 DECISION_ACTIONS_AR = {"approved": "اعتمد الرد", "edited": "عدّل الرد واعتمده", "took_over": "استلمها بنفسه",
                        "forwarded": "حوّلها لقسم ثاني", "undone": "تراجع عن القرار"}
-REASON_CODES = ("wrong_type", "wrong_team", "wrong_priority", "tone", "asks_unneeded", "promise",
-                "wrong_number", "missing_question", "shop_or_agent_name", "other")
+REASON_CODES = ("wrong_type", "wrong_team", "wrong_priority", "tone", "dialect", "asks_unneeded", "promise",
+                "false_claim", "wrong_number", "missing_question", "shop_or_agent_name", "duplicate",
+                "instructions", "other")
 REASON_CODES_AR = {"wrong_type": "نوع المشكلة غلط", "wrong_team": "القسم غلط", "wrong_priority": "الأولوية غلط",
-                   "tone": "الأسلوب ما يناسب", "asks_unneeded": "يطلب شي ما نحتاجه",
-                   "promise": "يوعد بشي ما نكدر نضمنه", "wrong_number": "بيه رقم غلط",
-                   "missing_question": "ناقصه سؤال للزبون", "shop_or_agent_name": "ما سأل عن اسم المحل أو الوكيل",
+                   "tone": "الأسلوب ما يناسب", "dialect": "اللهجة مو مضبوطة", "asks_unneeded": "يطلب شي ما نحتاجه",
+                   "promise": "يوعد بشي ما نكدر نضمنه", "false_claim": "يقول شي ما صار", "wrong_number": "بيه رقم غلط",
+                   "missing_question": "ناقصة سؤال للزبون", "shop_or_agent_name": "ما سأل عن اسم المحل أو الوكيل",
+                   "duplicate": "تذكرة مكررة", "instructions": "التذكرة بيها أوامر للنظام",
                    "other": "شي ثاني"}
 OUTCOMES = ("drafted", "flagged", "escalated")
 PRIORITIES = ("P1", "P2", "P3")
@@ -142,10 +147,18 @@ CHECK_FIELDS = {"draft", "allowed_text", "subcategory"}
 BLOCKED_AR = {"asks_secret": "الرد يطلب رمز أو كلمة سر من الزبون",
               "hold_reason": "الرد يذكر تحقيق أو اشتباه أو بلاغ",
               "sensitive_number": "الرد يكرر رقم بطاقة أو رمز"}
-# What an agent can tick "I checked it" for and approve anyway: the warnings that do not block, a draft
-# written for another type than the one the agent chose, and (account_risk) the customer's identity,
-# confirmed by the institution's own procedure. Logged as kinds, never text.
-ACK_KINDS = tuple(k for k in draft_check.KINDS if k not in BLOCKING_CHECKS) + ("draft_for_other_type", "account_risk")
+# What an agent can tick "I checked it" for and approve anyway, logged as kinds, never text: the draft
+# warnings that do not block, a draft written for another type than the one the agent chose, the
+# pipeline's own points (its flags: account_risk is the customer's identity, confirmed by the
+# institution's own procedure; recheck_used_second the type), a missing field the reply asks for
+# (missing:<field>), one the agent marks as not needed (missing:<field>:not_needed), and a second request
+# in a drafted ticket that no team is routed to (second_request: the agent read what the reply says of
+# it). An allow-list.
+_ACK_FIELDS = tuple(drf.FIELD_AR)
+ACK_KINDS = tuple(dict.fromkeys(
+    [k for k in draft_check.KINDS if k not in BLOCKING_CHECKS] + ["draft_for_other_type", "second_request"]
+    + [f for f in FLAG_AR if not f.startswith("draft:")]
+    + [f"missing:{f}" for f in _ACK_FIELDS] + [f"missing:{f}:not_needed" for f in _ACK_FIELDS]))
 
 # Files under /static/: these types only, each with its exact content type. index.html is served at /.
 STATIC_TYPES = {
@@ -242,8 +255,7 @@ def _summary(f: Path) -> dict | None:
     except (OSError, ValueError):
         data = None
     ok = isinstance(data, dict) and isinstance(data.get("meta"), dict) and isinstance(data.get("tickets"), list)
-    summary = {"meta": data["meta"], "sealed_ids": _has_sealed_ids(data["tickets"]), "n": len(data["tickets"]),
-               "account_risk_ids": _account_risk_ids(data["tickets"])} if ok else None
+    summary = {"meta": data["meta"], "sealed_ids": _has_sealed_ids(data["tickets"]), "n": len(data["tickets"])} if ok else None
     with _summaries_lock:
         _summaries[f] = (stamp, summary)
     return summary
@@ -390,18 +402,6 @@ def _with_account_risk(result: dict) -> dict:
     return out
 
 
-def _account_risk_ids(tickets: list) -> frozenset[str]:
-    """The ticket ids of a run that carry account_risk, as saved or as the page is served them."""
-    out = set()
-    for row in tickets:
-        if not isinstance(row, dict) or not isinstance(row.get("ticket"), dict) or not isinstance(row.get("result"), dict):
-            continue
-        res = row["result"]
-        if (isinstance(res.get("flags"), list) and "account_risk" in res["flags"]) or _gets_account_risk(res):
-            out.add(str(row["ticket"].get("id")))
-    return frozenset(out)
-
-
 def apply_account_risk(tickets: list) -> int:
     """Runs made before 5 Nov: each drafted ticket that run.py would flag account_risk today gets the flag
     (outcome flagged, marked account_risk_recomputed), in its result and in its "result" event, the way
@@ -519,6 +519,7 @@ def meta() -> dict:
         "decision_actions_ar": DECISION_ACTIONS_AR,
         "reason_codes": list(REASON_CODES),
         "reason_codes_ar": REASON_CODES_AR,
+        "ack_kinds": list(ACK_KINDS),
         "blocking_checks": list(BLOCKING_CHECKS),
         # A blocked account or a SIM change (run.py ACCOUNT_RISK): the page asks for the identity tick
         # when the agent's own correction makes a ticket one of these, as the pipeline's flag does.
@@ -650,10 +651,54 @@ def _corrected(raw) -> dict:
     return out
 
 
+def served_facts(result, events=None) -> dict:
+    """What the page was served for one ticket, the way it reads it: outcome (escalated when there is no
+    result), flags, the type the draft was written for, team, priority, and a keyed hash of the draft
+    (result.draft_ar, else the last finished draft's reply). Never the text."""
+    res = result if isinstance(result, dict) else {}
+    draft = res.get("draft_ar")
+    if not isinstance(draft, str):
+        done = [e.get("data") for e in events or [] if isinstance(e, dict) and e.get("stage") == "draft"
+                and e.get("status") == "done" and isinstance(e.get("data"), dict)]
+        draft = done[-1].get("reply") if done else None
+    ex = res.get("extraction")
+    flags = res.get("flags") if isinstance(res.get("flags"), list) else []
+    return {"outcome": res.get("outcome") if res.get("outcome") in OUTCOMES else "escalated",
+            "flags": [f for f in flags if isinstance(f, str) and _FLAG.fullmatch(f)][:32],
+            "subcategory": ex.get("subcategory") if isinstance(ex, dict) else None,
+            "team": res.get("team"), "priority": res.get("priority"),
+            "draft_sha256": _sha256(draft) if isinstance(draft, str) else None}
+
+
+def served_ticket(run: str, ticket_id: str) -> dict | None:
+    """The served facts of one ticket (served_facts): a live run's from this process's registry (none for
+    an id it did not stream), a saved run's from the run as /api/run serves it. None if not served."""
+    if run == "live":
+        with _live_lock:
+            entry = _live.get(ticket_id)
+            return dict(entry) if entry else None
+    f = run_file(run)
+    data = with_current_gold(f) if f is not None else {}
+    rows = data.get("tickets") if isinstance(data.get("tickets"), list) else []
+    row = next((r for r in rows if isinstance(r, dict) and isinstance(r.get("ticket"), dict)
+                and r["ticket"].get("id") == ticket_id), None)
+    if row is None:
+        return None
+    return {**served_facts(row.get("result"), row.get("events")), "ticket_sha256": None}
+
+
+def _never_drafted(sub) -> bool:
+    s = taxonomy().subcategories.get(sub) if isinstance(sub, str) else None
+    return bool(s and s.always_escalate)
+
+
 def decision_record(body: dict) -> dict:
     """The log line for one decision. It keeps keyed hashes (HMAC-SHA256, see _HASH_KEY) of the draft
     and the final reply, and how many characters changed, but never the text itself: the log is for
-    measuring the pipeline, and a reply can carry a customer's details."""
+    measuring the pipeline, and a reply can carry a customer's details. The outcome, flags and draft
+    hash are the ones the server served for the ticket (served_ticket), not the request's: a ticket it
+    did not serve is refused (400 ticket_id), and so is a draft_text other than the served draft, or an
+    approval (unedited) whose reply is not that draft."""
     unknown = set(body) - DECISION_FIELDS
     if unknown:
         raise BadField(sorted(unknown)[0])
@@ -692,21 +737,33 @@ def decision_record(body: dict) -> dict:
     draft, final = _text_field(body, "draft_text"), _text_field(body, "final_text")
     if action in ("approved", "edited") and not isinstance(final, str):
         raise BadField("final_text")   # an approval names the reply, so the checks below can read it
+    corrected = _corrected(body.get("corrected"))
+    served = served_ticket(run, ticket_id)
+    if served is None:
+        raise BadField("ticket_id")
+    if served["outcome"] is None:   # a live run with no result yet: the page shows it cut short
+        served = {**served, "outcome": "escalated", "flags": [f for f in flags if f in LIVE_CUT_SHORT]}
+    if draft and _sha256(draft) != served["draft_sha256"]:
+        raise BadField("draft_text")
+    if action == "approved" and served["draft_sha256"] and _sha256(final) != served["draft_sha256"]:
+        raise BadField("final_text")   # (with no draft served, append_decision refuses it: 409 escalated)
     return {
         "id": uuid.uuid4().hex,
         "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "reviewer": reviewer(),
-        "run": run, "ticket_id": ticket_id, "action": action, "pipeline_outcome": outcome,
-        "flags": flags, "reason_codes": list(dict.fromkeys(codes)), "seconds": seconds,
-        "corrected": _corrected(body.get("corrected")), "undoes": undoes, "visits": visits,
+        "run": run, "ticket_id": ticket_id, "action": action, "pipeline_outcome": served["outcome"],
+        "flags": served["flags"], "reason_codes": list(dict.fromkeys(codes)), "seconds": seconds,
+        "corrected": corrected, "undoes": undoes, "visits": visits,
         "warnings_acknowledged": list(dict.fromkeys(acked)),
         "models": {role: model_for(role) for role in models()},
         "prompt_sha256": {"classifier": _sha256(cls.system_prompt()), "drafter": _sha256(drf.system_prompt())},
-        "draft_sha256": _sha256(draft),
+        "draft_sha256": served["draft_sha256"],
         "final_sha256": _sha256(final),
         "edit_chars": edit_chars(draft, final),
+        "ticket_sha256": served["ticket_sha256"],   # live runs: the cleaned ticket text, keyed
         # Kept for the checks in append_decision; never written to the log.
         "_final": final,
+        "_never_drafted": _never_drafted(served["subcategory"]) or _never_drafted(corrected.get("subcategory")),
     }
 
 
@@ -737,36 +794,29 @@ def standing(records: list[dict]) -> dict[str, dict]:
     return out
 
 
-def run_account_risk_ids(run: str) -> frozenset[str]:
-    """The tickets of a saved run that need the identity tick (account_risk, saved or as served)."""
-    f = run_file(run) if run != "live" else None
-    s = _summary(f) if f is not None else None
-    return s.get("account_risk_ids", frozenset()) if s else frozenset()
-
-
 def needs_identity(record: dict) -> bool:
     """An approval needs «تأكدت من هوية الزبون» (warnings_acknowledged "account_risk") when the ticket is
-    a blocked account or a SIM change: the flags the page sent, the type the agent corrected it to, or,
-    on a saved run, what the server itself serves for that ticket (a request that leaves the flag out
-    is not believed)."""
-    if "account_risk" in record.get("flags", []):
-        return True
-    if (record.get("corrected") or {}).get("subcategory") in ACCOUNT_RISK:
-        return True
-    return record.get("run") != "live" and record.get("ticket_id") in run_account_risk_ids(record.get("run", ""))
+    a blocked account or a SIM change: the flags the server served for it (the record's, see
+    decision_record: a request that leaves the flag out is not believed), or the type the agent
+    corrected it to."""
+    return "account_risk" in record.get("flags", []) or (record.get("corrected") or {}).get("subcategory") in ACCOUNT_RISK
 
 
 def append_decision(record: dict) -> None:
     """One line, one write: concurrent decisions never interleave. A new log is readable by its owner
-    only (0600). Under the same lock, three checks (Conflict, 409):
+    only (0600). Under the same lock, four checks (Conflict, 409):
+    - an approval of a ticket served as an escalation, or of a type that is never drafted (fraud), as
+      served or as the agent corrected it: it can only be forwarded or taken over;
     - an approval whose reply still asks for a code, names an investigation or repeats a card number
       (the page blocks it first; this stops a stale check or a hand-made request);
     - an approval of a blocked account or a SIM change without the identity tick (needs_identity);
-    - on a saved run, a second decision on a ticket that already has one standing (another tab decided
-      it), or an undo of a decision that no longer stands. Live tickets are per page ("live-1" again
-      after a reload is another ticket), so they are not compared."""
+    - a second decision on a ticket that already has one standing (another tab decided it), or an undo
+      of a decision that no longer stands. Live tickets too: each live run has its own id."""
     final = record.pop("_final", None)
+    never_drafted = record.pop("_never_drafted", False)
     if record["action"] in ("approved", "edited"):
+        if record["pipeline_outcome"] == "escalated" or never_drafted:
+            raise Conflict("escalated")
         found = blocking_in(final)
         if found:
             raise Conflict("blocked", BLOCKED_AR[found[0]])
@@ -775,12 +825,11 @@ def append_decision(record: dict) -> None:
     line = json.dumps(record, ensure_ascii=False) + "\n"
     path = decisions_file()
     with _decisions_lock:
-        if record["run"] != "live":
-            now = standing(_read_decisions_unlocked(record["run"])).get(record["ticket_id"])
-            if record["action"] == "undone" and (now is None or now.get("id") != record["undoes"]):
-                raise Conflict("undo_stale")
-            if record["action"] != "undone" and now is not None:
-                raise Conflict("decided")
+        now = standing(_read_decisions_unlocked(record["run"])).get(record["ticket_id"])
+        if record["action"] == "undone" and (now is None or now.get("id") != record["undoes"]):
+            raise Conflict("undo_stale")
+        if record["action"] != "undone" and now is not None:
+            raise Conflict("decided")
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
         with open(fd, "a", encoding="utf-8") as f:
@@ -812,6 +861,38 @@ def _read_decisions_unlocked(run: str) -> list[dict]:
 
 # --- live runs ---
 
+# The live runs this process streamed, by the id the server gave each (live_started): what it served
+# (served_facts) and a keyed hash of the cleaned ticket text, for the decision log's checks. Never the
+# text. In memory only, the newest LIVE_KEEP; a restarted viewer knows none (and has a new page token).
+LIVE_KEEP = 1000
+_live: OrderedDict[str, dict] = OrderedDict()
+_live_lock = threading.Lock()
+# What the page shows for a live run whose stream was cut short (no result): the flags a take-over or a
+# forward of it may carry while the server still waits for the result.
+LIVE_CUT_SHORT = ("cancelled", "connection_lost")
+
+
+def live_started(text: str) -> str:
+    """Register a new live run and return its id: live-<UTC yyyymmddHHMMSS>-<6 hex>."""
+    run_id = f"live-{datetime.now(timezone.utc):%Y%m%d%H%M%S}-{secrets.token_hex(3)}"
+    entry = {**served_facts(None), "outcome": None, "ticket_sha256": _sha256(clean(text))}
+    with _live_lock:
+        _live[run_id] = entry
+        while len(_live) > LIVE_KEEP:
+            _live.popitem(last=False)
+    return run_id
+
+
+def live_served(run_id: str, event: dict, events: list) -> None:
+    """Keep what a live run served once its result is out (events: its earlier events, for the draft)."""
+    if event.get("stage") != "result" or event.get("status") != "done":
+        return
+    facts = served_facts(event.get("data"), events)
+    with _live_lock:
+        if run_id in _live:
+            _live[run_id].update(facts)
+
+
 def _log_exception(where: str) -> None:
     """The current exception on stderr, never on the page. Under REAL_DATA=1 only its type and
     stack: the message can quote a ticket or a model reply."""
@@ -837,15 +918,20 @@ def _internal_error_result(started: float) -> dict:
     return {"stage": "result", "status": "done", "data": data, "ms": int((time.time() - started) * 1000)}
 
 
-def _work(text: str, events: queue.Queue, gone: threading.Event, slot: threading.Lock) -> None:
+def _work(text: str, events: queue.Queue, gone: threading.Event, slot: threading.Lock, run_id: str = "") -> None:
     """Run one live ticket on its own thread. Always ends the stream (None) with a result before
-    it, and frees the live slot only when the pipeline has really stopped calling models."""
+    it, and frees the live slot only when the pipeline has really stopped calling models. What the
+    result served goes to the live registry (live_served) before the page can see it."""
     started = time.time()
     sent_result = False
+    seen: list[dict] = []   # this run's events, for the draft's hash; dropped when the run ends
 
     def emit(event: dict) -> None:
         nonlocal sent_result
         sent_result = sent_result or event.get("stage") == "result"
+        if isinstance(event, dict):
+            live_served(run_id, event, seen)
+            seen.append(event)
         events.put(event)
 
     try:
@@ -853,7 +939,7 @@ def _work(text: str, events: queue.Queue, gone: threading.Event, slot: threading
     except Exception:  # noqa: BLE001 - process() should never raise; if it does, the stream still ends
         _log_exception("live run")
         if not sent_result:
-            events.put(_internal_error_result(started))
+            emit(_internal_error_result(started))
     finally:
         events.put(None)
         slot.release()
@@ -1058,10 +1144,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._error("busy", 429)
         events: queue.Queue = queue.Queue()
         gone = threading.Event()
+        # The run's id comes first: the page keys the ticket by it, and the decision log checks against it.
+        run_id = live_started(text)
+        events.put({"live_id": run_id})
         try:
             # Started before the 200 goes out: if no thread can start, the slot is freed and the page
             # gets a plain 500 instead of a stream that never ends.
-            threading.Thread(target=_work, args=(text, events, gone, slot), daemon=True).start()
+            threading.Thread(target=_work, args=(text, events, gone, slot, run_id), daemon=True).start()
         except BaseException:
             slot.release()
             raise

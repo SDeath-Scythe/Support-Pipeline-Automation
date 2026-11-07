@@ -10,18 +10,18 @@ import { NetworkError, ServerError } from "./api.js";
 import { buildComposer, isBlocking, originalDraft } from "./composer.js";
 import { factLine, factsOf, textWithFacts } from "./facts.js";
 import {
-  ACTION_ICON, ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, FIELD_AR, IDENTITY_IF_REPLY_AR, PRIORITY_AR,
-  STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL, TICK_IDENTITY_AND_REST, WHY_AR,
+  ACTION_ICON, ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, DRAFT_REASONS, FIELD_AR, IDENTITY_IF_REPLY_AR, NOT_NEEDED_AR,
+  PRIORITY_AR, STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL, TICK_IDENTITY_AND_REST, WHY_AR, notNeededAR,
 } from "./labels.js";
 import {
-  QUICK_S, S, allItems, correctedFor, decide, draftDone, effective, errorEvent, escalatesNow, ev, extractionOf, findItem,
+  QUICK_S, S, allItems, correctedFor, correctionsOf, decide, draftDone, effective, errorEvent, escalatesNow, ev, extractionOf, findItem,
   flagsOf, itemsInTab, mostUrgent, openItems, outcomeOf, pauseClock, priorityRank, refreshDecisions, routeFor,
   runningItems, startClock, subOf, summarize, tabOf, uid, undo,
 } from "./state.js";
-import { hideToastIf, setBanner, showToast } from "./ui.js";
+import { hideToastIf, setBanner, showToast, toastShows } from "./ui.js";
 import {
-  MOD, add, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, median, mono, num, plainText, richText,
-  ticketsAr,
+  MOD, add, coarsePointer, countAr, digitRuns, dict, el, fmtSeconds, icon, isPhone, kbd, ltr, median, num, plainText, richText,
+  ticketId, ticketsAr, typingIn,
 } from "./util.js";
 
 const hooks = { toProcess: null, newTicket: null, rerun: null, cancelLive: null, reload: null };
@@ -36,7 +36,24 @@ let armed = null;
 const armedOn = (it) => !!armed && !!it && armed.u === uid(it);
 let fixOpenFor = null;   // uid of the ticket whose «صحّح» panel is open
 let refusal = null;      // {id, key, kind, reason}: the toast that refused an approve, while it still applies
+let tickAsked = null;    // the ticket whose approve was refused for its tick alone: its reason is no longer quiet
 let shownKey = null;     // the ticket drawn last: a different one starts at the top of the pane
+
+// A ticket that just came on screen can't be decided for a moment: the tap or Ctrl+Enter that decided the
+// one before (a thumb's bounce, a key pressed twice) must not decide one nobody saw. Its primary actions
+// say aria-disabled meanwhile, and the bar is drawn again when the moment is over.
+const SETTLE_MS = 700;
+const SWITCH_SETTLE_MS = 1500;   // the inbox moved to another tab by itself: a little longer
+let settleUntil = 0;
+const settling = () => performance.now() < settleUntil;
+function settle(ms = SETTLE_MS) {
+  settleUntil = Math.max(settleUntil, performance.now() + ms);
+  const key = shownKey;
+  setTimeout(() => {
+    const it = key && shownKey === key && !settling() ? findItem(key) : null;
+    if (it) refreshActions(it);
+  }, ms + 20);
+}
 
 // --- words ---
 
@@ -50,8 +67,8 @@ const PAGE_FLAG_AR = dict({ connection_lost: "انقطع الاتصال" });
 const flagShort = (f) => String(S.meta.flag_ar[f] || PAGE_FLAG_AR[f] || f).split(/[:،]/)[0].trim();
 /** A flag as one sentence with no colon in it (WHY_AR, else the server's wording joined with «، »). */
 const flagSentence = (f) => WHY_AR[f] || `${String(S.meta.flag_ar[f] || PAGE_FLAG_AR[f] || f).replace(/\s*:\s*/g, "، ")}.`;
-/** The shortcut letters, only while single-key shortcuts are on: « (T / ف)». */
-const keys = (latin, ar) => (S.prefs.singleKeys ? ` (${latin} / ${ar})` : "");
+/** The shortcut letters, only while single-key shortcuts are on and not on a touch screen: « (T / ف)». */
+const keys = (latin, ar) => (S.prefs.singleKeys && !coarsePointer() ? ` (${latin} / ${ar})` : "");
 /** A button's pointer hint: what it does and its key (the key chips are gone from the buttons; every key
  *  is in the «?» sheet). */
 const keyTitle = (what, latin, ar) => `${what}${keys(latin, ar)}`;
@@ -182,6 +199,18 @@ function keepCaretInView() {
   if (over > 0) scroller()?.scrollBy(0, over);
 }
 
+/** A point to tick appeared under the draft while the agent types (a warning in the edit): bring it into
+ *  view above the action bar, as far as the caret's line stays on screen. */
+function revealTick(box) {
+  if (!composer || document.activeElement !== composer.textarea) return;
+  const bar = $("actionBar")?.getBoundingClientRect();
+  const caret = composer.caretRect();
+  if (!bar || !caret) return;
+  const top = isPhone() ? 0 : $("main").getBoundingClientRect().top;
+  const by = Math.min(box.getBoundingClientRect().bottom + 8 - bar.top, caret.top - top - 8);
+  if (by > 0) scroller()?.scrollBy(0, by);
+}
+
 // --- the queue ---
 
 export function renderQueue({ focusRow = false } = {}) {
@@ -232,6 +261,7 @@ export function renderQueue({ focusRow = false } = {}) {
   box.replaceChildren(head, tabs, el("div", { role: "tabpanel", id: "queuePanel", "aria-labelledby": `tab-${S.agent.tab}` }, lb, empty));
   if (focusRow || (had && !$(had))) (lb.querySelector('[tabindex="0"]') || $(`tab-${S.agent.tab}`))?.focus();
   else if (had) $(had).focus();
+  refreshUrgentNote();
 }
 
 /** The working tabs (not the one on screen) where an open ticket waits that is more urgent than any open
@@ -247,6 +277,41 @@ function urgentTabs() {
     if (b <= 1 && b < here) out.set(t, b === 1 ? { p1: true, words: "فيها تذكرة عاجلة (P1)" } : { p1: false, words: "فيها تذكرة بدون أولوية" });
   }
   return out;
+}
+
+/** The tab «روح لـ…» names: set after a decision when a more urgent ticket waits in another tab (the inbox
+ *  stays in the agent's tab), it holds while that tab still has one more urgent than any open here. */
+function urgentElsewhere() {
+  const t = S.agent.urgentTab;
+  if (!t || t === S.agent.tab) return null;
+  const best = (tab) => Math.min(Infinity, ...itemsInTab(tab).map(priorityRank));
+  return best(t) < (S.agent.tab === "done" ? Infinity : best(S.agent.tab)) ? t : null;
+}
+/** One quiet line above the ticket while urgentElsewhere() holds, with the way there. */
+function urgentNote() {
+  const t = urgentElsewhere();
+  if (!t) return el("p", { id: "urgentNote", hidden: true });
+  const p = effective(itemsInTab(t)[0]).priority;
+  return el("p", { id: "urgentNote", class: "urgent-note" },
+    `اكو تذكرة ${p ? PRIORITY_AR[p] : "ما انعرفت أولويتها"} بـ«${tabLabel(t)}». `,
+    el("button", { type: "button", id: "urgentGo", class: "link-btn", onclick: () => goToUrgent(t) }, `روح لـ«${tabLabel(t)}»`));
+}
+function refreshUrgentNote() {
+  const old = $("urgentNote");
+  if (!old) return;
+  const next = urgentNote();
+  if (next.textContent === old.textContent) return;   // the same words: leave it (and its focus) alone
+  const had = old.contains(document.activeElement);
+  old.replaceWith(next);
+  if (had) ($("urgentGo") || $("ticketTitle"))?.focus();
+}
+/** «روح لـ…»: open that tab's most urgent ticket; once that tab is empty, the inbox comes back here. */
+function goToUrgent(t) {
+  const from = S.agent.tab;
+  S.agent.urgentTab = null;
+  setTab(t, { openFirst: true });
+  S.agent.cameFrom = from;
+  $("ticketTitle")?.focus();
 }
 
 function nextTabHint() {
@@ -276,7 +341,9 @@ function row(it, active) {
     "aria-current": open ? "true" : null, tabindex: active ? "0" : "-1", dataset: { key: it.key },
   },
   el("span", { class: "row-meta" }, status, e.priority || it.status !== "running" ? prioNode(e.priority) : null,
-    el("span", { class: "row-id" }, mono(it.key)),
+    el("span", { class: "row-id" }, ticketId(it.key)),
+    // A ticket pasted in this page, done and not decided yet: one small word, so it is found in its tab.
+    it.live && !d && it.status !== "running" ? el("span", { class: "row-new", text: "جديدة" }) : null,
     d ? el("span", { class: "row-decision", title: st.word }, icon(st.icon)) : null),
   el("span", { class: "row-text", dir: "rtl" }, digitRuns(firstWords(it.ticket.text))));
 }
@@ -315,6 +382,7 @@ function onTabsKey(e) {
 
 export function setTab(id, { openFirst = false, focusTab = false } = {}) {
   S.agent.tab = id;
+  S.agent.cameFrom = null;
   const list = itemsInTab(id);
   if (openFirst && !list.some((x) => x.key === S.agent.openKey)) {
     S.agent.openKey = list[0]?.key ?? null;
@@ -337,12 +405,24 @@ export function open(key, { user = false, focus = null, focusRow = false } = {})
   renderQueue({ focusRow });
   renderTicket();
   renderWhy();
-  // On a phone the queue gives way to the ticket: focus (and scroll) moves to its heading.
-  if (user && isPhone()) { document.body.dataset.screen = "ticket"; focus = "heading"; }
+  // On a phone the queue gives way to the ticket: focus (and scroll) moves to its heading. The ticket
+  // screen is a history entry of its own (the ticket's id, never its text), so the phone's back gesture
+  // comes back to the queue instead of leaving the page.
+  if (user && isPhone()) {
+    if (document.body.dataset.screen !== "ticket") history.pushState({ ticket: key }, "");
+    document.body.dataset.screen = "ticket";
+    focus = "heading";
+  }
   if (focus === "heading") $("ticketTitle")?.focus();
 }
 
+/** «القائمة»: back through the history entry open() added, if it did (popstate then shows the queue). */
 function backToQueue() {
+  if (history.state?.ticket) history.back();
+  else showQueue();
+}
+/** The phone's queue screen (popstate, «القائمة»). */
+export function showQueue() {
   document.body.dataset.screen = "queue";
   renderQueue({ focusRow: true });
 }
@@ -371,6 +451,8 @@ export function renderTicket() {
   if (changed && !isPhone()) $("main").scrollTop = 0;
   if (changed && whyCovers()) setWhyOpen(false);
   shownKey = key;
+  if (changed && key) settle();
+  if (changed) tickAsked = null;
   if (S.agent.loading) return main.replaceChildren(ticketSkeleton());
   if (S.agent.error) return main.replaceChildren(errorState(S.agent.error));
   const items = allItems();
@@ -384,7 +466,7 @@ export function renderTicket() {
       el("h2", { class: "empty-title", text: "ماكو تذكرة مفتوحة" }),
       el("p", { text: "اختار تذكرة من القائمة." }), nextTabHint()));
   }
-  main.replaceChildren(ticketView(it));
+  main.replaceChildren(urgentNote(), ticketView(it));
   settleRefusal(it);
 }
 
@@ -392,7 +474,7 @@ export function renderTicket() {
  *  buttons. No key chips: the keys are in the buttons' names and titles, and in the «?» sheet. */
 function titleChips(it) {
   const e = effective(it);
-  const c = S.corrections.get(uid(it)) || {};
+  const c = correctionsOf(it);
   return el("div", { id: "titleChips", class: "title-chips" }, it.status === "running" ? null : prioNode(e.priority),
     c.priority && c.priority !== it.result?.priority ? el("span", { class: "fixed-tag", text: "صحّحتها" }) : null,
     el("span", { class: "title-tools" },
@@ -413,7 +495,7 @@ function ticketView(it) {
   const back = el("button", { type: "button", class: "btn btn-quiet back-btn", onclick: backToQueue }, icon("back"), "القائمة");
   // The id is small: what the ticket is about is the summary line under it.
   add(art, el("div", { class: "ticket-bar" }, back,
-    el("h2", { id: "ticketTitle", class: "ticket-title", tabindex: "-1" }, el("span", { class: "sr-only", text: "تذكرة " }), mono(it.key)),
+    el("h2", { id: "ticketTitle", class: "ticket-title", tabindex: "-1" }, el("span", { class: "sr-only", text: "تذكرة " }), ticketId(it.key)),
     titleChips(it)));
 
   if (running) {
@@ -471,7 +553,7 @@ function shownConfidence(it) {
  *  confidence when it is not «واثق», and what the draft should ask for when something is missing. */
 function summaryBox(it) {
   const e = effective(it);
-  const c = S.corrections.get(uid(it)) || {};
+  const c = correctionsOf(it);
   const decided = S.decisions.has(it.key);
   const read = !!extractionOf(it) || !!e.subcategory || !!e.team;
   const conf = shownConfidence(it);
@@ -481,6 +563,7 @@ function summaryBox(it) {
     ? (it.result.flags || []).filter((f) => f.startsWith("missing:")).map((f) => FIELD_AR[f.slice(8)] || f.slice(8)) : []);
   const miss = escalatesNow(it) || decided ? null : (missingOf(it) || []).filter((m) => !inBanner.has(m));
   const fixed = (k) => (c[k] && c[k] !== (k === "subcategory" ? subOf(it) : it.result?.[k]) ? el("span", { class: "fixed-tag", text: "صحّحتها" }) : null);
+  const second = secondRequest(it);
   const sep = () => el("span", { class: "sep", "aria-hidden": "true", text: " · " });
   const open = fixOpenFor === uid(it);
   const toggle = el("button", { type: "button", id: "fixToggle", class: "btn btn-quiet btn-small icon-btn fix-toggle",
@@ -501,7 +584,15 @@ function summaryBox(it) {
       decided ? null : toggle),
     conf ? el("p", { class: conf.cls === "agreed" ? "summary-note muted" : `summary-note conf conf-${conf.cls}`, text: conf.word }) : null,
     miss?.length ? el("p", { class: "summary-note", text: `المسودة المفروض تسأل عن: ${miss.join("، ")}` }) : null,
+    second ? el("p", { class: "summary-note muted", text: `طلب ثاني: ${subAr(second)} · ${teamAr(S.meta.subcategories[second]?.team)}` }) : null,
     open && !decided ? fixPanel(it) : null);
+}
+
+/** A second request in a ticket that got a draft (extraction.secondary_subcategory): the reply may mention
+ *  it, but no team is routed to it. (An escalation's team note names it.) */
+function secondRequest(it) {
+  const sec = extractionOf(it)?.secondary_subcategory;
+  return sec && ["drafted", "flagged"].includes(outcomeOf(it)) && S.meta.subcategories[sec] ? sec : null;
 }
 
 function refreshSummary(it) {
@@ -537,7 +628,9 @@ function fixPanel(it) {
   });
   const teamSel = el("select", { id: "fixTeam" }, el("option", { value: "", text: "—" }),
     Object.entries(S.meta.teams).map(([k, t]) => el("option", { value: k, text: t.label_ar })));
-  teamSel.value = e.team || "";
+  // Two models disagreed on an escalation's type: no team is taken for granted (forwardTeam), so even the
+  // pipeline's own team is a pick here.
+  teamSel.value = (escalatesNow(it) ? forwardTeam(it) : e.team) || "";
   teamSel.addEventListener("change", () => { set({ team: teamSel.value || null }); $("fixTeam")?.focus(); });
   const prSel = el("select", { id: "fixPrio" }, el("option", { value: "", text: "—" }),
     ["P1", "P2", "P3"].map((p) => el("option", { value: p, text: `${p} · ${PRIORITY_AR[p]}` })));
@@ -553,8 +646,9 @@ function fixPanel(it) {
       onclick: () => { S.corrections.delete(uid(it)); refreshAfterCorrection(it); $("fixSub")?.focus(); } }));
 }
 
-/** After a correction: the summary, the chips and the gate follow it. A correction to a type that is
- *  never drafted (or back) changes what the ticket is, so the whole view is drawn again. */
+/** After a correction: the summary, the chips, the team note, the gate and the action bar follow it (the
+ *  forward button names the corrected team). A correction to a type that is never drafted (or back)
+ *  changes what the ticket is, so the whole view is drawn again. */
 function refreshAfterCorrection(it) {
   const wasEscalated = $("agentMain").querySelector(".ticket")?.classList.contains("o-escalated");
   if (wasEscalated !== escalatesNow(it)) {
@@ -562,6 +656,7 @@ function refreshAfterCorrection(it) {
     renderTicket();
     renderQueue();
     renderWhy();
+    rowInView(it);
     if (focused) $(focused)?.focus();
     return;
   }
@@ -569,11 +664,18 @@ function refreshAfterCorrection(it) {
   $("titleChips")?.replaceWith(titleChips(it));
   // A correction to (or away from) a blocked account or a SIM change changes the line at the top.
   keepPlace(composer?.node, () => $("whyLine")?.replaceWith(whySlot(it)));
+  $("handoffBox")?.replaceWith(handoffSection(it));
   $("choiceBox")?.replaceWith(choiceBox(it));
   refreshGate(it);
+  refreshActions(it);   // an escalation has no gate: its bar is drawn here
   refreshReasons(it);   // a correction is something to give a reason for
   renderQueue();
   renderWhy();
+  rowInView(it);
+}
+/** A correction can re-sort the queue (a new priority), a live ticket comes back: the open row stays in view. */
+export function rowInView(it) {
+  if (it && !isPhone()) $(`opt-${it.key}`)?.scrollIntoView({ block: "nearest" });
 }
 
 /** The customer's message, its facts underlined where they were written, and under it one quiet line with
@@ -615,13 +717,17 @@ function choiceBox(it) {
     el("legend", { text: "ياهو النوع الصح؟" }),
     opt("second", second, it.result.team, it.result.priority, "المراجعة الثانية، والمسودة على جوابها", !pickedFirst),
     opt("first", alt, r1.team, r1.priority, "النموذج الأول", pickedFirst));
+  // A pick with the pointer moves on to the tick under the draft; arrow keys keep the focus in the group.
+  let pointer = false;
+  fs.addEventListener("pointerdown", () => { pointer = true; });
   fs.addEventListener("change", (e) => {
     const v = e.target.value;
     const u = uid(it);
     if (v === "first") S.corrections.set(u, { ...(S.corrections.get(u) || {}), subcategory: alt, team: r1.team, priority: r1.priority });
     else S.corrections.set(u, { ...(S.corrections.get(u) || {}), subcategory: second, team: it.result.team, priority: it.result.priority });
     refreshAfterCorrection(it);
-    $("choiceBox")?.querySelector(`input[value="${v}"]`)?.focus();
+    (pointer && $("ackBox") || $("choiceBox")?.querySelector(`input[value="${v}"]`))?.focus();
+    pointer = false;
   });
   return fs;
 }
@@ -633,9 +739,20 @@ function confirmTargets(it, st) {
   const list = [];
   const push = (id, words) => { if (!list.some((x) => x.ask === words.ask)) list.push({ id, ...words }); };
   if (needsIdentity(it)) push("account_risk", CONFIRM_AR.account_risk);
-  for (const f of it.result?.flags || []) if (!f.startsWith("draft:") && f !== "account_risk") push(f, CONFIRM_AR[f] || CONFIRM_OTHER);
+  const notNeeded = S.notNeeded.get(uid(it)) || new Set();
+  for (const f of it.result?.flags || []) {
+    if (f.startsWith("draft:") || f === "account_risk") continue;
+    // A missing field: the reply asks for it, or the agent says this ticket does not need it.
+    const field = f.startsWith("missing:") ? f.slice(8) : null;
+    if (field && notNeeded.has(field)) push(`${f}:not_needed`, { ...notNeededAR(FIELD_AR[field] || field), field });
+    else push(f, { ...(CONFIRM_AR[f] || CONFIRM_OTHER), field });
+  }
+  if (secondRequest(it)) push("second_request", CONFIRM_AR.second_request);
   for (const f of st.findings) if (!isBlocking(f.kind)) push(`draft:${f.kind}`, CONFIRM_AR[`draft:${f.kind}`] || { ask: S.meta.check_ar?.[f.kind] ?? f.kind, done: "قريت التنبيه" });
-  if (retargeted(it)) push("draft_for_other_type", CONFIRM_AR.draft_for_other_type);
+  if (retargeted(it)) {
+    const other = effective(it).subcategory !== subOf(it) ? "draft_for_other_type" : "draft_for_other_team";
+    push(other, CONFIRM_AR[other]);
+  }
   return { list, key: list.map((x) => x.id).join("|") };
 }
 
@@ -644,11 +761,13 @@ function confirmTargets(it, st) {
  *  both use it, so they never name different ticks. */
 const tickText = (t) => (t.list.length === 1 ? t.list[0].done : t.list[0]?.id === "account_risk" ? TICK_IDENTITY_AND_REST : TICK_ALL);
 
-/** What the agent ticked and approves anyway: warning kinds, a draft for another type, and the identity
- *  check (the decision log keeps them as kinds, never text; the server wants account_risk). */
+/** Every point the agent ticked and approves anyway: the identity check, the pipeline's points (a missing
+ *  field, the type after a disagreement), warning kinds and a draft for another type. The decision log keeps
+ *  them as kinds, never text, from the server's allow-list (meta.ack_kinds); the server wants account_risk. */
 function acknowledged(t) {
-  return t.list.map((x) => x.id).filter((id) => id.startsWith("draft:") || id === "draft_for_other_type" || id === "account_risk")
-    .map((id) => id.replace(/^draft:/, ""));
+  const known = new Set(S.meta.ack_kinds || []);
+  const kind = (id) => (id === "draft_for_other_team" ? "draft_for_other_type" : id.replace(/^draft:/, ""));
+  return [...new Set(t.list.map((x) => kind(x.id)))].filter((id) => known.has(id));
 }
 
 function approval(it) {
@@ -679,17 +798,30 @@ function refreshGate(it) {
     const many = t.list.length > 1;
     // One point: its tick says it ("تأكدت من …"), so the point itself names the group without being
     // shown twice. Several: «قبل لا تعتمد:», the list, one tick.
+    // A missing field offers «ما يحتاج بهالتذكرة»: then the point (and the tick) says that instead.
+    const notNeeded = (x) => (x.field ? el("button", { type: "button", id: `notNeeded-${x.field}`, class: "link-btn not-needed",
+      "aria-pressed": String(x.id.endsWith(":not_needed")), "aria-label": `${FIELD_AR[x.field] || x.field}: ${NOT_NEEDED_AR}`,
+      onclick: () => {
+        const set = S.notNeeded.get(u) || new Set();
+        if (set.has(x.field)) set.delete(x.field); else set.add(x.field);
+        S.notNeeded.set(u, set);
+        refreshGate(it);
+      } }, NOT_NEEDED_AR) : null);
     const next = t.list.length ? el("div", { id: "confirmBox", class: `confirm${many ? "" : " is-one"}`, tabindex: "-1", role: "group", "aria-labelledby": "confirmTitle" },
       el("p", { id: "confirmTitle", class: many ? "confirm-title" : "sr-only" }, many ? icon("check") : null,
         many ? el("strong", { text: "قبل لا تعتمد:" }) : t.list[0].ask),
-      many ? el("ul", { class: "confirm-list" }, t.list.map((x) => el("li", { text: x.ask }))) : null,
-      el("label", { class: "confirm-check" },
-        el("input", { type: "checkbox", id: "ackBox", checked: S.acks.get(u) === t.key,
-          onchange: (e) => { if (e.target.checked) S.acks.set(u, t.key); else S.acks.delete(u); refreshActions(it); } }),
-        el("span", { text: tickText(t) }))) : el("div", { id: "confirmBox", tabindex: "-1" });
+      many ? el("ul", { class: "confirm-list" }, t.list.map((x) => el("li", {}, x.ask, x.field ? " · " : null, notNeeded(x)))) : null,
+      el("div", { class: "confirm-row" },
+        el("label", { class: "confirm-check" },
+          el("input", { type: "checkbox", id: "ackBox", checked: S.acks.get(u) === t.key,
+            onchange: (e) => { if (e.target.checked) S.acks.set(u, t.key); else S.acks.delete(u); refreshActions(it); } }),
+          el("span", { text: tickText(t) })),
+        many ? null : notNeeded(t.list[0]))) : el("div", { id: "confirmBox", tabindex: "-1" });
     // Under the draft: it can grow or go without moving the draft or the caret.
+    const appeared = !box.childElementCount && t.list.length > 0;
     box.replaceWith(next);
     if (hadFocus) $(hadFocus)?.focus();
+    if (appeared) revealTick(next);
   }
   refreshActions(it);
   keepCaretInView();
@@ -714,13 +846,17 @@ function handoffSection(it) {
     const i = l.indexOf(":");
     const k = l.slice(0, i);
     return i > 0 && i < 20 ? el("div", {}, el("dt", {}, k, k === SUMMARY ? el("span", { class: "dt-tag", text: "كتبها نموذج" }) : null),
-      el("dd", { dir: "rtl" }, richText(l.slice(i + 1).trim())))
-      : el("div", {}, el("dd", { dir: "rtl" }, richText(l)));
+      el("dd", { dir: "auto" }, richText(l.slice(i + 1).trim())))
+      : el("div", {}, el("dd", { dir: "auto" }, richText(l)));
   }));
   const byModel = lines.some((l) => l.startsWith(`${SUMMARY}:`));
+  // The note was written for the pipeline's type and team: after a correction it is marked as the
+  // system's, under what the agent corrected.
+  const fixed = corrWords(correctedFor(it));
   // The team is in the summary line and on the forward button: the title does not say it a third time.
-  return el("section", { class: "handoff", "aria-labelledby": "handoffTitle" },
-    el("h3", { id: "handoffTitle", class: "section-title" }, "ملاحظة للقسم"),
+  return el("section", { id: "handoffBox", class: "handoff", "aria-labelledby": "handoffTitle" },
+    el("h3", { id: "handoffTitle", class: "section-title" }, "ملاحظة للقسم", fixed.length ? el("span", { class: "dt-tag", text: "كتبها النظام قبل تصحيحك" }) : null),
+    fixed.length ? el("p", { class: "summary-note" }, "صحّحتها: ", fixed.join("، ")) : null,
     lines.length ? dl : el("p", { class: "hint", text: "ماكو ملاحظة، اقرا التذكرة كاملة." }),
     lines.length ? el("p", { class: "hint", text: byModel
       ? "الملاحظة من القواعد، بس «الخلاصة» كتبها نموذج من نص التذكرة. ما بيها رد للزبون."
@@ -741,11 +877,13 @@ function reasonsBox(it) {
   const u = uid(it);
   const chosen = S.reasons.get(u) || new Set();
   const on = armedOn(it);
+  // What a reply says (its tone, a promise, a number) is a reason only where there was a draft.
+  const hadDraft = !!originalDraft(it).text;
   const d = el("details", { id: "reasonBox", class: "reasons", open: on },
     el("summary", {}, on ? "ليش استلمتها؟ " : "ليش غيّرتها؟ ", el("span", { class: "muted", text: "(اختياري)" }),
       chosen.size ? el("span", { class: "reason-count" }, " · ", num(chosen.size)) : null),
     el("div", { class: "reason-chips", role: "group", "aria-label": "الأسباب" },
-      S.meta.reason_codes.map((c) => el("button", { type: "button", class: "reason-chip", "aria-pressed": String(chosen.has(c)),
+      S.meta.reason_codes.filter((c) => hadDraft || !DRAFT_REASONS.has(c)).map((c) => el("button", { type: "button", class: "reason-chip", "aria-pressed": String(chosen.has(c)),
         onclick: (e) => {
           const set = S.reasons.get(u) || new Set();
           if (set.has(c)) set.delete(c); else set.add(c);
@@ -760,40 +898,58 @@ function refreshReasons(it) {
   if (box && reasonsShown(it) !== (box.tagName === "DETAILS")) box.replaceWith(reasonsBox(it));
 }
 
+// After a take-over: the reply is the agent's, outside this page.
+const TOOK_OVER_NEXT = "كمّل ويا الزبون من قناتكم.";
 const charsAr = (n) => countAr(n, { one: "حرف واحد تغيّر", two: "حرفين تغيّروا", few: "حروف تغيّرت", many: "حرف تغيّر" });
+/** The corrections as words: «النوع: …»، «القسم: …»، «الأولوية: P2». */
+const corrWords = (corr) => [corr.subcategory && `النوع: ${subAr(corr.subcategory)}`, corr.team && `القسم: ${teamAr(corr.team)}`,
+  corr.priority && `الأولوية: ${corr.priority}`].filter(Boolean);
 
 function decidedSection(it, d) {
   const final = S.finalText.get(uid(it));
   const orig = originalDraft(it).text;
   const reasons = (d.reason_codes || []).map((c) => S.meta.reason_codes_ar[c] || c);
-  const corr = d.corrected || {};
-  const corrText = [corr.subcategory && `النوع: ${subAr(corr.subcategory)}`, corr.team && `القسم: ${teamAr(corr.team)}`,
-    corr.priority && `الأولوية: ${corr.priority}`].filter(Boolean);
+  const corrText = corrWords(d.corrected || {});
   let body = null;
   if (final != null && d.action !== "took_over") body = [el("p", { class: "decided-k", text: "الرد اللي اعتمدته:" }), el("blockquote", { class: "decided-text", dir: "rtl" }, digitRuns(final))];
   else if (d.action === "approved" && orig) body = [el("p", { class: "decided-k", text: "المسودة انعتمدت كما هي:" }), el("blockquote", { class: "decided-text", dir: "rtl" }, digitRuns(orig))];
   else if (d.action === "edited") body = el("p", { class: "hint" }, "انعدّلت قبل الاعتماد", d.edit_chars != null ? [" (", charsAr(d.edit_chars), ")"] : "", ". السجل يحفظ بصمة الرد بس، مو نصه.");
   return el("section", { class: "decided", "aria-labelledby": "decidedTitle" },
-    el("h3", { id: "decidedTitle", class: "decided-title" }, icon("done"), ACTION_WORD[d.action] || "خلصت", " · ", fmtSeconds(d.seconds)),
+    // A forward names the team it went to (the corrected one, if the agent corrected it).
+    el("h3", { id: "decidedTitle", class: "decided-title" }, icon("done"), ACTION_WORD[d.action] || "خلصت",
+      d.action === "forwarded" && effective(it).team ? ` ${toTeam(teamAr(effective(it).team))}` : "", " · ", fmtSeconds(d.seconds)),
     body,
     (d.warnings_acknowledged || []).includes("account_risk") ? el("p", { class: "hint", text: "تأكدت من هوية الزبون قبل الاعتماد." }) : null,
+    d.action === "took_over" ? el("p", { class: "hint", text: TOOK_OVER_NEXT }) : null,
     reasons.length ? el("p", { class: "hint" }, "الأسباب: ", reasons.join("، ")) : null,
     corrText.length ? el("p", { class: "hint" }, "صحّحت: ", corrText.join("، ")) : null);
+}
+
+/** Where «حوّلها» sends an escalation: the team as the agent now sees it, but none while the two models
+ *  disagreed on the type and the agent has not picked a type or team (the team would be one model's). */
+function forwardTeam(it) {
+  const c = S.corrections.get(uid(it)) || {};
+  if (flagsOf(it).includes("recheck_disagreed") && !c.team && !c.subcategory) return null;
+  return effective(it).team;
 }
 
 /** The decision: the one obvious action (with its Ctrl+Enter hint), the other one plain, and the one
  *  small lock line. Why approve is off stays, under them, while it is off. Once the take-over is armed
  *  (its first press), recording it is the one obvious action and Ctrl+Enter's; «رجوع» (or Esc) goes back. */
 function actionBar(it) {
-  const bar = el("div", { id: "actionBar", class: "actionbar", role: "group", "aria-label": "القرار" });
+  const wait = settling();   // just on screen: its decisions wait a moment (settle)
+  const bar = el("div", { id: "actionBar", class: "actionbar", role: "group", "aria-label": "القرار", dataset: wait ? { settling: "" } : {} });
   const badge = el("p", { class: "no-send" }, icon("lock"), "ما ينرسل شي للزبون تلقائياً");
   const d = S.decisions.get(it.key);
   const on = armedOn(it);
-  const take = (primary = false) => el("button", { type: "button", id: "takeBtn", class: primary ? "btn btn-primary" : "btn",
+  const off = wait ? "true" : null;
+  const take = (primary = false) => el("button", { type: "button", id: "takeBtn", class: primary ? "btn btn-primary" : "btn", "aria-disabled": off,
     title: keyTitle(on ? "سجّل: استلمتها" : "استلمها بنفسي", "T", "ف"), onclick: () => takeOver() },
   icon("user"), on ? "سجّل: استلمتها" : "استلمها بنفسي", on ? kbd(`${MOD}+Enter`) : null);
   if (d) {
-    add(bar, el("button", { type: "button", id: "undoBtn", class: "btn", onclick: () => undoKey(it.key) }, icon("undo"), "تراجع"), badge);
+    // Ctrl+Z undoes the decision of the ticket on screen (after a reload too).
+    add(bar, el("button", { type: "button", id: "undoBtn", class: "btn", "aria-keyshortcuts": "Control+Z", onclick: () => undoKey(it.key) },
+      icon("undo"), "تراجع", kbd(`${MOD}+Z`)), badge);
     return bar;
   }
   if (it.status === "running") {
@@ -809,22 +965,23 @@ function actionBar(it) {
     return bar;
   }
   if (escalatesNow(it)) {
-    const team = effective(it).team;
-    // No team (the system never read it): taking it is the main action; forwarding asks for a team first.
+    const team = forwardTeam(it);
+    // No team (the system never read it, or the two models disagreed on the type): taking it is the main
+    // action; forwarding asks for a team first.
     const fwdText = team ? `حوّلها ${toTeam(teamAr(team))}` : "حوّلها لقسم…";
     const fwd = el("button", { type: "button", id: "forwardBtn", class: team ? "btn btn-primary" : "btn", title: keyTitle(fwdText, "F", "ب"),
-      onclick: () => forward() }, icon("send"), fwdText);
+      "aria-disabled": off, onclick: () => forward() }, icon("send"), fwdText);
     add(bar, team ? [fwd, take()] : [take(true), fwd], badge);
     return bar;
   }
   const a = approval(it);
   const label = a.needsAck ? "تأكدت، اعتمد" : "اعتمد وانتقل";
   add(bar,
-    el("button", { type: "button", id: "approveBtn", class: "btn btn-primary", "aria-disabled": a.ok ? null : "true",
+    el("button", { type: "button", id: "approveBtn", class: "btn btn-primary", "aria-disabled": a.ok && !wait ? null : "true",
       "aria-describedby": a.ok ? null : "approveWhy", onclick: () => approve() }, icon("ready"), label, kbd(`${MOD}+Enter`)),
     take(), badge,
     // Only the tick missing (it is just above): quiet. Anything else (a blocking check above all): its colour.
-    a.ok ? null : el("p", { id: "approveWhy", class: `approve-why ${a.blocked ? "is-bad" : a.needsAck ? "is-muted" : ""}` },
+    a.ok ? null : el("p", { id: "approveWhy", class: `approve-why ${a.blocked ? "is-bad" : a.needsAck && tickAsked !== it.key ? "is-muted" : ""}` },
       a.needsAck ? null : icon(a.blocked ? "lock" : "check"), a.reason));
   return bar;
 }
@@ -867,16 +1024,28 @@ async function failed(e, it) {
     ? "ما انحفظ القرار: انقطع الاتصال بالخادم." : "ما انحفظ القرار.");
 }
 
-/** Where the agent's attention should go when approve is refused: the choice, else the thing to check. */
-function focusWhatToCheck() {
-  const radio = $("choiceBox")?.querySelector("input:checked");
-  if (radio) return radio.focus();
-  $("confirmBox")?.focus();
+/** Only the tick is missing: no toast (on a phone it sat on the tick it asked for). Its reason under the
+ *  action buttons takes the warning colour, the box comes into view above the action bar, and the focus
+ *  goes to the tick itself, so Space ticks it (never into the draft). */
+function askForTick(it) {
+  tickAsked = it.key;
+  refreshActions(it);
+  $("confirmBox")?.scrollIntoView({ block: "nearest" });
+  ($("ackBox") || $("confirmBox"))?.focus({ preventScroll: true });
+}
+
+/** X: tick (or untick) the box under the draft from anywhere outside a text field; the focus goes to it. */
+export function toggleTick() {
+  const box = $("ackBox");
+  if (!box) return false;
+  box.click();   // its change handler records the tick
+  box.focus();
+  return true;
 }
 
 export async function approve() {
   const it = findItem(S.agent.openKey);
-  if (!it || deciding) return;
+  if (!it || deciding || settling()) return;
   if (S.decisions.has(it.key)) return showToast(`هاي انحسمت. تكدر تتراجع (${MOD}+Z).`);
   if (it.status === "running") return;
   // Armed: the action bar's one obvious action is «سجّل: استلمتها», and Ctrl+Enter is that.
@@ -895,8 +1064,8 @@ export async function approve() {
     const a = approval(it);
     const st = composer.state();
     if (!a.ok || !st.current) {
-      refuse(it, a.ok ? "التعديل ما انفحص بعد، جرب مرة ثانية." : a.reason);
-      if (a.needsAck) focusWhatToCheck();
+      if (a.needsAck) askForTick(it);
+      else refuse(it, a.ok ? "التعديل ما انفحص بعد، جرب مرة ثانية." : a.reason);
       return;
     }
     const record = await decide(it, st.edited ? "edited" : "approved",
@@ -912,7 +1081,7 @@ export async function approve() {
 
 export async function takeOver() {
   const it = current();
-  if (!it || deciding) return;
+  if (!it || deciding || settling()) return;
   if (!armedOn(it)) {   // first press: offer the reasons (optional), second press records
     armed = { u: uid(it), before: new Set(S.reasons.get(uid(it)) || []) };
     $("reasonBox")?.replaceWith(reasonsBox(it));   // open, and asking «ليش استلمتها؟»
@@ -952,9 +1121,9 @@ export function disarm({ focus = false, redraw = true } = {}) {
 
 export async function forward() {
   const it = current();
-  if (!it || deciding || !escalatesNow(it)) return;
+  if (!it || deciding || settling() || !escalatesNow(it)) return;
   disarm();   // F after an armed take-over: the forward, with none of the take-over's reasons
-  if (!effective(it).team) return askForTeam(it);
+  if (!forwardTeam(it)) return askForTeam(it);
   const at = itemsInTab(S.agent.tab).findIndex((x) => x.key === it.key);
   deciding = true;
   try {
@@ -967,38 +1136,41 @@ export async function forward() {
   }
 }
 
-/** After a decision: the next ticket in this tab, unless a more urgent one waits in another tab. */
+/** After a decision: the next ticket in this tab. A more urgent one in another tab is said by «روح لـ…»
+ *  above the ticket (the inbox never leaves the agent's tab by itself while it has tickets). Once the tab
+ *  is empty: back to the tab the agent came from by «روح لـ…», else the most urgent open ticket. */
 function after(it, record, at) {
   const tab = S.agent.tab;
   // The edit, reasons and corrections stay (undo brings them back); the tick does not.
   S.acks.delete(uid(it));
   armed = null;   // recorded: its reasons stay with it
   const list = itemsInTab(tab);
-  const cand = at >= 0 ? list[Math.min(at, list.length - 1)] || null : list[0] || null;
+  let next = at >= 0 ? list[Math.min(at, list.length - 1)] || null : list[0] || null;
   const best = mostUrgent(tab);
-  const next = cand && (!best || priorityRank(cand) <= priorityRank(best)) ? cand : best;
+  if (next && best && tabOf(best) !== tab && priorityRank(best) < priorityRank(next)) S.agent.urgentTab = tabOf(best);
+  let note = null;
+  if (!next) {
+    const back = S.agent.cameFrom && S.agent.cameFrom !== tab ? itemsInTab(S.agent.cameFrom)[0] || null : null;
+    next = back || best;
+    if (next) note = `ماكو بعد تذاكر «${tabLabel(tab)}»، ف${back ? "رجعنا" : "انتقلنا"} لـ«${tabLabel(tabOf(next))}»`;
+    S.agent.cameFrom = null;
+  }
   S.agent.tab = next ? tabOf(next) : "done";   // all decided: the list beside the summary
   const remaining = openItems().length;
   const entry = { id: record.id, key: it.key, run: it.run };
   const msg = record.action === "forwarded"
-    ? ["تحوّلت ", mono(it.key), ` ${toTeam(teamAr(effective(it).team))}`, " · الباقي ", num(remaining)]
-    : [`${ACTION_WORD[record.action]} `, mono(it.key), " · الباقي ", num(remaining)];
-  if (next && S.agent.tab !== tab) msg.push(" · ", movedNote(tab, next, list));
+    ? ["تحوّلت ", ticketId(it.key), ` ${toTeam(teamAr(effective(it).team))}`, " · الباقي ", num(remaining)]
+    : [`${ACTION_WORD[record.action]} `, ticketId(it.key), " · الباقي ", num(remaining)];
+  if (note) msg.push(" · ", note);
+  if (record.action === "took_over") msg.push(el("br"), TOOK_OVER_NEXT);
   showToast(msg, () => undoKey(it.key, entry));
   S.agent.openKey = next ? next.key : null;
   startClock(next);
   renderQueue();
   renderTicket();
   renderWhy();
+  if (next && S.agent.tab !== tab) settle(SWITCH_SETTLE_MS);   // another tab: a little longer before deciding
   (next ? $("ticketTitle") : $("doneTitle"))?.focus();
-}
-
-/** Why the next ticket is in another tab: this tab is empty, or a more urgent ticket waits there. */
-function movedNote(from, next, leftHere) {
-  const to = `لـ«${tabLabel(tabOf(next))}»`;
-  if (!leftHere.length) return `ماكو بعد تذاكر «${tabLabel(from)}»، فانتقلنا ${to}`;
-  const p = effective(next).priority;
-  return `انتقلنا ${to}: فيها تذكرة ${p ? PRIORITY_AR[p] : "ما انعرفت أولويتها"}`;
 }
 
 export async function undoKey(key, entry = null) {
@@ -1018,14 +1190,38 @@ export async function undoKey(key, entry = null) {
   }
   S.agent.tab = tabOf(it);
   open(key, { focus: "heading" });
-  showToast(["رجعت ", mono(key), " للقائمة"]);
+  showToast(["رجعت ", ticketId(key), " للقائمة"]);
 }
 
-/** Ctrl/Cmd+Z: take back the last decision made in this page (on the run on screen, or a live ticket). */
+let undoAsked = null;   // {entry, toast}: Ctrl+Z asked about the last decision, on another ticket
+/** Ctrl/Cmd+Z: on a decided ticket, take back its decision (also one restored after a reload). On
+ *  another ticket, name the last decision made in this page (on the run on screen, or a live ticket) and
+ *  ask first: its «تراجع», or Ctrl+Z again while that question is on screen. */
 export function undoLast() {
+  const it = findItem(S.agent.openKey);
+  if (it && S.decisions.has(it.key)) return undoKey(it.key);
   const last = S.session.at(-1);
   if (!last) return showToast("ماكو قرار بهالجلسة تتراجع عنه.");
-  undoKey(last.key, last);
+  if (undoAsked && undoAsked.entry.id === last.id && toastShows(undoAsked.toast)) {
+    undoAsked = null;
+    return undoKey(last.key, last);
+  }
+  undoAsked = { entry: last, toast: showToast(["آخر قرار كان على ", ticketId(last.key), ". تتراجع عنه؟"], () => undoKey(last.key, last)) };
+}
+
+/** C: open the correction panel (its first select takes the focus), or close it. */
+export function toggleFix() {
+  const b = $("fixToggle");
+  if (!b) return false;
+  b.click();
+  return true;
+}
+/** Escape: close the correction panel from inside it, or from anywhere that is not a field. */
+export function closeFix(target) {
+  const panel = $("fixPanel");
+  if (!panel || !(panel.contains(target) || !typingIn(target))) return false;
+  $("fixToggle")?.click();   // closing: the focus goes to the pencil
+  return true;
 }
 
 export function focusDraft() {
@@ -1181,6 +1377,8 @@ function allDone() {
 }
 
 export function liveUpdated(it) {
+  // Done while «كيف يشتغل» was on screen: it is the ticket the inbox opens on when the agent comes back.
+  if (it.status !== "running" && S.mode !== "agent") S.agent.openKey = it.key;
   renderQueue();
   if (S.agent.openKey !== it.key) return;
   if (it.status === "running") {
@@ -1190,6 +1388,7 @@ export function liveUpdated(it) {
     S.agent.tab = tabOf(it);
     // The agent's time starts when the result is on screen, not while the pipeline worked on it.
     if (S.mode === "agent" && !document.hidden) startClock(it);
+    settle();   // the result comes on screen under the agent's pointer: it settles like a new ticket
     renderQueue();
     renderTicket();
     renderWhy();

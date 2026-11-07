@@ -39,6 +39,8 @@ export function buildComposer(item, onUpdate) {
   const label = el("label", { class: "composer-label", for: "draft" }, labelText);
   const restore = el("button", { type: "button", class: "link-btn", text: "رجّع المسودة الأصلية", hidden: true });
   const mirror = el("div", { class: "composer-mirror", "aria-hidden": "true" });
+  // Each paragraph takes the direction of its own first letter (the stylesheet's unicode-bidi: plaintext,
+  // on the mirror too), so a line in English reads left to right with its full stop at its end.
   const ta = el("textarea", {
     id: "draft", class: "composer-input", dir: "rtl", lang: "ar", spellcheck: "false", autocomplete: "off",
     "aria-describedby": "draftChecks", rows: "4",
@@ -144,7 +146,15 @@ export function buildComposer(item, onUpdate) {
   }
   const later = debounce(() => { run(); }, 400);
 
-  function changed() {
+  function changed(e) {
+    // Typed or pasted text is shown like the draft was: a no-break space between digit groups, a
+    // non-breaking hyphen in a reference. One character for one, so the caret stays where it was. Not
+    // while an input method is composing (it would break the word being composed).
+    if (!e?.isComposing && shownDraft(ta.value) !== ta.value) {
+      const [from, to, way] = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection];
+      ta.value = shownDraft(ta.value);
+      ta.setSelectionRange(from, to, way);
+    }
     const shown = ta.value;
     text = shown === shownDraft(orig.text) ? orig.text : realDraft(shown);
     // Any edit makes every check in flight stale: a late answer is for an older text.
@@ -196,6 +206,7 @@ export function buildComposer(item, onUpdate) {
   }
 
   ta.addEventListener("input", changed);
+  ta.addEventListener("compositionend", changed);
   restore.addEventListener("click", () => { ta.value = shownDraft(orig.text); changed(); ta.focus(); });
   requestAnimationFrame(fit);
   window.addEventListener("resize", fit, { passive: true });

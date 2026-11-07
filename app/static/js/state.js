@@ -13,9 +13,11 @@ export const S = {
   runs: [],
   sets: [],
   mode: "agent",
-  agent: { source: null, run: null, items: [], loading: false, error: null, tab: null, openKey: null },
+  // urgentTab: a more urgent ticket waits there (said by «روح لـ…» after a decision); cameFrom: the tab the
+  // agent left to follow it, to come back to once that tab is empty.
+  agent: { source: null, run: null, items: [], loading: false, error: null, tab: null, openKey: null, urgentTab: null, cameFrom: null },
   live: [],             // tickets pasted in this page (run "live"), newest first
-  liveSeq: 0,
+  liveSeq: 0,           // the order of live rows (their ids come from the server)
   liveBusy: false,      // the server runs one live ticket at a time
   liveBlocked: null,    // Arabic reason once the spending cap was reached
   decisions: new Map(), // ticket key → the decision that stands (not undone), for the run on screen and live
@@ -24,6 +26,7 @@ export const S = {
   acks: new Map(),      // uid → what the agent ticked "تأكدت" for
   reasons: new Map(),   // uid → Set of reason codes
   corrections: new Map(), // uid → {subcategory, team, priority} the agent chose
+  notNeeded: new Map(), // uid → Set of missing fields the agent marked «ما يحتاج بهالتذكرة»
   time: new Map(),      // uid → {ms, since, visits}: how long the ticket was on screen, over every visit
   finalText: new Map(), // uid → the reply as decided in this page (shown on the done ticket)
   timing: null,         // the uid whose clock is running
@@ -86,9 +89,15 @@ export function routeFor(sub, extraction) {
   return { team: s.team, priority: p };
 }
 
+/** The agent's corrections of a ticket: the decided one's as its standing decision has them (also after
+ *  a reload, when nothing is in memory), else those made in this page. */
+export function correctionsOf(item) {
+  const d = S.decisions.get(item.key);
+  return (d ? d.corrected : S.corrections.get(uid(item))) || {};
+}
 /** Type, team and priority as the agent now sees them (their corrections over the pipeline's). */
 export function effective(item) {
-  const c = S.corrections.get(uid(item)) || {};
+  const c = correctionsOf(item);
   return {
     subcategory: c.subcategory || subOf(item),
     team: c.team || item.result?.team || null,
