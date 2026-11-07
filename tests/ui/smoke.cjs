@@ -1097,6 +1097,41 @@ async function runPass(browser, pass) {
         /interactive-widget=resizes-content/.test(metaVp) && hasDraft > 0 && typing === "static" && resting === "fixed" && dlg.top >= 0 && dlg.bottom <= dlg.h,
         JSON.stringify({ metaVp, hasDraft, typing, resting, dlg }));
     }
+
+    // T37: on a touch screen (the main pointer coarse) the small controls get a 44 px hit area, no key hints
+    // show, and a tap on an underlined fact shows its value next to it.
+    {
+      const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, colorScheme: pass.scheme });
+      try {
+        const m = await mctx.newPage();
+        await watch(m, "coarse");
+        await m.goto(srv.base);
+        await m.waitForSelector("#queueList [role=option]", { timeout: 15000 });
+        const withFact = run.tickets.find((r) => r.result.outcome === "drafted" && r.result.extraction?.reference
+          && r.ticket.text.includes(r.result.extraction.reference) && !decidedIds().has(r.ticket.id))?.ticket.id;
+        await m.tap("#tab-drafted");
+        await m.locator(`#queueList [data-key="${withFact}"]`).tap();
+        await waitUntil(() => m.evaluate(() => document.body.dataset.screen === "ticket"), 3000, "the ticket screen");
+        await settled(m);
+        const sizes = await m.evaluate(() => {
+          const r = (sel) => { const b = document.querySelector(sel)?.getBoundingClientRect(); return b ? [Math.round(b.width), Math.round(b.height)] : null; };
+          const hint = document.querySelector("#approveBtn .kbd-hint");
+          return { coarse: matchMedia("(pointer: coarse)").matches, pencil: r("#fixToggle"), ok: r(".checks-ok"),
+            hint: hint ? getComputedStyle(hint).display : "none",
+            tipArea: [...document.styleSheets].flatMap((s) => [...s.cssRules]).some((x) => x.conditionText === "(pointer: coarse)"
+              && [...x.cssRules].some((y) => y.selectorText === ".fact-tip::after" && y.style.inset === "-12px")) };
+        });
+        await m.locator(".customer-text [data-fact]").first().tap();
+        await sleep(150);
+        const pop = await m.evaluate(() => document.querySelector(".customer-text .fact-pop")?.textContent || "");
+        check(`T37: on a touch screen the pencil and «ما بيها مشكلة» are at least 44 px high, the «؟» marker's hit area is 44 px, no key hints; a tap on ${withFact}'s underline shows «${pop}» beside it`,
+          sizes.coarse && sizes.pencil[0] >= 44 && sizes.pencil[1] >= 44 && (!sizes.ok || sizes.ok[1] >= 44) && sizes.hint === "none" && sizes.tipArea
+          && pop.startsWith("رقم العملية"), JSON.stringify({ sizes, pop }));
+        await cspOf(m, "coarse");
+      } finally {
+        await mctx.close().catch(() => {});
+      }
+    }
     await cspOf(p, "phone-fixes");
     await p.close();
   }
