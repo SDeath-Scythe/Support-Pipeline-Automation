@@ -1,6 +1,6 @@
 # Smoke test, 20 Oct 2026: 20 new synthetic tickets + mixed_30
 
-Branch: `claude/eager-tesla-x1dcxj` (nothing was changed on `main`).
+Branch: the 20 Oct development branch (nothing was changed on `main` then; the branch was merged into `main` on 29 Oct).
 
 ## What changed, where, and why
 

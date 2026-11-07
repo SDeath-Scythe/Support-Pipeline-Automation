@@ -1,8 +1,54 @@
 # Results log: fix experiments
 
-Newest first. Method: [README.md](README.md). The 20 Oct rounds (from "Current recommendation" down) have per-config pages and a summary table in [fixes_30/summary.md](fixes_30/summary.md) (round 1 kept as [summary-round1.md](fixes_30/summary-round1.md)); each of their steps is its own commit on `claude/eager-tesla-x1dcxj`.
+Newest first. Method: [README.md](README.md). The 20 Oct rounds (from "Current recommendation" down) have per-config pages and a summary table in [fixes_30/summary.md](fixes_30/summary.md) (round 1 kept as [summary-round1.md](fixes_30/summary-round1.md)); each of their steps is its own commit on the 20 Oct development branch, merged into `main` on 29 Oct.
 
 The 20 Oct numbers come from the `cli` backend: good for comparing configs with each other, **not** for thresholds or the MVP. From 29 Oct, reported pipeline numbers come from the API. Gold labels for `fixes_30` were model-written, and the draft judge is a model, so treat single-ticket differences with care.
+
+## 7 Nov: Before the second round of test sessions: the saved run served as today's code decides it (no model calls)
+
+Four items were left before the second round of role-played test sessions. No model was called, and nothing was spent.
+
+**1. The saved run is served as today's code would decide it.** The viewer serves `docs/runs/test2/final.json` (run on 30 Oct; not regenerated, and the server never writes it). Until now its draft checks were recomputed with today's rules, but its outcome and flags stayed as saved: six ready tickets showed a new draft warning and asked for a tick while they sat in «جاهزة», and t2-0030 and t2-0041 had no quiet note. The author's decision: serve a saved run as today's code would decide it, for the rules that need no model call. After `apply_account_risk`, the server's `apply_current_rules` (`app/server.py`) adds only what is missing, in the result and in its "result" event:
+- a flag `draft:<kind>` for each draft-check finding the page shows, as `run.py` flags a live draft; a ready ticket with one becomes «تحتاج تأكيد»;
+- the code rules on the customer's text (`run.text_flags`: `secret_in_ticket`, `bidi_controls`, `other_phone`, `complaint_risk`, and the quiet `instructions_in_ticket`, which leaves a ticket ready) and `amount_disagreed` from the two saved answers, with their notes, `secret_spans`, and on an escalation the team note's line for each.
+
+It never re-routes, re-prioritises, re-types or re-drafts a ticket, so `device_lost` and `fraud_secondary`, which move a ticket to the fraud team, are not applied. A changed result is marked `rules_recomputed` (the flags added) and `outcome_recomputed` (when it moved), and «كيف يشتغل» says so on the ticket and in the overview. A decision is checked against this served copy (`served_ticket`): an approval of t2-0004 is logged as flagged with `draft:amount_not_in_ticket`, whatever the request says, and `ticket_sha256` stays null for a saved run.
+
+| test2 final, as the viewer serves it | Before | After |
+|---|---|---|
+| «تحتاج تأكيد» / «متصعّدة» / «جاهزة» | 15 / 6 / 59 | **21 / 6 / 53** |
+| Ready → «تحتاج تأكيد» | – | t2-0004, t2-0013, t2-0058 (`amount_not_in_ticket`); t2-0056 (`ask_missing`); t2-0019, t2-0069 (`dialect_words`) |
+| Flags added, outcome kept | – | t2-0017 (flagged already for a missing reference): `draft:ask_missing`, `draft:dialect_words`; t2-0030, t2-0041: `instructions_in_ticket`, still «جاهزة» |
+| Outcome equal to the gold outcome, as «كيف يشتغل» scores it | 74/80 | 68/80 |
+
+- **Six, not seven.** The entries below said 7 ready tickets; there were 6, and t2-0017 was already flagged (corrected below).
+- **The score.** The gold file marks the six as ready: a warning is about the draft, not the ticket. «كيف يشتغل» scores them against the file as it is and says why.
+- **Nothing else fires on test2:** no other code rule, and no saved ticket has a card number or code to hide.
+- **The inbox's first flagged ticket is now a P1:** t2-0058, a transfer. The others there are P2s and P3s.
+
+**2. «كيف يشتغل» hides a typed secret.** It showed the full customer text in its ticket list, the ticket's text and the cleaned text. It now hides each card number or code in `result.secret_spans` the way «رسالة الزبون» does: «••••», read «رقم مخفي» by a screen reader. The list never shows it. In the ticket on screen, the text is hidden by its spans, and the cleaned text, the models' answers and prompts, the draft, its check chips, the team note, the extracted reference and phone, and the gold table hide the same digits wherever they are written again, until one «اظهر الرقم». Opening another ticket hides it again, and ranges that do not fit the text are dropped (`app/static/js/process.js`, `setHidden`, `hideBox`, `refreshHidden`, `rowText`; shared with the inbox in `facts.js`, `fitSpans`, `secretMask`, `secretRanges`). A live ticket's spans come with its result, and the page hides them then. A number the pipeline did not find is not hidden here either (failure mode 8).
+
+**3. `claims_done` learns «مسجل عندنا».** It missed «رقم العملية 7021535 مسجل عندنا» (dev-0015, in the prompt revision step), a claim that something is on record with us, which the tool cannot have checked. It now also fires on "registered" said to be "with us" or "in the system": «مسجل», «مسجلة», «مسجلين» or «متسجل», «سجلنا» or «سجلناه», or «تم تسجيل» or «تم تسجيله», followed within three words by «عندنا», «عدنا», «لدينا», «بنظامنا», «بالنظام» or «بسجلاتنا» (`draft_check.py`, `_on_record`). It stays narrow:
+- without "with us", «سجلنا طلبك», «سجلنا رقم العملية» and «وصلنا طلبك وسجلناه» are hand-offs, and «رقمك المسجل» is the customer's number;
+- not when negated («غير مسجل عندنا»), asked («رقمك مسجل عندنا؟», «إذا مسجل عندنا»), for the customer to check («تأكد إن رقمك مسجل عندنا», «لازم يكون مسجل عندنا»), reported («ذكرت إن رقمك مسجل عندنا»; but «الرقم اللي كتبته مسجل عندنا» is the draft's own claim) or quoted;
+- «سجّل» and «سجلت», said by the customer or asked of them, are not matched.
+
+Measured on every saved draft set, with the draft checks only (`LLM_CACHE_ONLY=1`, no key; the checks call no model):
+
+| Drafts | claims_done before → after |
+|---|---|
+| Saved drafts: `runs/exp` (heldout left out) and test2 final, 2,531 | 0 → 5 (2 texts: dev-0040 in one config, dev-0015 in four) |
+| Cache-only replays of the adopted code: dev 215, test2 74, mvp_test 69, adversarial_14 11 | 0 → 0 |
+| The adopted drafter's 146 new drafts (test2 and mvp_test) | 0 → 0 |
+| The prompt revision step's dev drafts, all configs (1,135) | 0 → 2 (dev-0015 and dev-0118, both from the revised drafter) |
+| The session tickets re-drafted in the flag runs (183) | 0 → 0 |
+| The sessions' own drafts (42) | 1 → 1 (T05's «فسجلناها», unchanged) |
+
+All four new texts were read, and each says something is on record with us: «رقم العملية 7021535 مسجل عندنا», «ومسجلين عندنا رقم آخر عملية 7021535», «ورقم ابن عمك اللي كتبته (…) مسجل عندنا», «رقم العملية TX95304083 سجلناه عندنا». No false alarm was found. Unit tests: 11 that fire and 23 that don't (`tests/test_text_rules.py`). One older test changed with it: «رقمك 9647701234568 مسجل عدنا», in the list `sensitive_number` must leave alone, is now a `claims_done`, and `sensitive_number` still leaves it alone. The saved test2 run has no such draft, so its tab counts do not move.
+
+**4. Branch names.** The docs named the 20 Oct working branch. `git merge-base --is-ancestor` shows that its last commit (7bae0d8, 23 Oct) is on `main` and on `mvp`, and the local reflog shows `main` reached it by a fast-forward on 29 Oct. CONTEXT.md, HANDOVER.md, this log and the 20 Oct smoke-test README now say "the 20 Oct development branch, merged into `main` on 29 Oct". The working rule now reads: work on `mvp`; changes reach `main` when the author says so.
+
+**Tests.** pytest: 1,963 pass (1,926 before), with the API keys removed and no model call. `node tests/ui/smoke.cjs`: 535/535 (527 before): desk-light 155, desk-dark 155, phone-light 89, phone-dark 89, fresh-clone 47. New: the three «كيف يشتغل» hiding checks and an identity-tick approval in each desktop pass. Changed with the behaviour: the tab counts (21 / 6 / 53); the overview's outcome, 68/80, and its note; and the flagged-ticket steps, whose first ticket is now t2-0058 (see tests/ui/README.md). The `docs/demo/` screenshots were retaken with the fresh-clone pass (47/47); its tabs read 21 / 6 / 53.
 
 ## 7 Nov: Role-played test sessions with live model calls, and the fixes
 
@@ -54,7 +100,7 @@ Two pipeline fixes needed no flag: the code-request check (item 4 above) and the
 **Still open:**
 - **Questions for the institution:** an AML or frozen-account type (a session's frozen account was typed as an unknown charge); the safety advice a customer who lost a phone should get (none was written); masking before the text goes to the provider (SECURITY.md, section 11).
 - **Not built:** a model-based check for unclear sentences in drafts and notes (only a prompt line); a second team for a second request, in routing and in the decision record; duplicate detection; replies in English; new ticket types; a view for a team lead.
-- **Left from the fixes:** `summary_qualifiers` stays a flag, and about a third of summaries are over 20 words; 3 of 146 new drafts put words in «»; one draft carried a second, revised reply (caught by `stray_latin`); «مسجل عندنا» is not yet a `claims_done` phrase. The saved test2 run shows the new warnings on 7 ready tickets but keeps them in «جاهزة» (the author's decision). The desktop toast still sits at the bottom, no real phone keyboard was tried, and edge_cases was not re-run.
+- **Left from the fixes:** `summary_qualifiers` stays a flag, and about a third of summaries are over 20 words; 3 of 146 new drafts put words in «»; one draft carried a second, revised reply (caught by `stray_latin`); «مسجل عندنا» is not yet a `claims_done` phrase (added before the second round, entry above). The saved test2 run shows the new warnings on 6 ready tickets (this said 7) but keeps them in «جاهزة» (the author's decision; changed before the second round, entry above). The desktop toast still sits at the bottom, no real phone keyboard was tried, and edge_cases was not re-run.
 - **People:** these sessions were role-played. No support agent has used the inbox yet.
 
 **Spend.** The sessions: about $0.23, from the cost of each stage in the streams they saved, with a few uncaptured tickets estimated. The fixes: $1.40, from the run files' `cost_usd` (pipeline rules $0.06, prompt flags $0.80, their revision $0.24, the adoption's re-drafts $0.31). Reproducing the reports, the viewer fixes and the draft warnings made no paid call, and the judge ran on the free cli backend. In all, about $1.63.
@@ -83,7 +129,7 @@ On these sets, `fraud_secondary`, `secret_in_ticket`, `device_lost`, `other_phon
 | 1 | 4.375 → 4.55 | 2 → 1 | 34 → 35 | 38 → 39 | 8 / 1 |
 | 2 (salt g2) | 4.325 → 4.525 | 1 → 1 | 34 → 35 | 39 → 39 | 11 / 3 |
 
-**The saved run the viewer serves** (`docs/runs/test2/final.json`, not regenerated). The server recomputes its draft-check spans with today's rules. 7 drafted tickets and t2-0017 now show a new warning: amount_not_in_ticket on t2-0004, t2-0013 and t2-0058; ask_missing on t2-0056; dialect_words on t2-0019 and t2-0069; ask_missing and dialect_words on t2-0017. Their outcome and flags stay as saved, so the tab counts do not move (15 / 6 / 59, as since the 5 Nov account_risk recompute). The text rules are not recomputed, so t2-0030 and t2-0041 do not show the quiet instructions_in_ticket note.
+**The saved run the viewer serves** (`docs/runs/test2/final.json`, not regenerated). The server recomputes its draft-check spans with today's rules. 6 drafted tickets (this said 7) and t2-0017 now show a new warning: amount_not_in_ticket on t2-0004, t2-0013 and t2-0058; ask_missing on t2-0056; dialect_words on t2-0019 and t2-0069; ask_missing and dialect_words on t2-0017. Their outcome and flags stay as saved, so the tab counts do not move (15 / 6 / 59, as since the 5 Nov account_risk recompute). The text rules are not recomputed, so t2-0030 and t2-0041 do not show the quiet instructions_in_ticket note. (Both changed before the second round: entry above, 21 / 6 / 53.)
 
 ## 7 Nov: The code-request check and an unrelated «ما» (no model calls)
 

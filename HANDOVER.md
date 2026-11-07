@@ -1,6 +1,6 @@
 # Handover: testing and improving the support pipeline
 
-**Period:** 20–23 Oct 2026 · **Branch:** `claude/eager-tesla-x1dcxj` (nothing on `main`) · **Commits:** all after `cb5b89c` · **Tests:** 25 → 51, all passing
+**Period:** 20–23 Oct 2026 · **Branch:** the 20 Oct development branch (nothing on `main` then; merged into `main` on 29 Oct) · **Commits:** all after `cb5b89c` · **Tests:** 25 → 51, all passing
 
 > **New here? Start with [`CONTEXT.md`](CONTEXT.md)**: goals, deadlines, rules, decisions and where the project stands now. This file is the detailed experiment report from 20–23 Oct.
 
@@ -319,7 +319,7 @@ Built after the experiments, as you asked. These help *us* watch the pipeline an
 
 ## 9. What changed in the repo
 
-All on `claude/eager-tesla-x1dcxj`. With no flags set, the pipeline behaves exactly as before; the classifier and drafter prompts are byte-identical, and this was checked.
+All on the 20 Oct development branch, merged into `main` on 29 Oct. With no flags set, the pipeline behaves exactly as before; the classifier and drafter prompts are byte-identical, and this was checked.
 
 | Area | Files | Change |
 |---|---|---|
