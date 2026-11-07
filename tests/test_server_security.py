@@ -1253,3 +1253,207 @@ def test_the_new_reason_chips_are_codes_never_text(srv):
     for c in ("typo", "wrong_gender", "wrong_language"):
         assert c in meta["reason_codes"] and meta["reason_codes_ar"][c]
     assert "fraud_team_changed" in meta["ack_kinds"]
+
+
+# --- review before shipping (7 Nov): the decision checks agree with the page and the docs ---
+
+BILL_TICKET = "دفعت فاتورة الكهرباء من التطبيق وانخصمت الفلوس بس الفاتورة بعدها ما مدفوعة"
+
+
+def test_every_warning_that_reads_the_prompt_is_a_prompt_check():
+    """SERVER-1: asks_given reads the drafter's <ticket> but was missing from PROMPT_CHECKS, so the tick the page sent for
+    it on an edited reply was refused (400). PROMPT_KINDS is kept next to KINDS; this reads findings() to keep it whole."""
+    import inspect
+
+    from pipeline import draft_check
+    src = inspect.getsource(draft_check.findings)
+    reads = set(re.findall(r'"(\w+)":\s*_\w+\([^)]*allowed_text', src))
+    assert reads == set(draft_check.PROMPT_KINDS) and server.PROMPT_CHECKS == draft_check.PROMPT_KINDS
+    assert "asks_given" in reads
+
+
+def test_an_edit_that_brings_asks_given_is_approved_with_the_page_s_ticks(srv, live):
+    """SERVER-1, the page's own flow: a live ticket that names the bill, /api/check with the drafter's prompt (what
+    composer.js sends as allowed_text), the ticks the page builds from its findings, then the edited approval."""
+    from pipeline import draft as drf
+    from pipeline.schemas import Extraction
+    ex = Extraction(category="bills", subcategory="bill_not_reflected", confidence=0.9)
+    prompt = drf.user_prompt(BILL_TICKET, ex, "bills")
+    n = live(text=BILL_TICKET, flags=[], outcome="drafted", extraction={"subcategory": "bill_not_reflected"})
+    edited = DRAFT + " ممكن تكتب لنا نوع الفاتورة؟"
+    status, _, raw = call(srv, "POST", "/api/check", {"draft": edited, "allowed_text": prompt, "subcategory": "bill_not_reflected"})
+    kinds = [f["kind"] for f in json.loads(raw)["findings"]] if status == 200 else []
+    assert status == 200 and "asks_given" in kinds
+    acks = [k for k in kinds if k in server.ACK_KINDS]
+    body = _decision(ticket_id=n, action="edited", final_text=edited, reason_codes=[], corrected={}, flags=[],
+                     warnings_acknowledged=acks)
+    assert call(srv, "POST", "/api/decision", body)[0] == 200
+    assert "asks_given" in server.read_decisions("live")[-1]["warnings_acknowledged"]
+
+
+PROMISE_CHECK = [{"kind": "promise", "start": 0, "end": 3, "text": "هلا"}]
+
+
+def test_an_unedited_approval_must_tick_the_draft_warnings_it_was_served_with(srv, tmp_path, live):
+    """SERVER-2: required_acks skipped every draft:<kind>, so a hand-made or stale approval of a draft that promises an
+    outcome got 200 with no tick, though SECURITY.md says every point served must be ticked. An approval of the reply as
+    served now needs each warning the page lists (a draft:<kind> flag among the draft's shown findings); an edited reply's
+    warnings stay the page's to ask for."""
+    def ticket():
+        return live(flags=["draft:promise"], outcome="flagged", draft_checks=PROMISE_CHECK)
+    body = _decision(action="approved", final_text=DRAFT, reason_codes=[], corrected={}, flags=["draft:promise"])
+    status, _, raw = call(srv, "POST", "/api/decision", {**body, "ticket_id": ticket(), "warnings_acknowledged": []})
+    assert status == 409 and json.loads(raw)["conflict"] == "unticked" and "promise" in json.loads(raw)["error"]
+    assert not (tmp_path / "decisions.jsonl").exists()
+    assert call(srv, "POST", "/api/decision", {**body, "ticket_id": ticket(), "warnings_acknowledged": ["promise"]})[0] == 200
+    # an edited reply: the server can't run the prompt's checks on it, so the page asks for its ticks
+    edited = {**body, "action": "edited", "final_text": FINAL, "warnings_acknowledged": []}
+    assert call(srv, "POST", "/api/decision", {**edited, "ticket_id": ticket()})[0] == 200
+    # a flag whose finding the page does not show (an older run's) is not asked for: the page could not tick it
+    old = live(flags=["draft:unknown_number"], outcome="flagged", draft_checks=[])
+    assert call(srv, "POST", "/api/decision", {**body, "ticket_id": old, "flags": ["draft:unknown_number"],
+                                               "warnings_acknowledged": []})[0] == 200
+
+
+def test_ask_missing_is_met_when_the_agent_marks_the_missing_field_not_needed(srv, live):
+    """The page drops the ask_missing point once every field it names is marked «ما يحتاج بهالتذكرة» (inbox.js
+    confirmTargets): the server takes that mark for it, as for the missing field itself."""
+    ask = [{"kind": "ask_missing", "start": 10, "end": 10, "text": "", "fields": ["reference"]}]
+    served = ["missing:reference", "draft:ask_missing"]
+    body = _decision(action="approved", final_text=DRAFT, reason_codes=[], corrected={}, flags=served)
+    n = live(flags=served, outcome="flagged", draft_checks=ask)
+    status, _, raw = call(srv, "POST", "/api/decision", {**body, "ticket_id": n, "warnings_acknowledged": ["missing:reference"]})
+    assert status == 409 and "ask_missing" in json.loads(raw)["error"]
+    for acked in (["missing:reference", "ask_missing"], ["missing:reference:not_needed"]):
+        n = live(flags=served, outcome="flagged", draft_checks=ask)
+        assert call(srv, "POST", "/api/decision", {**body, "ticket_id": n, "warnings_acknowledged": acked})[0] == 200
+
+
+def test_every_saved_ticket_approves_with_the_ticks_the_page_sends(srv, tmp_path):
+    """SERVER-2 must not refuse what the page sends: on the final run as served, each drafted or flagged ticket approved
+    with the page's ticks (inbox.js confirmTargets: its points, the identity tick, the draft's warnings as listed) is
+    logged, and with none, every ticket that has a point is refused."""
+    from pipeline import draft_check
+    run = server.with_current_gold(server.run_file("saved/test2/final"))
+    approved = refused = 0
+    for row in run["tickets"]:
+        r = row["result"]
+        if r["outcome"] not in ("drafted", "flagged") or not isinstance(r.get("draft_ar"), str):
+            continue
+        tid = row["ticket"]["id"]
+        served = server.served_ticket("saved/test2/final", tid)
+        findings = server._shown_findings(row)
+        lost = any(f.get("kind") == "ask_missing" and "reference_lost" in (f.get("fields") or []) for f in findings)
+        acks = ["account_risk"] if server.identity_applies(served, {}) else []
+        for f in r["flags"]:
+            if f.startswith("draft:") or f in server.QUIET_FLAGS or f == "account_risk" or f not in server.ACK_KINDS:
+                continue
+            acks.append(f"{f}:not_needed" if f == "missing:reference" and lost else f)
+        if served["secondary_subcategory"]:
+            acks.append("second_request")
+        acks += [f["kind"] for f in findings if f["kind"] in server.ACK_KINDS and f["kind"] not in draft_check.STYLE_KINDS]
+        acks = list(dict.fromkeys(acks))
+        body = {"run": "saved/test2/final", "ticket_id": tid, "action": "approved", "pipeline_outcome": r["outcome"],
+                "seconds": 3, "final_text": r["draft_ar"], "draft_text": r["draft_ar"]}
+        if acks:
+            status, _, raw = call(srv, "POST", "/api/decision", {**body, "warnings_acknowledged": []})
+            assert status == 409, (tid, raw)
+            refused += 1
+        status, _, raw = call(srv, "POST", "/api/decision", {**body, "warnings_acknowledged": acks})
+        assert status == 200, (tid, acks, raw)
+        approved += 1
+    assert approved == 74 and refused == 20
+
+
+def test_the_identity_and_fraud_team_ticks_are_taken_only_where_they_applied(srv, live):
+    """SERVER-3: account_risk and fraud_team_changed were accepted on any ticket, so the log (and the page's decided view,
+    «تأكدت من هوية الزبون قبل الاعتماد») could record an identity check or a fraud-team change that never applied."""
+    body = _decision(action="approved", final_text=DRAFT, reason_codes=[], corrected={}, flags=[])
+    for bad in (["account_risk"], ["fraud_team_changed"], ["account_risk", "fraud_team_changed"]):
+        status, _, raw = call(srv, "POST", "/api/decision", {**body, "ticket_id": live(flags=[]), "warnings_acknowledged": bad})
+        assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged", bad
+    # a forward of an escalation that is not fraud, and a take-over: neither may claim them
+    esc = {"flags": ["low_confidence"], "outcome": "escalated", "draft_ar": None, "team": "transfers"}
+    fwd = _decision(action="forwarded", pipeline_outcome="escalated", flags=["low_confidence"], draft_text=None,
+                    final_text=None, reason_codes=[], corrected={"team": "tech"})
+    for acked, action in ((["fraud_team_changed"], "forwarded"), (["account_risk"], "forwarded"), (["fraud_team_changed"], "took_over")):
+        status, _, raw = call(srv, "POST", "/api/decision", {**fwd, "ticket_id": live(**esc), "action": action,
+                                                              "warnings_acknowledged": acked})
+        assert status == 400 and json.loads(raw)["field"] == "warnings_acknowledged", (acked, action)
+    # where they apply: a correction to a blocked account, a served SIM change, a fraud forward to another team
+    n = live(flags=[])
+    corr = {**body, "ticket_id": n, "corrected": {"subcategory": "blocked_account"}}
+    assert call(srv, "POST", "/api/decision", {**corr, "warnings_acknowledged": ["account_risk", "draft_for_other_type"]})[0] == 200
+    sim = live(flags=["account_risk"], outcome="flagged", extraction={"subcategory": "sim_change"})
+    assert call(srv, "POST", "/api/decision", {**body, "ticket_id": sim, "warnings_acknowledged": ["account_risk"]})[0] == 200
+    fraud = live(flags=["fraud"], outcome="escalated", draft_ar=None, team="fraud", priority="P1",
+                 extraction={"subcategory": "unauthorized_charge"})
+    assert call(srv, "POST", "/api/decision", {**fwd, "ticket_id": fraud, "flags": ["fraud"],
+                                               "warnings_acknowledged": ["fraud_team_changed"]})[0] == 200
+
+
+def test_a_type_outside_the_taxonomy_never_reaches_the_log(srv, monkeypatch):
+    """SERVER-4: served_facts copied the model's subcategory unchecked, so an answer outside the taxonomy (escalated as
+    invalid_category) was logged verbatim, at any length, card numbers included."""
+    from pipeline import run
+    odd = "card 4111111111111111 pin 1234 " + "A" * 3000
+    monkeypatch.setattr(run, "call", lambda role, system, user, attempt=0:
+                        json.dumps({"category": "transfers", "subcategory": odd, "confidence": 0.9}))
+    monkeypatch.setattr(server, "process", run.process)
+    status, _, raw = call(srv, "POST", "/api/stream", {"text": "حولت فلوس وما وصلت"})
+    events, ended = sse(raw)
+    assert status == 200 and ended
+    result = next(e["data"] for e in events if e.get("stage") == "result")
+    assert "invalid_category" in result["flags"]
+    n = events[0]["live_id"]
+    body = _decision(ticket_id=n, action="took_over", pipeline_outcome="escalated", flags=result["flags"], draft_text=None,
+                     final_text=None, reason_codes=[], corrected={})
+    assert call(srv, "POST", "/api/decision", body)[0] == 200
+    line = server.decisions_file().read_text(encoding="utf-8")
+    assert server.read_decisions("live")[-1]["served"]["subcategory"] is None
+    assert "4111" not in line and "AAAA" not in line
+    served = server.served_facts({"outcome": "escalated", "team": "x" * 50, "priority": "P9", "extraction": {"subcategory": 7}})
+    assert served["subcategory"] is None and served["team"] is None and served["priority"] is None
+
+
+@pytest.mark.parametrize("final", ["", "   \n "])
+def test_a_blank_reply_is_never_approved(srv, live, final):
+    """SERVER-5: an edit to an empty or blank reply got 200 and logged an approval; the page refuses it («المسودة فاضية»)."""
+    body = _decision(ticket_id=live(), action="edited", final_text=final, reason_codes=[], corrected={})
+    status, _, raw = call(srv, "POST", "/api/decision", body)
+    assert status == 400 and json.loads(raw)["field"] == "final_text"
+
+
+def test_only_an_escalation_is_forwarded(srv, live):
+    """SERVER-6: the API forwarded a ready ticket, which the page never offers (state.js escalatesNow). A live run the page
+    shows cut short (its stream broke after the server had a drafted result) is still forwarded."""
+    fwd = _decision(action="forwarded", pipeline_outcome="drafted", flags=[], draft_text=None, final_text=None,
+                    reason_codes=[], corrected={"team": "tech"})
+    status, _, raw = call(srv, "POST", "/api/decision", {**fwd, "ticket_id": live(flags=[])})
+    assert status == 409 and json.loads(raw)["conflict"] == "not_escalated"
+    assert call(srv, "POST", "/api/decision", {**fwd, "ticket_id": live(flags=[]), "pipeline_outcome": "escalated",
+                                               "flags": ["connection_lost"]})[0] == 200
+    to_fraud = {**fwd, "ticket_id": live(flags=[]), "corrected": {"subcategory": "unauthorized_charge", "team": "fraud"}}
+    assert call(srv, "POST", "/api/decision", to_fraud)[0] == 200
+    esc = live(flags=["low_confidence"], outcome="escalated", draft_ar=None)
+    assert call(srv, "POST", "/api/decision", {**fwd, "ticket_id": esc, "pipeline_outcome": "escalated"})[0] == 200
+
+
+@pytest.mark.parametrize("field", ["final_text", "draft_text"])
+def test_a_lone_surrogate_in_a_decision_is_refused_400(srv, live, field):
+    """SERVER-7: "\\ud83d" (valid JSON) in a reply raised UnicodeEncodeError in _sha256: a 500 with a traceback."""
+    body = _decision(ticket_id=live(), **{field: "هلا \ud83d بيك"})
+    raw = json.dumps(body).encode("utf-8")
+    assert "\\ud83d" in raw.decode("ascii", "replace")
+    status, _, out = call(srv, "POST", "/api/decision", raw=raw, headers={"Content-Type": "application/json"})
+    assert status == 400 and json.loads(out)["field"] == field
+
+
+@pytest.mark.parametrize("text", ["ㅤㅤㅤ", "⠀⠀", "ᅟ", "͏͏", "ﾠﾠ", "ᅠ ㅤ"])
+def test_a_ticket_of_blank_looking_characters_is_empty(srv, text, monkeypatch):
+    """SERVER-8: Hangul fillers, the empty Braille cell and combining grapheme joiners survive clean, so a ticket of only
+    these started a model call."""
+    monkeypatch.setattr(server, "process", lambda *a, **k: (_ for _ in ()).throw(AssertionError("processed")))
+    status, _, raw = call(srv, "POST", "/api/stream", {"text": text})
+    assert status == 400 and json.loads(raw)["error"] == server.ERR_AR["empty"]
+    assert not server.blank_text("ㅤ ok") and not server.blank_text("١")

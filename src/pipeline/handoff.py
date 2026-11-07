@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 
 from .config import taxonomy, thresholds
-from .draft import FIELD_AR, _have, ask_for, own_words
+from .draft import FIELD_AR, _have, ask_for, own_words_for
 from .draft_check import amount_written
 from .requirements import missing_required
 from .schemas import Extraction
@@ -70,7 +70,7 @@ def secret_note(kinds: list[str] | None) -> str:
 
 
 # complaint_reasons: the note says which reason complaint_risk fired for.
-COMPLAINT_NOTE_AR = {"threat": "الزبون يهدد بشكوى علينا أو للجهات الرقابية", "repeat": "الزبون راسلنا قبل وما وصله رد"}
+COMPLAINT_NOTE_AR = {"threat": "الزبون يهدد بشكوى علينا أو للجهات الرقابية", "repeat": "الزبون راسلنا قبل"}
 
 
 def complaint_note(reasons: list[str] | None) -> str:
@@ -131,7 +131,7 @@ def _amount(ex: Extraction, text: str | None) -> str | None:
         return None
     if not text or amount_written(text, n, cur):
         return f"المبلغ {n:,} {unit}"
-    words = own_words(text)
+    words = own_words_for(text, n, cur)
     return (f"المبلغ «{words}» (قراه النموذج {n:,} {unit})" if words
             else f"المبلغ {n:,} {unit} (قراه النموذج، والزبون ما كتبه بالأرقام)")
 

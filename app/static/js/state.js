@@ -38,6 +38,11 @@ export const uid = (item) => `${item.run}\u0000${item.key}`;
 // --- one ticket's data ---
 
 /** The last finished event of a stage (not "running"). */
+/** Where the hidden numbers of a ticket are: its result (secret_spans, secret_kinds), or, before a live run has one or
+ *  when it was cut short, its clean event (the rules find them before any model call). */
+export function secretsOf(item) {
+  return item?.result?.secret_spans ? item.result : ev(item, "clean")?.data?.secret_spans ? ev(item, "clean").data : item?.result || null;
+}
 export function ev(item, stage) {
   const list = item.events || [];
   for (let i = list.length - 1; i >= 0; i--) if (list[i].stage === stage && list[i].status !== "running") return list[i];

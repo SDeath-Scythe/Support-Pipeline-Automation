@@ -276,6 +276,7 @@ def _model_step(role: str, system: str, user: str,
     before = ex.secondary_subcategory
     ex = _clean_secondary(ex)
     cleared = before if before and ex.secondary_subcategory is None else None
+    ex, unknown = _known_secondary(ex)
     return ex, {
         "role": role,
         "model": model_for(role),
@@ -286,7 +287,20 @@ def _model_step(role: str, system: str, user: str,
         "extraction": ex.model_dump(),
         "usage": usage,
         **({"cleared_secondary": cleared} if cleared else {}),
+        **({"unknown_secondary": unknown} if unknown else {}),
     }
+
+
+def _known_secondary(ex: Extraction) -> tuple[Extraction, str | None]:
+    """second_request_unknown (review before shipping, 7 Nov, adopted): a second type the model made up («general_name_change_
+    question», a name change the taxonomy has no type for) was dropped everywhere, so a draft that promised to follow
+    it up was ready for one key with nobody routed to it. It is a second request all the same: read as «unclear», and
+    the made-up key is returned for the record. An invented main type is escalated as invalid_category (gate.py)."""
+    sec = ex.secondary_subcategory
+    if not (isinstance(sec, str) and sec.strip()
+            and sec not in taxonomy().subcategories and sec != ex.subcategory):
+        return ex, None
+    return ex.model_copy(update={"secondary_subcategory": "unclear"}), sec[:64]
 
 
 def process(raw_text: str, emit: Emit = lambda e: None,
@@ -384,11 +398,15 @@ def process(raw_text: str, emit: Emit = lambda e: None,
         # 1. Clean (rules)
         text = clean(raw_text)
         ctx["text"] = text
-        send("clean", "done", {"text": text, "changes": _clean_changes(raw_text)})
-        ctx["text_flags"] = text_flags(raw_text, text)
         ctx["secret_spans"] = ticket_rules.secret_spans(raw_text)
         ctx["secret_digits"] = ticket_rules.secret_digits(raw_text)
         ctx["secret_kinds"] = ticket_rules.secret_kinds(raw_text)
+        # Where a card number or a code is, known before any model call: the page hides it from this event on, so a
+        # live ticket shows it neither while it runs nor once it is cut short (review before shipping, 7 Nov).
+        send("clean", "done", {"text": text, "changes": _clean_changes(raw_text),
+                               **({"secret_spans": ctx["secret_spans"], "secret_kinds": ctx["secret_kinds"]}
+                                  if ctx["secret_spans"] else {})})
+        ctx["text_flags"] = text_flags(raw_text, text)
         ctx["complaint_reasons"] = ticket_rules.complaint_reasons(raw_text)
 
         # A very long ticket is not sent to a model: it costs more and is the usual shape of an

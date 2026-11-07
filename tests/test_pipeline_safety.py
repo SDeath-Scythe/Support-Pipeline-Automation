@@ -1171,12 +1171,59 @@ def test_the_secret_advice_names_what_the_customer_wrote(fake, monkeypatch):
 
 def test_the_note_s_time_has_no_english_gloss_and_an_amount_in_words_is_the_customer_s():
     """R33: a classifier date «البارحة بالسوق (card lost); withdrawal reported today morning» was copied into the note,
-    and «ورقتين» was stated as «المبلغ 200 دولار»."""
+    and «ورقتين» was stated as «المبلغ 200 دولار». Since drafter_inputs_r3 (review before shipping) «ورقتين» reads as the
+    200 USD the model gave, so the note quotes the customer's word first."""
     from pipeline import handoff
     from pipeline.schemas import Extraction
     ex = Extraction(category="fraud_security", subcategory="unauthorized_charge", confidence=0.9, amount_usd=200,
                     date="البارحة بالسوق (card lost); withdrawal reported today morning")
     facts = handoff._facts(ex, "ابن اختي اخذ تلفوني ودز ورقتين لواحد ما اعرفه البارحة بالسوق")
-    assert facts == ["المبلغ 200 دولار (قراه النموذج، والزبون ما كتبه بالأرقام)", "الوقت: البارحة بالسوق"]
+    assert facts == ["المبلغ «ورقتين» (قراه النموذج 200 دولار)", "الوقت: البارحة بالسوق"]
+    other = ex.model_copy(update={"amount_usd": 300})   # words that don't read as the amount: not quoted
+    assert handoff._facts(other, "دز ورقتين لواحد")[0] == "المبلغ 300 دولار (قراه النموذج، والزبون ما كتبه بالأرقام)"
     assert handoff._facts(ex.model_copy(update={"date": "yesterday"}), "حولت 200 دولار") == ["المبلغ 200 دولار"]
     assert handoff.arabic_date("قبل يومين") == "قبل يومين"
+
+
+# --- the review before shipping (7 Nov) ---
+
+def test_a_second_type_the_model_made_up_is_a_second_request(fake):
+    """LIVE-1 (second_request_unknown, adopted): Haiku answered «general_name_change_question» for a second request; it was
+    dropped everywhere, so a draft promising to follow it up was ready for one key. It is read as «unclear» now: the
+    ticket is flagged second_request and the drafter is told of it; the made-up key is kept on the classify event."""
+    fake.replies["classifier"] = json.dumps({"category": "general", "subcategory": "app_bug", "confidence": 0.95,
+                                             "secondary_subcategory": "general_name_change_question"})
+    events = []
+    result = fake.run.process("التطبيق يفتح شاشة بيضاء، وشغلة ثانية اريد اغير اسمي بالحساب", events.append)
+    assert result["outcome"] == "flagged" and "second_request" in result["flags"]
+    assert result["extraction"]["secondary_subcategory"] == "unclear"
+    classify = next(e for e in events if e["stage"] == "classify" and e["status"] == "done")
+    assert classify["data"]["unknown_secondary"] == "general_name_change_question"
+    draft = next(e for e in events if e["stage"] == "draft" and e["status"] == "done")
+    assert "Second question in the ticket:" in draft["data"]["user_prompt"]
+    # a second type the taxonomy has, or none, is as before
+    fake.replies["classifier"] = json.dumps({"category": "general", "subcategory": "app_bug", "confidence": 0.95})
+    assert fake.run.process("التطبيق يفتح شاشة بيضاء")["flags"] == []
+
+
+def test_the_clean_event_says_where_a_typed_secret_is(fake):
+    """LIVE-2: secret_spans came with the result only, so a live ticket showed the code while it ran and for good once
+    its stream broke. The clean event carries them (rules only, before any model call); a ticket with none has none."""
+    events = []
+    text = "الرمز اللي وصلني 739205 وبطاقتي رقمها 5211 9034 6612 0087 شنو اسوي؟"
+    result = fake.run.process(text, events.append)
+    clean_ev = next(e for e in events if e["stage"] == "clean")
+    assert clean_ev["data"]["secret_spans"] == result["secret_spans"] and clean_ev["data"]["secret_kinds"] == ["otp", "card"]
+    assert [text[a:b] for a, b in clean_ev["data"]["secret_spans"]] == ["739205", "5211 9034 6612 0087"]
+    events.clear()
+    fake.run.process("التطبيق يفتح شاشة بيضاء", events.append)
+    assert "secret_spans" not in next(e for e in events if e["stage"] == "clean")["data"]
+
+
+def test_the_drafter_is_told_what_to_advise_on_a_typed_secret(fake):
+    """LIVE-3 (security_line, adopted): the tick asked the agent to confirm advice the drafter was never asked to write."""
+    events = []
+    fake.run.process("التطبيق يفتح شاشة بيضاء والرقم السري مالتي 4829", events.append)
+    prompt = next(e for e in events if e["stage"] == "draft" and e["status"] == "done")["data"]["user_prompt"]
+    assert "Security: the customer wrote their PIN in the ticket. Never repeat it. Advise them to change their PIN." in prompt
+    assert "4829" not in prompt.split("</ticket>")[1]

@@ -26,6 +26,10 @@ KINDS = ("stray_latin", "promise", "asks_secret", "unknown_number", "hold_reason
 # like every kind, but never flag a drafted ticket and are never a point to tick (run.py, the server and the page
 # read this; style_notes, after the second round of role-played test sessions).
 STYLE_KINDS = ("dialect_words", "persona_slip")
+# The kinds whose rule reads `allowed_text` (the drafter's prompt: its <ticket>, its ask lines, the numbers it was
+# given). Run with no prompt they can't find what they find with one, so the server, which keeps no prompt for a live
+# run, takes their tick on an edited reply as the page sends it. A test keeps this list in step with findings().
+PROMPT_KINDS = ("stray_latin", "unknown_number", "ask_missing", "amount_not_in_ticket", "asks_given")
 # Warnings under test, each behind the flag of the same name in fixes.py: off, they never appear. None now.
 FLAG_KINDS: tuple[str, ...] = ()
 # A kind whose flag has another name.
@@ -116,6 +120,10 @@ _SECRET_EXTRA = re.compile(
     r"|(?:(?<=بيها\s)|(?<=فيها\s)|(?<=بيها\sال)|(?<=فيها\sال))[أا]رقام(?!\w)"
     r"|\s*(?:[اأ]و\s*تي\s*بي|سي\s*في\s*في)(?!\w)|(?<=ال)\s*بي?ن(?=\s+(?:مال|حق)\s)"
     r"|\s*(?i:(?:verification\s+|otp\s+|sms\s+)?code|verification\s+number)(?![A-Za-z]))")
+# draft_checks_r3 (review before shipping, 7 Nov, adopted): «تاريخ انتهاء البطاقة والأرقام اللي وراها»: the digits behind "it", with the card named just before.
+_BEHIND_IT = re.compile(r"(?<!\w)(?P<pfx>[وف]?(?:ال)?)[أا]رقام\s+(?:(?:اللي|الي)\s+|(?:ال)?(?:موجود|مطبوع|مكتوب)[ةه]\s+)?"
+                           r"(?:وراها|خلفها|بظهرها|ظهرها|على\s+ظهرها)(?!\w)")
+_CARD_BEFORE = re.compile(r"(?:بطاق|كارت)\w*")
 # «آخر ٤ أرقام من البطاقة» is the safe way to find a card: «رقم البطاقة» after «آخر» is not the card.
 _LAST = {"آخر", "اخر", "أخر"}
 # «الكود اللي على الوصل», «الرمز المطبوع على الإيصال»: a reference printed on a receipt, not a secret.
@@ -203,6 +211,7 @@ _ON_SCREEN = re.compile(r"\s+(?:اللي|الي)\s+(?:ي|ت)?(?:طلع|ظهر)")
 _ARRIVES = re.compile(r"\s+(?:راح\s+|رح\s+)?(?:ي|ت)(?:وصل|جي)")
 # 5. "help us with" or "reply to us with" the secret: «ممكن تساعدنا بالرمز؟», «رد علينا بالرمز».
 _WITH = {"تساعدنا", "ساعدنا", "تساعدونا", "ساعدونا"}
+_ANSWER_US = {"جاوبنا", "جاوبونا", "تجاوبنا", "تجاوبونا", "جاوبيني", "جاوبني", "تجاوبني"}   # «جاوبنا بالرمز»
 # 6. "unless you sent us", "if/why you haven't sent us": «ما نگدر نتحقق منك إلا إذا دزيتلنا الرمز», «ليش ما
 #    دزيتلنا الرمز لحد هسه؟».
 #    With no "to us" on the verb («إلا إذا ارسلت الرمز») only with "we can't go on" or a threat in the sentence.
@@ -227,8 +236,11 @@ _PURPOSE = {"حتى", "عشان", "علمود", "لكي", "كي", "لأن", "ل�
             "إنك", "انك", "إنج", "انج", "إنكم", "انكم"}
 # The secret first, then the request: «الكود اللي اجاك دزه النا», «إذا وصلك الرمز، دزه إلنا», «دزلي ياه»,
 # «الرمز اللي وصلك نحتاجه», «الرمز لازم يندز إلنا».
+# The secret first, then "send it" (draft_checks_r3 adds «انسخ الكود والصقه بالرد»).
 _SEND_IT = re.compile(r"(?:ت?دز|(?:ا|أ|إ|ت)رسل|(?:ا|أ|إ|ت)بع[ثت]|(?:ا|ت)?كتب|(?:ا|ت)?نطي(?:ن|ني|نا)?|ت?شارك(?:نا)?"
-                      r"|(?:ب|ل)?[اإ]رسال|نحتاج|محتاجين)(?:ه|ها|يا?ه|ياها|اه|هن|هم)(?:لنا|النا|لي)?")
+                         r"|(?:ا|ت)?لصق|(?:ب|ل)?[اإ]رسال|نحتاج|محتاجين)(?:ه|ها|يا?ه|ياها|اه|هن|هم)(?:لنا|النا|لي)?")
+
+
 _SEND_TO = re.compile(r"(?:ت?دز|(?:ا|أ|إ|ت)رسل|(?:ا|أ|إ|ت)بع[ثت]|(?:ا|ت)?نطي|حط|ت?شارك)(?:لنا|لي|نا|ني)"
                       r"|[گقك]و?(?:لنا|لي)")
 _IT = {"ياه", "اياه", "إياه", "ياها", "إلنا", "النا", "لنا", "الجديد", "الجديدة", "الجديده"}
@@ -248,7 +260,8 @@ _TO_US = re.compile(r"\s+(?:(?:[إا]لى\s+(?:ال)?|لل|ل)(?:فريق|دعم
 # Or with no verb: «ممكن الرمز اللي وصلك؟», «الرمز اللي وصلك لو سمحت؟», «الرمز اللي وصلك شنو؟», «وصلك الرمز؟
 # شنو هو؟», «ما وصلنا منك الرمز لحد الآن».
 _TAIL = r"(?:\s+(?:اللي|الي)\s+\S+)?"
-_POLITE_ASK = re.compile(r"\s*(?:ممكن|رجاء[ًا]?|ياريت|يا\s+ريت|لو\s+سمحت)\s+(?:منك\s+)?$")
+# «ممكن الـ OTP؟», «ممكن الـ CVV؟» (folded to «ممكن ال OTP»; draft_checks_r3).
+_POLITE_ASK = re.compile(r"\s*(?:ممكن|رجاء[ًا]?|ياريت|يا\s+ريت|لو\s+سمحت)\s+(?:منك\s+)?(?:ال\s*)?$")
 _POLITE_TAIL = re.compile(_TAIL + r"\s*(?:لو\s+سمحت|رجاء[ًا]?|من\s+فضلك|مالتك|مالك)?\s*$")
 _PLEASE = re.compile(r"لو\s+سمحت|رجاء|من\s+فضلك")
 _WHAT_TAIL = re.compile(_TAIL + r"(?:\s+مالت?(?:ك|ج|كم))?\s+(?:هو\s+)?(?:شنو|شنهو|ايش|إيش|شني|شكد|شگد)"
@@ -257,6 +270,10 @@ _WHAT_NEXT = re.compile(r"(?:\s+\S+){0,2}?\s*[؟?،,]\s*(?:شنو|شنهو|اي�
 # «ما هو الرمز اللي يوصلك؟ هو رقم مؤقت ...»: the draft answers its own question (see _answered).
 _ANSWER = re.compile(r"\s*(?:هو|هي|هذا|هذه|هذي)\s+(?:ال)?(?:رقم|رمز|كود|عبار[ةه]|مجموع[ةه])")
 # "If we don't get it from you" asks too: «إذا ما وصلنا منك الرمز اليوم ...», «لم يصلنا منك الرمز حتى الآن».
+# draft_checks_r3 (adopted): the secret before «منك»: «ما وصلنا الرمز منك لحد الآن».
+_STILL_HEAD = re.compile(r"(?:^|\s)(?:ما|لم)\s+(?:وصلنا|استلمنا|جانا|اجانا|يصلنا)\s+$")
+_STILL_BEFORE = re.compile(r"(?<!\w)(?:لحد|لهسه|للحين|لحين|لسه|لسا)(?!\w)")   # «لحد الآن ما وصلنا منك الرمز»
+_STILL_TAIL = re.compile(r"(?:\s+(?:اللي|الي)\s+\S+)?\s+منك\s+(?:لحد|لهسه|للحين|لحين|لسه|بعد|حتى\s+(?:الآن|الان|هسه|اللحظ[ةه]))(?!\w)")
 _STILL_WAITING = (re.compile(r"(?:^|\s)(?P<cond>(?:[إا]ذا|لو)\s+ما\s+)?(?:لم\s+)?(?:وصلنا|استلمنا|جانا|اجانا|يصلنا)"
                              r"\s+منك\s+$"),
                   re.compile(r"\s+(?:لحد|لهسه|للحين|لحين|لسه|بعد|حتى\s+(?:الآن|الان|هسه|اللحظ[ةه]))(?!\w)"))
@@ -476,6 +493,20 @@ _HOLD = re.compile(
     r"|(?:تحت|قيد)\s+(?:ال)?مراقب[ةه]|(?:غس(?:ي)?ل|تبييض)\s+(?:ال)?[أاإ]موال|تمويل\s+(?:ال)?[إا]رهاب"
     r"|(?:مراجع[ةه]|تدقيق)\s+(?:ال)?[أا]مني[ةه]?|جه(?:[ةه]|ات)\s+(?:ال)?(?:رقابي|[أا]مني)[ةه]"
     r")|(?<![A-Za-z])AML(?![A-Za-z])", re.IGNORECASE)
+# draft_checks_r3 (review before shipping, 7 Nov, adopted): the regulator by name, a court, monitoring, «التحري», «نشك», and a
+# report «on» the account. Not «تحرير المبلغ» (a release) or «نشكرك».
+_HOLD_MORE = re.compile(
+    r"(?<!\w)[وف]?(?:بال|لل|عال|ال|ب|ل|ك)?(?:"
+    r"(?:تحت|قيد)\s+(?:ال)?رقاب[ةه]"
+    r"|تحري(?:ات)?(?!\w)"
+    r"|(?:بنك|مصرف)\s+(?:ال)?مركزي\s+(?:\S+\s+)?(?:طلب|يطلب|طالب|[اأ]مر|وجه)\w*"
+    r"|محكم[ةه]\s+(?:\S+\s+)?(?:طلب|تطلب|طالب|[اأ]مرت?|حكمت)\w*"
+    r"|(?:قرار|[اأ]مر)\s+(?:من\s+)?(?:ال)?(?:محكم[ةه]|قضائي|قضاء)"
+    r"|(?:موقوف|محجوز|مجمد|متجمد|مقفول|متوقف)\w*\s+(?:\S+\s+)?(?:بطلب|بامر|بأمر|بقرار)"
+    r"|حساب\w*\s+(?:\S+\s+)?مراقب(?!\w)"
+    r"|(?:عليه|عليها|بسبب|لوجود)\s+(?:\S+\s+)?بلاغ(?:ات)?(?!ك|ج|كم)(?!\w)"
+    r"|(?:وصلنا|وصلتنا|استلمنا)\s+بلاغ(?:ات)?\s+(?:بخصوص|عن|على|ضد)\s+(?:ال)?حساب"
+    r")|(?<!\w)[وف]?نشك(?:\s+(?:ب|[إا]ن|في)|ب)", re.IGNORECASE)
 # Safety advice: a suspicious link or call («لا تفتح روابط مشبوهة»), or the customer's own doubt
 # («إذا عندك اشتباه بأي رسالة», «إذا شفت أي نشاط مشبوه بلغنا»), is not about the customer.
 _SUSPICION = re.compile(r"[اإ]شتباه|مشبوه|مريب|شكوك|مشكوك|شبه")
@@ -526,7 +557,7 @@ def _bare(token: str) -> str:
     ("but")."""
     token = token.strip("\"'«»()[]:،,")
     own = token.startswith(("وصل", "وصول", "فقط", "في", "وقت", "وكت", "ودي", "ودو", "وغير", "فغير", "فايد", "فائد",
-                            "فعل", "فور", "فرص"))
+                            "فعل", "فور", "فرص", "فلوس"))   # «فلوسك» is not «ف + لوسك» (draft_checks_r3)
     return token[1:] if token[:1] in "وف" and len(token) > 2 and not own else token
 
 
@@ -563,8 +594,8 @@ def _there_is_no(words: list[str], n: int, fine: bool = False) -> bool:
 def _is_negation(words: list[str], k: int) -> bool:
     w, nxt, prev = words[k], words[k + 1] if k + 1 < len(words) else "", words[k - 1] if k else ""
     after = words[k + 2] if k + 2 < len(words) else ""
-    if w in {"لا", "ما"} and _OTHER_VERB.fullmatch(after if nxt in {"راح", "رح"} else nxt):
-        return False                                        # «ما راح نطول عليك»
+    if w in {"لا", "ما", "بلاش"} and _OTHER_VERB.fullmatch(after if nxt in {"راح", "رح"} else nxt):
+        return False                                        # «ما راح نطول عليك», «بلاش تنسى وتدزلنا الرمز»
     if w in _WITHOUT and nxt in _NO_TROUBLE:
         return False
     if w == "ما" and (prev in _MA_CONJ or (nxt in _COURTESY and not (nxt in {"عليك", "عليج", "عليكم"}
@@ -721,12 +752,18 @@ def _request_at(words: list[str], i: int, j: int, pfx: str, after: str, app: boo
     if m:                                                   # «إلا إذا دزيتلنا», «إذا ما دزيتلنا», «ليش ما دزيتلنا»
         before = words[max(0, i - 2):i]
         why = len(before) == 2 and before[0] in {"ليش", "ليه", "لويش"} and before[1] == "ما"
+        still = (before[-1:] == ["ما"] and bool(m.group("us") or to_us)
+                 and bool({"لحد", "لهسه", "للحين", "لحين", "لسه", "لسا"} & set(words[max(0, i - 4):i - 1])))
+        if still:
+            return True                                     # «لحد هسه ما دزيتلنا الرمز»
         return len(before) == 2 and ((before[0] in {"إلا", "الا", "بس"} and before[1] in _IF_NOT)
                                      or (before[0] in _IF_NOT and before[1] == "ما") or why) and (
             bool(m.group("us")) or to_us
             or ((cant in ("we", "it") or why) and where != "app" and (w != "كتبت" or where == "here")))
     if w in _WITH or (w == "علينا" and i and words[i - 1] in _REPLY):
         return not between and pfx.lstrip("وف").startswith("ب")
+    if (w in _ANSWER_US or (w == "علينا" and i and words[i - 1] in _ANSWER_US | {"جاوب", "جاوبي", "تجاوب"})):
+        return not between and pfx.lstrip("وف").startswith("ب")   # «جاوبنا بالرمز اللي وصلك», «جاوب علينا بالرمز»
     if w in _REPLY and all(x in _REPLY_TO for x in between):
         return pfx.lstrip("وف").startswith("ب")             # «رد على هاي الرسالة برمز التحقق»
     without = w in _WITHOUT or (w == "غير" and prev == "من")  # «ما نگدر نكمل من غير الرمز»
@@ -1000,6 +1037,9 @@ def _negated(words: list[str], i: int, j: int, cant: str = "", question: bool = 
         return not (cant in ("we", "it") or (to_us and cant != "free"))
     opener = all(x in _ADDRESS for x in words[:k])          # «عيوني ما تدزلنا الرمز؟»
     why = words[k - 1:k] in (["ليش"], ["ليه"], ["لويش"])
+    if (to_us and words[k] == "ما" and k == i - 1 and _PAST_YOU.fullmatch(w)
+            and {"لحد", "لهسه", "للحين", "لحين", "لسه", "لسا"} & set(words[max(0, k - 3):k])):
+        return False                                        # «لحد هسه ما دزيتلنا الرمز»: still not sent, so send it
     if (to_us or why) and words[k] == "ما" and k == i - 1 and (w.startswith("ت") or _PAST_YOU.fullmatch(w)) and (
             (question and opener) or why):
         return False                                        # «ليش ما ترسل الرمز؟», «ما تدزلنا الرمز؟»: please
@@ -1018,6 +1058,9 @@ def _secrets(text: str) -> list[tuple[int, int, str]]:
         if m.group("msg") and before[-1:] and (before[-1] in _SHOT or before[-1].startswith(("صور", "لقط"))):
             continue                                        # «صورة الرسالة اللي وصلتك»: see _HOLDS for one with the code
         if not _LAST & set(before):
+            found.append((m.start(), m.end(), m.group("pfx") or ""))
+    for m in _BEHIND_IT.finditer(text):
+        if _CARD_BEFORE.search(text, max(0, m.start() - 60), m.start()):
             found.append((m.start(), m.end(), m.group("pfx") or ""))
     return sorted(found)
 
@@ -1084,15 +1127,21 @@ def _asks_secret(norm: str, pos: list[int]) -> tuple[int, int] | None:
                  and (_POLITE_ASK.fullmatch(head) or (not head.strip() and _PLEASE.search(tail))))
                     or (not negated and _WHAT_TAIL.match(tail) and not _after_preposition(pfx)
                         and not _ON_SCREEN.match(tail) and not answered)
-                    or (waiting and (waiting.group("cond") or _STILL_WAITING[1].match(tail)))):
+                    or (waiting and (waiting.group("cond") or _STILL_WAITING[1].match(tail)))
+                    or (_STILL_HEAD.search(head) and _STILL_TAIL.match(tail))
+                    or (waiting and _STILL_BEFORE.search(head, 0, waiting.start()))):
                 return _raw(pos, base + lead, base + end)
             j = bisect_right(starts, start) - 1
             if j and words[j - 1] in {"ال", "بال", "لل"} and tokens[j - 1].end() < start:
                 j -= 1                                      # «نحتاج منك الـ OTP», folded to «ال OTP»
                 pfx = words[j] + pfx
             if (j == 1 and needs and words[0] in _EXCEPT | {"بس", "فقط"}
-                    and not any(_is_negation(words, k) for k in range(len(words)))):
+                    and not any(_is_negation(words, k) for k in range(len(words)))
+                    and not _denied_after(tail)):
                 return _raw(pos, base + tokens[0].start(), base + end)   # «ما نحتاج شي ثاني، بس الرمز»
+            if (j == 0 and needs and [_bare(x) for x in tail.split()[:1]] in (["بس"], ["فقط"])
+                    and not any(_is_negation(words, k) for k in range(len(words)))):
+                return _raw(pos, base + lead, base + end)            # «ما نحتاج صورة الهوية، الرمز بس»
             if j >= 2 and words[j - 1] == "من" and words[j - 2] in {"أرقام", "ارقام", "رقمين"}:
                 j -= 2                                      # «شنو أول ثلاث أرقام من الرمز»: part of the secret
                 while j and (words[j - 1] in _FIRST_DIGITS or words[j - 1].isdigit()):
@@ -1124,7 +1173,10 @@ def _asks_secret(norm: str, pos: list[int]) -> tuple[int, int] | None:
                             or _BUT_US.search(tail)):
                         return _raw(pos, base + tokens[i].start(), base + end)
                     break
-        needs = any(w.startswith(_NEED) for w in words)
+        # A clause that sends or refuses carries over too (draft_checks_r3): «لا تدزلنا صورة الهوية، بس الرمز», «مو لازم
+        # صورة الهوية، بس الرمز».
+        needs = any(w.startswith(_NEED) or w in {"لازم", "ضروري", "مطلوب"} or w in _TELL
+                    or (_SEND.match(w) and not _WE_DID.search(w)) for w in words)
     for start, end, _ in _secrets(norm):                    # «وصلك الرمز؟ شنو هو؟», «الرمز اللي وصلك، شنو هو؟»
         m = _WHAT_NEXT.match(norm, end)
         if m and not _answered(norm, m.end()):
@@ -1163,6 +1215,9 @@ def _asks_for_it(norm: str, pos: list[int]) -> tuple[int, int] | None:
         said = [_bare(w) for w in lead][-6:]                # the words before the secret
         if lead and said[-1] == "لا" and lead[-1][-1] not in "،,":
             continue                                        # «لا الرمز ولا الرقم السري نحتاجه منك»
+        if said and (_HIDE.fullmatch(said[-1]) or said[-2:] in (["لا", "تخلي"], ["لا", "تخليه"])
+                               or (said[-1] in {"تغطي", "تخفي", "تمسح"})):
+            continue                                        # «وغطي الرمز قبل ما تدزها»: hide it, then send the photo
         blocked = None                                      # the clause of a negated "send it"
         for k, w in enumerate(words):
             if parts[k] == blocked:
@@ -1206,7 +1261,8 @@ def _asks_for_it(norm: str, pos: list[int]) -> tuple[int, int] | None:
             if _reported(said + words[:k]):
                 break
             rest = _STOP.split(norm[tokens[k].end():tokens[k].end() + 200], maxsplit=1)[0]
-            if "كتب" in w and (_IN_APP.search(rest) or not (_HERE.search(rest) or w.endswith(("لنا", "النا", "لي")))):
+            if ("كتب" in w or "لصق" in w) and (
+                    _IN_APP.search(rest) or not (_HERE.search(rest) or w.endswith(("لنا", "النا", "لي")))):
                 break                                       # «الرمز صالح لخمس دقائق، فاكتبه بسرعة»: in the app
             return _raw(pos, start, tokens[k].end())
     return None
@@ -1380,7 +1436,8 @@ def _unknown_number(norm: str, pos: list[int], allowed_text: str) -> tuple[int, 
 
 
 def _hold_reason(norm: str, pos: list[int]) -> tuple[int, int] | None:
-    for m in _HOLD.finditer(norm):
+    found = sorted(list(_HOLD.finditer(norm)) + list(_HOLD_MORE.finditer(norm)), key=lambda m: m.start())
+    for m in found:
         clause = re.split(r"[.،,!?؟؛;\n]", norm[:m.start()])[-1]
         before = [_bare(w) for w in clause.split()]
         prev = re.sub(r"^(?:بال|لل|ال|ب|ل)", "", before[-1]) if before else ""
@@ -1405,20 +1462,32 @@ def _sensitive_number(norm: str, pos: list[int]) -> tuple[int, int] | None:
 # so «حولنا طلبك للقسم» and «رفعنا شكواك للقسم المختص» stay allowed, and so do «وصلتنا رسالتك» and «سجلنا ملاحظتك».
 # Each completion verb (a passive noun after «تم», or a past "we" verb) with the kinds of object it claims for.
 _DONE_KINDS = {
-    "money": "[اإ]رجاع|استرجاع|استرداد|[اإ]عاد[ةه]|تعويض|[اإ]ضاف[ةه]|[اأ]?رجع|[اأ]?ضف|عوض|استرجع|استرد|[اأ]عد|حول",
+    # a cancelled transfer is money too: «ألغينا الحوالة», «تم إلغاء الحوالة» (draft_checks_r3)
+    "money": "[اإ]رجاع|استرجاع|استرداد|[اإ]عاد[ةه]|تعويض|[اإ]ضاف[ةه]|[اأ]?رجع|[اأ]?ضف|عوض|استرجع|استرد|[اأ]عد|حول|[اإ]لغاء|[اأ]?لغي",
     "account": "فتح|فك|[اإ]لغاء|تفعيل|رفع|[اإ]يقاف|تحديث|تعديل|[اإ]عاد[ةه]|[اأ]لغ|فعل|[اأ]?وقف|عدل|حدث|غير",
     "number": "تغيير|تبديل|تعديل|تحديث|تفعيل|[اإ]عاد[ةه]|غير|بدل|عدل|حدث|فعل",
     "complaint": "تسجيل|سجل",
 }
 _DONE_PASSIVE = re.compile(r"(?<!\w)[وف]?(?:تم|تمت|انتهى|خلص)\s+(?:\S+\s+)?(?P<v>[اإ]رجاع|استرجاع|استرداد|[اإ]عاد[ةه]"
                            r"|تعويض|[اإ]ضاف[ةه]|تسجيل|تغيير|تبديل|تعديل|تحديث|فتح|فك|[اإ]لغاء|تفعيل|رفع|[اإ]يقاف)(?!\w)")
-_DONE_WE = re.compile(r"(?<!\w)[وف]?(?P<v>[اأ]?رجع|حول|[اأ]?ضف|عوض|سجل|فتح|فك|غير|بدل|[اأ]لغ|فعل|رفع|عدل|حدث|[اأ]?وقف"
-                      r"|استرجع|استرد|[اأ]عد)نا(?:ه|ها|هم|ل(?:ك|ج|كم)|ال(?:ك|ج|كم)|ك|ج|كم)?(?!\w)")
 _DONE_OBJECT = re.compile(r"(?:ال|بال|لل|ل|ب)?(?:"
                           r"(?P<money>مبلغ\w*|فلوس\w*|رصيد\w*|عمول\w*|رسوم\w*|مصاري\w*|حوال(?:[ةه]|ت)\w*|دينار)"
                           r"|(?P<account>حساب\w*|قفل|حظر|تجميد|بطاق(?:[ةه]|ت)\w*)"
                           r"|(?P<number>رقم(?:ك|ج|كم)?|شريح(?:[ةه]|ت)\w*|خط(?:ك|ج)?)"
                           r"|(?P<complaint>شكو(?:ى|ا|ت)\w*|اعتراض\w*|تظلم\w*))$")
+# draft_checks_r3 (adopted): «ألغينا الحوالة», «تم إلغاء الحوالة» (a cancelled transfer is money), and done said with no "we":
+# «المبلغ رجع لحسابك», «انضاف المبلغ لرصيدك», «فلوسك رجعت», «حسابك انفتح».
+_DONE_WE = re.compile(r"(?<!\w)[وف]?(?P<v>[اأ]?رجع|حول|[اأ]?ضف|عوض|سجل|فتح|فك|غير|بدل|[اأ]?لغي|فعل|رفع|عدل|حدث|[اأ]?وقف"
+                         r"|استرجع|استرد|[اأ]عد)نا(?:ه|ها|هم|ل(?:ك|ج|كم)|ال(?:ك|ج|كم)|ك|ج|كم)?(?!\w)")
+_DONE_ITSELF = re.compile(
+    r"(?<!\w)[وف]?(?:ال)?(?:مبلغ|فلوس|رصيد|مصاري)\w*\s+(?:(?:تم\s+)?(?:رجع|رجعت|انرجع|انرجعت|انضاف|انضافت|انعاد|انعادت"
+    r"|اتحول|اتحولت|انحول|انحولت|نزل|نزلت))(?=\s+(?:ل|لل|بال|ب|على|[إا]لى)?\s*(?:حساب|رصيد|محفظ)\w*)"
+    r"|(?<!\w)[وف]?(?:انضاف|انضافت|رجع|رجعت|انرجع|انرجعت|نزل|نزلت)\s+(?:ال)?(?:مبلغ|فلوس)\w*\s+(?:ل|لل|بال|ب|على)\s*(?:حساب|رصيد)\w*"
+    r"|(?<!\w)[وف]?(?:ال)?حساب(?:ك|ج|كم)\s+(?:انفتح|انفك|اتفعل|انفعل|رجع\s+يشتغل)(?!\w)")
+# A forward about the money is still a forward: «حولنا طلبك بخصوص المبلغ للقسم المختص». The words after «بخصوص» are the
+# topic, not what was done.
+_ABOUT_WORD = {"بخصوص", "عن", "حول", "بشأن", "بشان", "بموضوع", "موضوع"}
+_HANDOFF_OBJECT = re.compile(r"(?:ال)?(?:طلب|شكو|تذكر|موضوع|ملاحظ|رسال)\w*")
 _TEAM = re.compile(r"(?<!\w)(?:لل|ل|[إا]لى\s+(?:ال)?)(?:قسم|فريق|جه[ةه]|[إا]دار[ةه]|موظف|مختص)\w*")
 _NOT_YET = {"ما", "لم", "لا", "مو", "ماكو", "محد", "لسه", "لسا", "بعده", "مازال"}
 _IF_WHEN = {"إذا", "اذا", "لو", "لمن", "لما", "عندما", "متى", "شوكت", "هل", "أول", "اول", "حتى", "بعد"}
@@ -1446,6 +1515,20 @@ def _claims_more(norm: str, pos: list[int], stops: list[int]) -> tuple[int, int]
     return None
 
 
+def _claims_itself(norm: str, pos: list[int], stops: list[int]) -> tuple[int, int] | None:
+    """Done said with no "we" («المبلغ رجع لحسابك»; draft_checks_r3), unless not yet, if or when, told, quoted or asked."""
+    for m in _DONE_ITSELF.finditer(norm):
+        s0, s1 = _sentence(norm, stops, m.start())
+        clause_start = max([s0] + [x + 1 for x in (norm.rfind(c, s0, m.start()) for c in "،,") if x >= 0])
+        before = [_bare(w) for w in norm[clause_start:m.start()].split()]
+        inside = [_bare(w) for w in m.group().split()]
+        if (_NOT_YET & set(before[-2:] + inside) or _IF_WHEN & set(before[-3:]) or any(_TOLD.fullmatch(w) for w in before)
+                or any(q in norm[s0:m.start()] for q in "«\"“") or norm[s1:s1 + 1] in ("?", "؟")):
+            continue
+        return _raw(pos, m.start(), m.end())
+    return None
+
+
 def _claims_done(norm: str, pos: list[int]) -> tuple[int, int] | None:
     stops = [m.start() for m in _STOP.finditer(norm)]
     for rx in (_DONE_PASSIVE, _DONE_WE):
@@ -1456,14 +1539,19 @@ def _claims_done(norm: str, pos: list[int]) -> tuple[int, int] | None:
             if (_NOT_YET & set(before[-2:]) or _IF_WHEN & set(before[-3:]) or any(_TOLD.fullmatch(w) for w in before)
                     or any(q in norm[s0:m.start()] for q in "«\"“")):
                 continue                                    # «ما رجعنا المبلغ», «إذا تم إرجاع», «ذكرت إنه تم ...», quoted
-            near = norm[max(clause_start, m.start() - 40):m.start()].split()[-3:] + norm[m.end():s1].split()[:3]
+            after = norm[m.end():s1].split()[:3]
+            cut = next((x for x, w in enumerate(after) if _bare(w) in _ABOUT_WORD), len(after))
+            after = after[:cut]                             # «حولنا طلبك بخصوص المبلغ»: the topic is not the object
+            near = norm[max(clause_start, m.start() - 40):m.start()].split()[-3:] + after
             kinds = {k for o in (_DONE_OBJECT.match(_bare(w)) for w in near) if o for k, v in o.groupdict().items() if v}
             verb = m.group("v")
             claimed = [k for k in kinds if re.fullmatch(_DONE_KINDS[k], verb)]
-            if not claimed or (verb in {"حول", "رفع"} and claimed != ["money"] and _TEAM.search(norm, m.end(), s1)):
+            handoff = (verb in {"حول", "رفع"} and bool(after) and bool(_HANDOFF_OBJECT.fullmatch(_bare(after[0])))
+                       and bool(_TEAM.search(norm, m.end(), s1)))
+            if not claimed or handoff or (verb in {"حول", "رفع"} and claimed != ["money"] and _TEAM.search(norm, m.end(), s1)):
                 continue                                    # «حولنا شكواك للقسم»: forwarding is what the tool does
             return _raw(pos, m.start(), m.end())
-    return _on_record(norm, pos, stops) or _claims_more(norm, pos, stops)
+    return _on_record(norm, pos, stops) or _claims_more(norm, pos, stops) or _claims_itself(norm, pos, stops)
 
 
 # claims_done also covers a claim that something is on record with us (7 Nov, dev-0015's «رقم العملية 7021535 مسجل
@@ -1538,7 +1626,15 @@ _FIELD_WORDS = {
     "bill_type": r"فاتور|كهرباء|ماء|مي|[إا]نترني?ت|نوع",
     "screenshot": r"صور[ةه]|سكرين|لقط[ةه]",
 }
+# draft_checks_r3 (review before shipping, 7 Nov, adopted): «وكم حولت؟» and «وقيمتها؟» ask the amount; «رقم موبايلك» is the
+# customer's own number, not the recipient's; «بأقرب وقت» and «خلال يومين» are not the date asked for.
+_FIELD_WORDS = {**_FIELD_WORDS,
+                   "amount": _FIELD_WORDS["amount"] + r"|قيمت|كم\s+\S*(?:حول|دفع|رسل|دز|سحب|شحن|خصم|انخصم|نزل)",
+                   "recipient_number": r"رقم\s+(?:ال)?(?:مستلم|مستفيد|شخص|هاتف|تلفون|موبايل)(?!ك|ج|كم)"
+                                       r"|رقم\s+(?:\S+\s+){0,2}?\S*(?:حول|رح|راح|رسل|دز)"}
 _FIELD_RE = {k: re.compile(rf"(?<!\w)[وفبل]?(?:ال|لل)?(?:{v})") for k, v in _FIELD_WORDS.items()}
+_NOT_A_DATE = re.compile(r"(?<!\w)ب?[أا](?:قرب|سرع)\s+وقت(?:\s+ممكن)?|(?<!\w)(?:خلال|بظرف|بغضون)\s+(?:\S+\s+)?"
+                            r"(?:يوم|[أا]يام|ساع|دقيق)\w*|(?<!\w)وقت\s+ممكن")
 _ASK_LINES = re.compile(r"^(?:Ask the customer for|Also ask for these, but only if the ticket does not already give "
                         r"them): (.+)$", re.MULTILINE)
 # A sentence asks when it ends in a question mark or has a request word: «تكدر تكتبلنا ...», «دزلنا ...», «نحتاج ...».
@@ -1548,8 +1644,10 @@ _LOST_RECEIPT = re.compile(r"(?:وصل|[إا]يصال|فاتور[ةه])\w*\s+(?:
                            r"|(?:ضيعت|فقدت|ضاع\s+مني|ما\s+عندي|ماعندي|رميت|ما\s+احتفظت\s+ب)\s*(?:ال)?(?:وصل|[إا]يصال)")
 _HISTORY = re.compile(r"سجل|التطبيق|تاريخ\s+(?:ال)?عمليات|حركات")
 # The drafter asks for a bill type only if the ticket doesn't give it; a ticket that names one has given it.
-_BILL_GIVEN = re.compile(r"كهرب|(?<!\w)(?:ال)?ما[ءي](?!\w)|[إا]نترني?ت|(?<!\w)(?:ال)?نت(?!\w)|موبايل|غاز|قسط|جامع|مدرس"
-                         r"|اشتراك")
+# «من موبايلي» is how the bill was paid, not its type; «فاتورة الموبايل» still names it (draft_checks_r3).
+_BILL_GIVEN = re.compile(r"كهرب|(?<!\w)(?:ال)?ما[ءي](?!\w)|[إا]نترني?ت|(?<!\w)(?:ال)?نت(?!\w)"
+                            r"|(?:فاتور[ةه]|رصيد|شحن|خط)\s+(?:ال)?موبايل|غاز|قسط|جامع|مدرس|اشتراك")
+
 
 
 def ask_missing_fields(draft: str, allowed_text: str) -> list[str]:
@@ -1563,6 +1661,7 @@ def ask_missing_fields(draft: str, allowed_text: str) -> list[str]:
     norm = fold(draft)[0]
     asking = " . ".join(m.group() for m in re.finditer(r"[^.!?؟\n]+[.!?؟]?", norm)
                         if m.group().rstrip()[-1:] in "؟?" or _ASKING_SENTENCE.search(m.group()))
+    asking = _NOT_A_DATE.sub(lambda x: " " * len(x.group()), asking)
     ticket = re.search(r"<ticket>\n(.*?)\n</ticket>", allowed_text, re.DOTALL)
     lost = bool(ticket and _LOST_RECEIPT.search(fold(ticket.group(1))[0]))
     given = {"bill_type"} if ticket and _BILL_GIVEN.search(fold(ticket.group(1))[0]) else set()
@@ -1604,7 +1703,7 @@ def _ask_missing(draft: str, allowed_text: str) -> tuple[int, int] | None:
 # scripts/generate_tickets.py, and the words the role-played test sessions found in drafts). Whole words only, after one و/ف/ب/ل.
 _DRIFT_WORDS = {
     "بدي", "بدك", "بدو", "هيك", "كتير", "منيح", "هلق", "بقدر", "مابقدر", "شو", "قديش",       # Levantine
-    "وايد", "ابغي", "ابغا", "عشان", "علشان", "توصلنا",                                       # Gulf
+    "وايد", "ابغي", "ابغا", "عشان", "علشان",               # Gulf («توصلنا» is Iraqi too: "so it reaches us")
     "عايز", "عاوز", "ازاي", "دلوقتي", "كده", "مش", "بتاع",                                   # Egyptian
     "لقد", "سوف", "الذي", "التي", "لماذا", "ليس", "لدي", "اود", "حيث", "يرجى", "بينما", "نأمل",  # standard Arabic
     "ابي", "ابيه", "ابيها", "متضايج", "متضايق", "بعثلي", "بعثتلي",                            # not Iraqi (the author)
@@ -1656,13 +1755,26 @@ _SINGULAR = {"وياي", "آني", "اني", "اكدر", "أكدر", "اقدر",
              "أتابع", "اتأكد", "أتأكد", "اساعدك", "أساعدك", "اساعدج", "أساعدج", "اراجع", "أراجع"}
 
 
+# draft_checks_r3 (review before shipping, 7 Nov): the drafter's own singular forms («وصلتني مشكلتك», «تكدر تكتبلي»,
+# «وأعتذر منك»), «أگدر» with the Persian letter as «أكدر»; «اعرف رصيدك من التطبيق» (an order to the customer) and
+# «انت أعرف بظروفك» are not the draft's voice.
+_SINGULAR |= {"وصلتني", "تكتبلي", "اكتبلي", "تدزلي", "ترسللي", "ترسلي", "أعتذر", "اعتذر", "أفهم", "افهم"}
+_YOU = {"انت", "إنت", "انتي", "إنتي", "انتم", "إنتم"}
+
+
 def _persona_slip(norm: str, pos: list[int]) -> tuple[int, int] | None:
-    for t in _WORD.finditer(norm):
-        w = t.group().strip("\"'«»()[]:،,.!?؟؛")
+    tokens = list(_WORD.finditer(norm))
+    for n, t in enumerate(tokens):
+        w = t.group().strip("\"'«»()[]:،,.!?؟؛").replace("گ", "ك")
         bare = w[1:] if w[:1] in "وف" and len(w) > 3 else w
+        if bare in {"اعرف", "أعرف"}:
+            prev = tokens[n - 1].group().strip("\"'«»()[]:،,.!?؟؛") if n else ""
+            nxt = tokens[n + 1].group().strip("\"'«»()[]:،,.!?؟؛") if n + 1 < len(tokens) else ""
+            if prev in _YOU or re.search(r"(?:ك|ج|كم)$", nxt):
+                continue                                    # «انت أعرف», «اعرف رصيدك»: not the draft speaking
         if bare in _SINGULAR or w in _SINGULAR:
             s0 = max(norm.rfind(c, 0, t.start()) for c in ".!?؟\n") + 1
-            lead = t.group().find(w)
+            lead = max(0, t.group().replace("گ", "ك").find(w))
             if any(q in norm[s0:t.start() + lead] for q in "«\"“"):
                 continue                                    # quoted: the customer's words
             return _raw(pos, t.start() + lead, t.start() + lead + len(w))
@@ -1707,8 +1819,9 @@ _WORD_VALUE = {
 _HUNDRED_OF = {"ثلاث": 3, "ثلث": 3, "تلاث": 3, "تلث": 3, "اربع": 4, "أربع": 4, "ربع": 4, "خمس": 5, "ست": 6,
                "سبع": 7, "ثمان": 8, "ثمن": 8, "تسع": 9}
 _HUNDREDS = re.compile(rf"({'|'.join(_HUNDRED_OF)})(?:مية|مئة|ميت)")
+# «حدعش» (11) and «طنعش» (12) too (draft_checks_r3: they were read as their «الف» alone).
 _TEEN_OF = {"احد": 1, "اثن": 2, "ثن": 2, "ثل": 3, "ثلاث": 3, "ثلث": 3, "اربع": 4, "أربع": 4, "ربع": 4, "خمس": 5,
-            "ست": 6, "سبع": 7, "ثمان": 8, "ثمن": 8, "تسع": 9}
+            "ست": 6, "سبع": 7, "ثمان": 8, "ثمن": 8, "تسع": 9, "حد": 1, "طن": 2, "اطن": 2}
 _TEENS = re.compile(rf"({'|'.join(sorted(_TEEN_OF, key=len, reverse=True))})[طت]?عشر?")   # «خمسطعش», «خمستعشر»
 _MULTIPLIER = {"الف": (1, 1000), "ألف": (1, 1000), "آلاف": (1, 1000), "الاف": (1, 1000), "ألاف": (1, 1000),
                "الفين": (2, 1000), "ألفين": (2, 1000), "مليون": (1, 10**6), "ملايين": (1, 10**6), "مليونين": (2, 10**6),
@@ -1730,6 +1843,8 @@ def _number_word(w: str) -> tuple[str, object] | None:
         hundreds, teens = _HUNDREDS.fullmatch(word), _TEENS.fullmatch(word)
         if re.fullmatch(r"\d[\d,٬]*", word):
             return "num", int(re.sub(r"[,٬]", "", word))
+        if re.fullmatch(r"\d{1,3}\.\d{3}", word):      # «250.000»: thousands, as written in Iraq
+            return "num", int(word.replace(".", ""))
         if re.fullmatch(r"\d+[.٫]\d+", word):                 # «1.5 مليون»
             return "num", float(word.replace("٫", "."))
         if word in _WORD_VALUE:
@@ -1771,6 +1886,27 @@ def _read_run(words: list[tuple[str, object]]) -> list[tuple[float, str]]:
     return [(v, unit or "iqd") for v in values if v > 0]
 
 
+def _split_run(words: list[tuple[str, object]]) -> list[list[tuple[str, object]]]:
+    """One run of amount words as the amounts it holds (draft_checks_r3). A unit word ends an amount («مية دولار وخمسين
+    الف دينار» is 100 USD and 50,000 IQD), and so does a multiplier that comes again at the same or a larger scale after
+    a finished one («خمسين الف و عشرين الف» is 50,000 and 20,000); «مليون و500 الف», «مية وخمسين الف» and «الف ونص»
+    stay one amount."""
+    out, seg, last, since = [], [], 0, 0              # since: where the words after the last multiplier start in seg
+    for kind, v in words:
+        if kind == "mult":
+            if last and v[1] >= last and since < len(seg):
+                out.append(seg[:since])
+                seg, last = seg[since:], 0
+            seg.append((kind, v))
+            last, since = v[1], len(seg)
+            continue
+        seg.append((kind, v))
+        if kind in ("unit", "dual"):
+            out.append(seg)
+            seg, last, since = [], 0, 0
+    return out + ([seg] if seg else [])
+
+
 def word_amounts(text: str) -> list[tuple[float, str]]:
     """Every amount the text writes with number words, as (value, unit), unit "iqd", "usd" or "note" (a 100 USD
     note, «ورقة»). Amount words without a currency are dinars. «خمسين الف» -> (50000, "iqd")."""
@@ -1782,7 +1918,8 @@ def word_amounts(text: str) -> list[tuple[float, str]]:
             continue
         if w == "و" and run:                # «2 مليون و 500 الف»: a lone «و» goes on with the amount
             continue
-        out += _read_run(run)
+        for part in _split_run(run):
+            out += _read_run(part)
         run = []
     return out
 
@@ -1807,6 +1944,9 @@ def ticket_amounts(ticket: str) -> list[tuple[float, str | None]]:
             values = [float(number.replace(".", ""))]
         elif re.fullmatch(r"\d{1,3}[.٫]\d{3}", plain):          # «10٫000», «10.000»: a separator, or a decimal
             values = [float(plain.replace("٫", "").replace(".", "")), float(plain.replace("٫", "."))]
+            usd = dollar or (unit or "").lower() in ("دولار", "usd", "$")
+            if not usd and not million and not thousand:
+                values = values[:1]                         # «250.000 دينار» is 250,000, never 250
         else:
             values = [float(plain.replace("٫", "."))]
         cur = "usd" if dollar or (unit or "").lower() in ("دولار", "usd", "$") else "iqd" if unit else None

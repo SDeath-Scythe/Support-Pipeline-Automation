@@ -38,6 +38,7 @@ import sys
 import threading
 import time
 import traceback
+import unicodedata
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -117,6 +118,7 @@ ERR_AR = {
     "identity": "ما أشّرت على «تأكدت من هوية الزبون»، فما ينعتمد",
     "unticked": "ما أشّرت على كل النقاط اللي تحت المسودة ({why})، فما ينعتمد",
     "fraud_team": "هاي تذكرة احتيال: أشّر إنك متأكد قبل لا تحوّلها لقسم ثاني",
+    "not_escalated": "هالتذكرة مو متصعّدة، فما تتحوّل: اعتمدها أو عدّلها أو استلمها",
     "escalated": "هالتذكرة متصعّدة، فما ينعتمد إلها رد: حوّلها أو استلمها",
 }
 
@@ -819,6 +821,11 @@ def _text_field(body: dict, key: str) -> str | None:
     # Twice the ticket limit is room for any reply, and keeps the diff fast.
     if value is not None and (not isinstance(value, str) or len(value) > 2 * limits()["max_ticket_chars"]):
         raise BadField(key)
+    if value is not None:
+        try:
+            value.encode("utf-8")   # a lone surrogate ("\ud83d") can't be hashed: 400, as /api/check refuses it
+        except UnicodeEncodeError:
+            raise BadField(key) from None
     return value
 
 
@@ -843,18 +850,29 @@ def served_facts(result, events=None) -> dict:
     a keyed hash of the draft (result.draft_ar, else the last finished draft's reply). Never the text."""
     res = result if isinstance(result, dict) else {}
     draft = res.get("draft_ar")
+    done = [e.get("data") for e in events or [] if isinstance(e, dict) and e.get("stage") == "draft"
+            and e.get("status") == "done" and isinstance(e.get("data"), dict)]
     if not isinstance(draft, str):
-        done = [e.get("data") for e in events or [] if isinstance(e, dict) and e.get("stage") == "draft"
-                and e.get("status") == "done" and isinstance(e.get("data"), dict)]
         draft = done[-1].get("reply") if done else None
+    # The draft's findings as the page shows them (composer.js originalDraft: the draft event's check_spans, else
+    # result.draft_checks), by kind: an unedited approval must tick the warnings among them (required_acks).
+    shown = done[-1].get("check_spans") if done else None
+    shown = shown if isinstance(shown, list) else res.get("draft_checks")
+    kinds = [f.get("kind") for f in shown if isinstance(f, dict)] if isinstance(shown, list) else []
     ex = res.get("extraction")
     flags = res.get("flags") if isinstance(res.get("flags"), list) else []
-    sec = ex.get("secondary_subcategory") if isinstance(ex, dict) else None
+    tax = taxonomy()
+    # Only taxonomy values: a model's type outside it (escalated as invalid_category) is free text, and the log
+    # keeps no text (review before shipping, 7 Nov).
+    def known(v, allowed):
+        return v if isinstance(v, str) and v in allowed else None
+    sub = known(ex.get("subcategory"), tax.subcategories) if isinstance(ex, dict) else None
+    sec = known(ex.get("secondary_subcategory"), tax.subcategories) if isinstance(ex, dict) else None
     return {"outcome": res.get("outcome") if res.get("outcome") in OUTCOMES else "escalated",
             "flags": [f for f in flags if isinstance(f, str) and _FLAG.fullmatch(f)][:32],
-            "subcategory": ex.get("subcategory") if isinstance(ex, dict) else None,
-            "secondary_subcategory": sec if isinstance(sec, str) and sec in taxonomy().subcategories else None,
-            "team": res.get("team"), "priority": res.get("priority"),
+            "subcategory": sub, "secondary_subcategory": sec,
+            "team": known(res.get("team"), tax.teams), "priority": known(res.get("priority"), PRIORITIES),
+            "draft_kinds": [k for k in dict.fromkeys(kinds) if k in ACK_KINDS],
             "draft_sha256": _sha256(draft) if isinstance(draft, str) else None}
 
 
@@ -875,24 +893,41 @@ def served_ticket(run: str, ticket_id: str) -> dict | None:
     return {**served_facts(row.get("result"), row.get("events")), "ticket_sha256": None}
 
 
+# Characters that look blank but are letters or symbols to Unicode (so clean keeps them): the Hangul fillers and
+# the empty Braille cell (review before shipping, 7 Nov: a ticket of only these started a model call).
+_BLANK_LOOKING = frozenset("\u115f\u1160\u3164\uffa0\u2800")
+
+
+def blank_text(text: str) -> bool:
+    """True when nothing in `text` can be read: every character is a space or separator (Z*), a format character
+    (Cf), a combining mark (Mn, Me: the grapheme joiner) or a blank-looking filler (_BLANK_LOOKING)."""
+    return all(ch in _BLANK_LOOKING or unicodedata.category(ch)[0] == "Z" or unicodedata.category(ch) in ("Cf", "Mn", "Me")
+               or ch.isspace() for ch in text)
+
+
 def _never_drafted(sub) -> bool:
     s = taxonomy().subcategories.get(sub) if isinstance(sub, str) else None
     return bool(s and s.always_escalate)
 
 
-# The draft warnings that read the drafter's prompt (its ticket, its ask lines): on an edited reply the server,
-# which keeps no prompt for a live run, can't run them, so their tick is taken as the page sends it.
-PROMPT_CHECKS = ("stray_latin", "unknown_number", "ask_missing", "amount_not_in_ticket")
+# The draft warnings that read the drafter's prompt (its ticket, its ask lines; draft_check.PROMPT_KINDS): on an
+# edited reply the server, which keeps no prompt for a live run, can't run them, so their tick is taken as the page
+# sends it.
+PROMPT_CHECKS = draft_check.PROMPT_KINDS
 
 
-def required_acks(served: dict, corrected: dict) -> list[str]:
+def required_acks(served: dict, corrected: dict, unedited: bool = False) -> list[str]:
     """The points an approval of this ticket must tick (second round of role-played test sessions, 7 Nov: the
     server enforced only the identity tick). As the page lists them (inbox.js confirmTargets): each flag the
     ticket was served with that is not a draft warning or a quiet note (account_risk is checked apart, see
     needs_identity); second_request when a drafted ticket has a second type; draft_for_other_type when the agent
     corrected the type or the team of a drafted ticket. A missing:<field> point is also met by
-    missing:<field>:not_needed. A draft warning is never one here (the page asks for its tick), and a style note
-    (draft_check.STYLE_KINDS) is never one anywhere."""
+    missing:<field>:not_needed. For an approval of the reply as served (`unedited`), also each draft warning it
+    was served with (a draft:<kind> flag that is among the draft's findings the page shows, served_facts
+    draft_kinds), as the page asks for it; ask_missing is also met when the agent marked a
+    missing field not needed (the page then drops the fields it named; see acks_met). An edited reply's warnings
+    are the page's to ask for: the server can't run the prompt's checks on it. A blocking check is refused
+    apart (blocking_in), and a style note (draft_check.STYLE_KINDS) is never a point anywhere."""
     out = [f for f in served["flags"] if not f.startswith("draft:") and f not in QUIET_FLAGS and f != "account_risk"
            and f in ACK_KINDS]
     if served["outcome"] in ("drafted", "flagged") and served.get("secondary_subcategory"):
@@ -901,7 +936,25 @@ def required_acks(served: dict, corrected: dict) -> list[str]:
             corrected.get("subcategory") not in (None, served.get("subcategory"))
             or corrected.get("team") not in (None, served.get("team"))):
         out.append("draft_for_other_type")
+    if unedited and served.get("draft_sha256"):
+        shown = served.get("draft_kinds") or []
+        out += [f[len("draft:"):] for f in served["flags"] if f.startswith("draft:") and f[len("draft:"):] in shown]
     return list(dict.fromkeys(out))
+
+
+def acks_met(kind: str, acked) -> bool:
+    """Whether a required point is ticked: the kind itself; for missing:<field> its :not_needed mark; for the
+    ask_missing warning any missing field marked not needed (the page drops the fields the agent marked, and with
+    none left, the point)."""
+    return (kind in acked or f"{kind}:not_needed" in acked
+            or (kind == "ask_missing" and any(k.startswith("missing:") and k.endswith(":not_needed") for k in acked)))
+
+
+def identity_applies(served: dict, corrected: dict) -> bool:
+    """A blocked account or a SIM change, as the page reads it (inbox.js needsIdentity): served with account_risk,
+    or of either type as served or as the agent corrected it. Only then may a decision tick the identity check."""
+    return ("account_risk" in served["flags"] or served.get("subcategory") in ACCOUNT_RISK
+            or corrected.get("subcategory") in ACCOUNT_RISK)
 
 
 def fraud_forward(served: dict, corrected: dict) -> bool:
@@ -912,12 +965,20 @@ def fraud_forward(served: dict, corrected: dict) -> bool:
     return fraud and team is not None and team != SECURITY_TEAM
 
 
-def allowed_acks(served: dict, corrected: dict, final: str | None) -> set[str]:
+def allowed_acks(served: dict, corrected: dict, final: str | None, action: str | None = None) -> set[str]:
     """Every kind this decision may tick: the required points (and missing:<field>:not_needed for each missing
-    field), the identity tick, fraud_team_changed, a draft warning the ticket was served with, and on an edited
-    reply a warning the prompt-free checks find in it (or one that needs the prompt). Never a style note
-    (draft_check.STYLE_KINDS)."""
-    out = set(required_acks(served, corrected)) | {"account_risk", "fraud_team_changed"}
+    field), the identity tick where it applies (identity_applies), fraud_team_changed on a forward of a ticket
+    served as fraud to another team (as the page reads it: the corrected team, else the served one), a draft
+    warning the ticket was served with, and on an edited reply a warning the prompt-free checks find in it (or one
+    that needs the prompt, PROMPT_CHECKS). Never a style note (draft_check.STYLE_KINDS). So the log can't say an
+    identity check or a fraud-team change was made on a ticket that had neither (review before shipping, 7 Nov)."""
+    out = set(required_acks(served, corrected))
+    if identity_applies(served, corrected):
+        out.add("account_risk")
+    fraud = "fraud" in served["flags"] or _never_drafted(served.get("subcategory"))
+    team = corrected.get("team") or served.get("team")
+    if action == "forwarded" and fraud and team is not None and team != SECURITY_TEAM:
+        out.add("fraud_team_changed")
     out |= {f"{f}:not_needed" for f in out if f.startswith("missing:")}
     out |= {f[len("draft:"):] for f in served["flags"] if f.startswith("draft:")}
     if final is not None and _sha256(final) != served.get("draft_sha256"):
@@ -968,8 +1029,8 @@ def decision_record(body: dict) -> dict:
     if not isinstance(acked, list) or not all(isinstance(k, str) and k in ACK_KINDS for k in acked):
         raise BadField("warnings_acknowledged")
     draft, final = _text_field(body, "draft_text"), _text_field(body, "final_text")
-    if action in ("approved", "edited") and not isinstance(final, str):
-        raise BadField("final_text")   # an approval names the reply, so the checks below can read it
+    if action in ("approved", "edited") and not (isinstance(final, str) and final.strip()):
+        raise BadField("final_text")   # an approval names the reply, so the checks below can read it; never a blank one
     corrected = _corrected(body.get("corrected"))
     served = served_ticket(run, ticket_id)
     if served is None:
@@ -980,8 +1041,15 @@ def decision_record(body: dict) -> dict:
         raise BadField("draft_text")
     if action == "approved" and served["draft_sha256"] and _sha256(final) != served["draft_sha256"]:
         raise BadField("final_text")   # (with no draft served, append_decision refuses it: 409 escalated)
-    if action != "undone" and set(acked) - allowed_acks(served, corrected, final if action == "edited" else None):
+    if action != "undone" and set(acked) - allowed_acks(served, corrected, final if action == "edited" else None, action):
         raise BadField("warnings_acknowledged")   # a point the ticket never had
+    unedited = action in ("approved", "edited") and served["draft_sha256"] is not None and _sha256(final) == served["draft_sha256"]
+    # A forward is of an escalation, as the page offers it (state.js escalatesNow): served escalated, a type that is
+    # never drafted (as served or corrected), or a live run the page shows cut short (the stream broke after the
+    # server had the result).
+    forwardable = (served["outcome"] == "escalated" or _never_drafted(served["subcategory"])
+                   or _never_drafted(corrected.get("subcategory"))
+                   or (run == "live" and any(f in LIVE_CUT_SHORT for f in flags)))
     return {
         "id": uuid.uuid4().hex,
         "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
@@ -1001,8 +1069,9 @@ def decision_record(body: dict) -> dict:
         "ticket_sha256": served["ticket_sha256"],   # live runs: the cleaned ticket text, keyed
         # Kept for the checks in append_decision; never written to the log.
         "_final": final,
-        "_required": required_acks(served, corrected),
+        "_required": required_acks(served, corrected, unedited),
         "_fraud_forward": fraud_forward(served, corrected),
+        "_forwardable": forwardable,
         "_never_drafted": _never_drafted(served["subcategory"]) or _never_drafted(corrected.get("subcategory")),
     }
 
@@ -1044,13 +1113,15 @@ def needs_identity(record: dict) -> bool:
 
 def append_decision(record: dict) -> None:
     """One line, one write: concurrent decisions never interleave. A new log is readable by its owner
-    only (0600). Under the same lock, four checks (Conflict, 409):
+    only (0600). Under the same lock, these checks (Conflict, 409):
     - an approval of a ticket served as an escalation, or of a type that is never drafted (fraud), as
       served or as the agent corrected it: it can only be forwarded or taken over;
     - an approval whose reply still asks for a code, names an investigation or repeats a card number
       (the page blocks it first; this stops a stale check or a hand-made request);
     - an approval of a blocked account or a SIM change without the identity tick (needs_identity), or without
       a tick on each point its ticket had (required_acks: the 409 names the first one missing);
+    - a forward of a ticket that is not an escalation as the page shows it (decision_record's forwardable: served
+      escalated, a type never drafted, or a live run the page shows cut short);
     - a forward of a fraud escalation to another team without fraud_team_changed (fraud_forward);
     - a second decision on a ticket that already has one standing (another tab decided it), or an undo
       of a decision that no longer stands. Live tickets too: each live run has its own id."""
@@ -1058,6 +1129,7 @@ def append_decision(record: dict) -> None:
     never_drafted = record.pop("_never_drafted", False)
     required = record.pop("_required", [])
     fraud_fwd = record.pop("_fraud_forward", False)
+    forwardable = record.pop("_forwardable", True)
     acked = record["warnings_acknowledged"]
     if record["action"] in ("approved", "edited"):
         if record["pipeline_outcome"] == "escalated" or never_drafted:
@@ -1067,9 +1139,11 @@ def append_decision(record: dict) -> None:
             raise Conflict("blocked", BLOCKED_AR[found[0]])
         if "account_risk" not in acked and needs_identity(record):
             raise Conflict("identity")
-        missing = [k for k in required if k not in acked and f"{k}:not_needed" not in acked]
+        missing = [k for k in required if not acks_met(k, acked)]
         if missing:
             raise Conflict("unticked", missing[0])
+    if record["action"] == "forwarded" and not forwardable:
+        raise Conflict("not_escalated")
     if record["action"] == "forwarded" and fraud_fwd and "fraud_team_changed" not in acked:
         raise Conflict("fraud_team")
     line = json.dumps(record, ensure_ascii=False) + "\n"
@@ -1381,8 +1455,8 @@ class Handler(BaseHTTPRequestHandler):
         text = body.get("text")
         text = text.strip() if isinstance(text, str) else ""
         # Only invisible characters (zero-width spaces, direction controls, a BOM) is empty too: the clean step
-        # would send the model an empty ticket.
-        if not text or not clean(text):
+        # would send the model an empty ticket. So are blank-looking ones clean keeps (blank_text).
+        if not text or blank_text(clean(text)):
             return self._error("empty", 400)
         try:
             text.encode("utf-8")       # JSON allows a lone surrogate ("\\ud83d"); it can't be streamed or saved

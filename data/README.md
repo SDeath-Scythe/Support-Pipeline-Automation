@@ -23,7 +23,7 @@ Every subcategory appears at least 3 times in each test set (23 × 3 = 69 ≤ 80
 - **Priority and outcome come from code**: the taxonomy and routing rules with the recommended flags on. With F15, gold priority is the subcategory's `default_priority`, raised one level only for an amount of 1,000,000 IQD or more; no word changes it. Outcome: escalated for fraud, flagged if a required field is missing, otherwise drafted.
 - **Blind audit:** the `evaluator` role (Opus) labels every ticket without seeing its gold label, using the classifier rules with F16 ("ورقة" = 100 USD). A disagreement never changes gold; it goes into `review_reason`. `review_reason` also marks every two-issue ticket and every ticket whose amount is in ورقة.
 - **heldout** was generated in its own run with its own seed, and only its statistics were printed. Keep it unread until the progress review.
-- Hand check: `data/review/handcheck_80.csv` (columns ok / fix / note left blank, for Google Sheets), from dev and mvp_test only: every audit dispute, every two-issue ticket and every ticket with "ورقة" or a USD amount, then at least 30 random tickets spread across subcategories and dialects.
+- Hand check: `data/review/handcheck_80.csv` (columns ok / fix / note left blank, for a spreadsheet), from dev and mvp_test only: every audit dispute, every two-issue ticket and every ticket with "ورقة" or a USD amount, then at least 30 random tickets spread across subcategories and dialects.
 
 ## No Arabizi (author's decision, 29 Oct)
 

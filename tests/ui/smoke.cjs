@@ -1444,6 +1444,173 @@ async function runPass(browser, pass) {
     await s.close();
   }
 
+  /** The review before shipping (7 Nov): the page side of the confirmed findings (PAGE-1 to PAGE-9, LIVE-2). */
+  async function shipFixes() {
+    const used = decidedIds();
+    const ready = run.tickets.filter((r) => !used.has(r.ticket.id) && r.result.outcome === "drafted"
+      && !r.result.extraction?.secondary_subcategory);
+    const [hyId, padZ, padR, secId] = ready.slice(-8, -4).map((r) => r.ticket.id);
+    const HY = "هلا بيك، وصلتنا رسالتك برقم العملية 1686-70659، وراح يتابعها القسم المختص.";
+    const PIN = "4829";
+    const secText = `الرقم السري مالتي ${PIN} وما يشتغل بالصراف، وكتبته مرتين`;
+    const s = await freshPage("ship", (x) => x.route(`**/api/run?name=${encodeURIComponent(RUN)}`, async (route) => {
+      const r = await route.fetch();
+      const j = await r.json();
+      const row = (id) => j.tickets.find((x2) => x2.ticket.id === id);
+      const draftEv = (x2) => x2.events.filter((e) => e.stage === "draft" && e.status === "done").at(-1);
+      const h = row(hyId);
+      h.result.draft_ar = HY;
+      h.result.draft_checks = [];
+      Object.assign(draftEv(h).data, { reply: HY, check_spans: [] });
+      for (const [id, pad] of [[padZ, "\u200B\n"], [padR, "\r\n"]]) {
+        const t2 = `الرمز ما يوصلني من البارحة.\n${pad.repeat(60)}وبعدين صار يطلب تحديث`;
+        row(id).ticket.text = t2;
+        row(id).events.find((e) => e.stage === "received").data.text = t2;
+      }
+      const sr = row(secId);
+      sr.ticket.text = secText;
+      sr.events.find((e) => e.stage === "received").data.text = secText;
+      const at = secText.indexOf(PIN);
+      Object.assign(sr.result, { secret_spans: [[at, at + PIN.length]], secret_kinds: ["pin"] });
+      sr.result.extraction = { ...(sr.result.extraction || {}), reference: PIN };
+      await route.fulfill({ response: r, json: j });
+    }));
+    const box = () => s.evaluate(() => {
+      const ta = document.getElementById("draft");
+      return { value: ta.value, label: document.querySelector(".composer-label-text")?.textContent || "" };
+    });
+
+    // PAGE-1: Backspace just after the left-to-right mark before a hyphenated number deletes what the agent sees.
+    await openId(s, hyId);
+    const at = (await box()).value.indexOf("\u200E");
+    await s.focus("#draft");
+    await s.evaluate((i) => document.getElementById("draft").setSelectionRange(i + 1, i + 1), at);
+    const b0 = await box();
+    await s.keyboard.press("Backspace");
+    await sleep(100);
+    const b1 = await box();
+    check("PAGE-1: Backspace right after the hidden mark before «1686-70659» deletes the character before it (the text changes)",
+      at > 0 && b1.value !== b0.value && b1.value.length < b0.value.length && b1.label === "معدّلة منك", JSON.stringify({ at, b0: b0.value.length, b1: b1.value.length }));
+    // PAGE-2: Ctrl+Z undoes it, and undoes a paste the box reformats, in one press each; Ctrl+Shift+Z redoes it.
+    await s.keyboard.press("Control+z");
+    await sleep(100);
+    const b2 = await box();
+    await s.evaluate(() => { const x = document.getElementById("draft"); x.setSelectionRange(x.value.length, x.value.length); });
+    await s.keyboard.insertText(" المرجع 2497-53512 والرقم 0791 079 0226");
+    await sleep(100);
+    const b3 = await box();
+    await s.keyboard.press("Control+z");
+    await sleep(150);
+    const b4 = await box();
+    await s.keyboard.press("Control+Shift+z");
+    await sleep(150);
+    const b5 = await box();
+    check("PAGE-2: Ctrl+Z undoes the Backspace, and a pasted reference and phone number the box reformats, in one press each; Ctrl+Shift+Z redoes the paste",
+      b2.value === b0.value && b3.value.includes("\u2011") && b3.value.includes("\u00A0") && b4.value === b0.value && b4.label === "مسودة مقترحة"
+      && b5.value === b3.value, JSON.stringify({ b2: b2.value === b0.value, b3: b3.value.slice(-40), b4: b4.value === b0.value, l: b4.label, b5: b5.value === b3.value }));
+    // PAGE-3: copying from the box gives the reply as stored: no mark, a plain hyphen, plain spaces.
+    const copied = await s.evaluate(() => {
+      const ta = document.getElementById("draft");
+      ta.focus();
+      ta.setSelectionRange(0, ta.value.length);
+      const dt = new DataTransfer();
+      ta.dispatchEvent(new ClipboardEvent("copy", { clipboardData: dt, bubbles: true, cancelable: true }));
+      return dt.getData("text/plain");
+    });
+    check("PAGE-3: copying the whole draft box gives the reply as stored (no left-to-right mark, no non-breaking hyphen or space)",
+      copied.includes("1686-70659") && !/[\u200E\u2011\u00A0]/.test(copied) && copied.includes("0791 079 0226"), JSON.stringify(copied.slice(-60)));
+    await s.click(".composer-head .link-btn");   // «رجّع المسودة الأصلية»
+
+    // PAGE-4: padding of zero-width spaces or CRLF line ends is kept to one blank line, and said.
+    for (const [id, what] of [[padZ, "zero-width spaces"], [padR, "CRLF line ends"]]) {
+      await openId(s, id);
+      const pad = await s.evaluate(() => ({ h: Math.round(document.querySelector("#custBox .customer-text").getBoundingClientRect().height),
+        note: document.getElementById("blankNote")?.textContent || "" }));
+      check(`PAGE-4: a message padded with 60 lines of ${what} is shown with one blank line, and said`,
+        pad.h < 250 && pad.note.includes("انشالت"), JSON.stringify(pad));
+    }
+
+    // PAGE-6: the queue row and the facts line read a hidden number as «رقم مخفي», as the message does.
+    await openId(s, secId);
+    const sr = await s.evaluate((id) => ({
+      row: document.querySelector(`#queueList [data-key="${id}"] .row-text`)?.textContent || "",
+      rowSr: [...document.querySelectorAll(`#queueList [data-key="${id}"] .row-text .secret-mask .sr-only`)].map((x) => x.textContent),
+      facts: [...document.querySelectorAll("#custBox .facts .secret-mask .sr-only")].map((x) => x.textContent),
+    }), secId);
+    check("PAGE-6: the queue row and the facts line hide the PIN as «••••» read «رقم مخفي» (a node, not the bullets alone)",
+      !sr.row.includes(PIN) && sr.rowSr.includes("رقم مخفي") && sr.facts.includes("رقم مخفي"), JSON.stringify(sr));
+    // PAGE-8: a number revealed in the inbox is hidden again on the switch to «كيف يشتغل».
+    await s.click("#secretToggle");
+    await sleep(100);
+    const shownHere = (await t(s, "#custBox")).includes(PIN);
+    await s.click("#modeProcess");
+    await sleep(300);
+    const inHidden = await s.evaluate((pin) => document.getElementById("agentMain").textContent.includes(pin), PIN);
+    await s.click("#modeAgent");
+    await sleep(300);
+    const back = { pin: (await t(s, "#custBox")).includes(PIN), btn: await t(s, "#secretToggle") };
+    check("PAGE-8: a PIN revealed in the inbox is hidden again when the agent switches to «كيف يشتغل» (no digits left), and stays hidden on the way back",
+      shownHere && !inHidden && !back.pin && back.btn === "اظهر الرقم", JSON.stringify({ shownHere, inHidden, back }));
+
+    // PAGE-9: t2-0017's point says «ما يحتاج بهالتذكرة» once, and its toggle takes the lost-receipt mark back.
+    if (!used.has("t2-0017")) {
+      await openId(s, "t2-0017");
+      const c1 = await t(s, "#confirmBox");
+      await s.click("#notNeeded-reference");
+      await sleep(150);
+      const c2 = { box: await t(s, "#confirmBox"), pressed: await s.getAttribute("#notNeeded-reference", "aria-pressed") };
+      await s.click("#notNeeded-reference");
+      await sleep(150);
+      const c3 = await t(s, "#confirmBox");
+      check("PAGE-9: t2-0017 says «رقم العملية: ما يحتاج بهالتذكرة» once; its toggle makes the reference a point again, and marks it back",
+        (c1.match(/ما يحتاج بهالتذكرة/g) || []).length === 1 && c1.includes("رقم العملية: ما يحتاج بهالتذكرة")
+        && c2.pressed === "false" && c2.box.includes("تأكد إن الرد يطلب رقم العملية") && c3 === c1, JSON.stringify({ c1, c2, c3 }));
+    }
+
+    // PAGE-5: a phone on its side (844 × 390): the action bar sits under the draft, not over it.
+    {
+      await openId(s, hyId);
+      await s.setViewportSize({ width: 844, height: 390 });
+      await sleep(250);
+      const lay = await s.evaluate(() => ({ pos: getComputedStyle(document.getElementById("actionBar")).position,
+        draft: Math.round(document.getElementById("draft").getBoundingClientRect().bottom),
+        bar: Math.round(document.getElementById("actionBar").getBoundingClientRect().top) }));
+      await s.setViewportSize(pass.viewport);
+      await sleep(200);
+      check("PAGE-5: at 844 × 390 the action bar is in the flow under the draft (approving means scrolling past the draft)",
+        lay.pos === "static" && lay.draft <= lay.bar, JSON.stringify(lay));
+    }
+    await cspOf(s, "ship");
+    await s.close();
+
+    // LIVE-2 / PAGE-7: a live ticket cut short (its stream breaks after the clean event) keeps the code hidden.
+    {
+      const CODE = "739205";
+      const p = await freshPage("ship-live", (x) => x.route("**/api/stream", async (route) => {
+        const r = await route.fetch();
+        const body = await r.text();
+        const blocks = body.split("\n\n");
+        const keep = [];
+        for (const b of blocks) { keep.push(b); if (b.includes('"stage": "clean"') || b.includes('"stage":"clean"')) break; }
+        await route.fulfill({ status: 200, headers: { "Content-Type": "text/event-stream" }, body: `${keep.join("\n\n")}\n\n` });
+      }));
+      await p.click("#newTicket");
+      await p.fill("#newText", `مرحبا، ما دا يقبل الرمز. الرمز اللي وصلني ${CODE} شنو اسوي؟`);
+      await p.click("#newRun");
+      await p.waitForFunction(() => document.querySelector('[id^="opt-live-"]') && !document.querySelector('[id^="opt-live-"].st-running'), null, { timeout: 15000 });
+      const key = await p.evaluate(() => document.querySelector('[id^="opt-live-"]').dataset.key);
+      await p.locator(`#queueList [data-key="${key}"]`).click();
+      await sleep(200);
+      const lv = await p.evaluate((code) => ({ inPage: document.getElementById("agentMain").textContent.includes(code)
+        || document.getElementById("queueList").textContent.includes(code), masks: document.querySelectorAll("#custBox .secret-mask").length,
+        toggle: !!document.getElementById("secretToggle"), why: document.getElementById("whyLine")?.textContent || "" }), CODE);
+      check("LIVE-2: a live ticket cut short after its clean event hides the code in «رسالة الزبون» and the queue row, offers «اظهر الرقم» and says the advice",
+        !lv.inPage && lv.masks >= 1 && lv.toggle && lv.why.includes("انقطع") && lv.why.includes("رمز"), JSON.stringify(lv));
+      await cspOf(p, "ship-live");
+      await p.close();
+    }
+  }
+
   async function phoneFixes() {
     const p = await freshPage("phone-fixes");
     if (await p.evaluate(() => document.body.dataset.screen === "ticket")) await p.locator("#agentMain .back-btn").first().click();
@@ -1781,7 +1948,9 @@ async function runPass(browser, pass) {
       // 5 Nov review, then 7 Nov: the log keeps the ticket's flags as served and each point ticked, as kinds (the identity
       // tick of a blocked account or a SIM change is checked in flagFixes and in fresh-clone).
       const k2Flags = run.tickets.find((r) => r.ticket.id === k2)?.result.flags || [];
-      const k2Points = k2Flags.filter((f) => !(meta.quiet_flags || []).includes(f)).map((f) => (f.startsWith("draft:") ? f.slice(6) : f));
+      // A style note is never a point (since the review before shipping t2-0058 also has one, «وصلتني»).
+      const k2Points = k2Flags.filter((f) => !(meta.quiet_flags || []).includes(f)).map((f) => (f.startsWith("draft:") ? f.slice(6) : f))
+        .filter((k) => !(meta.style_kinds || []).includes(k));
       check(`flagged ${k2} [${k2Flags.join(", ")}]: the log line keeps its flags as served and each point ticked (warnings_acknowledged)`,
         k2Points.length > 0 && JSON.stringify(d.flags) === JSON.stringify(k2Flags)
         && JSON.stringify(d.warnings_acknowledged) === JSON.stringify(k2Points), JSON.stringify(d));
@@ -1817,6 +1986,17 @@ async function runPass(browser, pass) {
     let k3;
     {
       k3 = await openTab("drafted");
+      // A ready draft with no finding at all: since draft_checks_r3 (review before shipping) more ready drafts carry a
+      // style note («وصلتني»), and the first one in the tab may be one of them.
+      const plainDraft = (id) => !(run.tickets.find((r) => r.ticket.id === id)?.result.draft_checks || []).length;
+      if (!plainDraft(k3)) {
+        if (pass.phone && await page.evaluate(() => document.body.dataset.screen === "ticket")) await page.locator("#agentMain .back-btn").first().click();
+        const keys = await page.evaluate(() => [...document.querySelectorAll("#queueList [role=option]")].map((x) => x.dataset.key));
+        k3 = keys.find(plainDraft);
+        await page.locator(`#queueList [data-key="${k3}"]`).click();
+        if (pass.phone) await waitUntil(() => page.evaluate(() => document.body.dataset.screen === "ticket"), 3000, "the ticket screen");
+        await settled(page);
+      }
       // 5 Nov calm: all checks passed: a few words, the list of checks in their tip (hover or focus; a tap
       // pins it). No reasons yet. The action bar's one key hint is Ctrl+Enter, and no sentence explains it.
       {
@@ -2080,7 +2260,7 @@ async function runPass(browser, pass) {
 
     // 14. The fixes from the 1 Nov review, on a fresh page of the same server (desktop passes); the
     // phone passes check the phone-only ones.
-    if (pass.phone) await phoneFixes(); else { await reviewFixes(); await flowFixes(); await pageFixes(); await flagFixes(); await secondRound(); }
+    if (pass.phone) await phoneFixes(); else { await reviewFixes(); await flowFixes(); await pageFixes(); await flagFixes(); await secondRound(); await shipFixes(); }
   } catch (e) {
     check("the pass ran to its end", false, e.stack || e.message);
   } finally {
@@ -2450,10 +2630,11 @@ async function runFresh(browser, pass) {
     const resBox = await t(pr, "#pResult .result");
     // 7 Nov: six ready drafts with a draft warning were «تحتاج تأكيد» (74 → 68); the second round's warnings and
     // second_request moved ten more (68 → 58). Since style_notes a style note moves none: five ready tickets move (an
-    // amount, ask_missing, second_request), 74 → 69. The gold file says «جاهزة».
+    // amount, ask_missing, second_request), 74 → 69. The gold file says «جاهزة». Since the review before shipping 40
+    // tickets carry a mark of the 7 Nov rules (24 before): the new persona_slip forms, style notes all.
     check(`«كيف يشتغل»: outcome 69/80 by the 5 Nov rule and the 7 Nov rules, said in the overview, and ${rk}'s expected «تحتاج تأكيد» with ✓ and the note`,
       outcomeStat === "69/80" && ruleNote.includes("6 تذاكر حساب مقفول أو تبديل شريحة") && ruleNote.includes("انعلّمت هسه بنفس القاعدة")
-      && ruleNote.includes("قواعد 7 تشرين الثاني") && ruleNote.includes("24 تذكرة انضافتلها علامة") && ruleNote.includes("5 تذاكر كانت «جاهزة» وصارت «تحتاج تأكيد»")
+      && ruleNote.includes("قواعد 7 تشرين الثاني") && ruleNote.includes("40 تذكرة انضافتلها علامة") && ruleNote.includes("5 تذاكر كانت «جاهزة» وصارت «تحتاج تأكيد»")
       && goldRow.includes("تحتاج تأكيد (قاعدة 5 تشرين الثاني)") && goldRow.includes("✓") && !goldRow.includes("✗")
       && resBox.includes("أقدم من قاعدة 5 تشرين الثاني"), `${outcomeStat} | ${ruleNote} | ${goldRow} | ${resBox.slice(0, 300)}`);
     await done(pr, "account-risk");

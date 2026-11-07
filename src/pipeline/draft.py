@@ -13,7 +13,7 @@ from pathlib import Path
 from . import fixes
 from .clean import neutralise_tags, secret_kinds
 from .config import load_yaml, taxonomy
-from .draft_check import amount_written
+from .draft_check import amount_written, word_amounts
 from .llm import call
 from .requirements import reference_needed
 from .schemas import Extraction
@@ -44,26 +44,60 @@ def system_prompt() -> str:
     return _read("draft_system.draft_rules_r2.md" if fixes.enabled("draft_rules_r2") else "draft_system.md")
 
 
-# The amount as the customer wrote it, when it is not a number in the ticket («عشر ورقات»).
-# A run of number words with a money word in it; «ورقة» (a 100 USD note) is how the classifier reads it, not
-# something the customer wrote, so the draft quotes the words instead of the converted number.
-_NUM_WORD = (r"(?:و|ب|وب)?(?:واحد|وحدة|ثنين|اثنين|ثنتين|ثلاث|ثلاثة|تلاث|تلاثة|اربع|أربع|اربعة|أربعة|خمس|خمسة|ست|ستة|"
-             r"سبع|سبعة|ثمان|ثمانية|ثمن|ثمنية|تسع|تسعة|عشر|عشرة|احدعش|اثنعش|ثلطعش|ربعطعش|خمسطعش|عشرين|ثلاثين|تلاثين|"
-             r"اربعين|أربعين|خمسين|ستين|سبعين|ثمانين|تسعين|مية|ميه|مئة|ميت|ميتين|\w+مي[ةه]|ربع|نص|نصف|الف|ألف|الفين|"
-             r"ألفين|آلاف|الاف|مليون|ملايين|\d+)")
-_MONEY_WORD = r"(?:ورق[ةه]|ورقات|اوراق|أوراق|دولار|دينار|الف|ألف|آلاف|الاف|مليون|ملايين)"
-# Second round of role-played test sessions (drafter_inputs_r2, adopted 7 Nov): «1.5 مليون» is one number, a lone «و» goes
-# on with the amount («2 مليون و 500 الف»), and «مئتي» is 200 («ألف ومئتي دولار» was given to the drafter as «ألف»).
-_NUM_WORD_R2 = _NUM_WORD.replace(r"|\d+)", r"|مئتي|ميتي|مائتي|مائتين|\d+(?:[.٫]\d+)?)")
-_TOKEN_R2 = rf"(?:{_NUM_WORD_R2}|(?:و|ب|وب)?{_MONEY_WORD}|و(?=\s))"
-_OWN_WORDS_R2 = re.compile(rf"(?<!\w){_TOKEN_R2}(?:\s+{_TOKEN_R2})*(?<=\w)(?!\w)")
+# The amount as the customer wrote it, when it is not a number in the ticket («عشر ورقات»): «ورقة» (a 100 USD note) is
+# how the classifier reads it, not something the customer wrote, so the draft quotes the words instead of the converted
+# number (amount_own_words, 7 Nov; «1.5 مليون», «2 مليون و 500 الف» and «مئتي» whole since drafter_inputs_r2).
+# drafter_inputs_r3 (review before shipping, 7 Nov, adopted): «سبعطعش الف» (17,000), «اربعطعش», «ثنعش» and «الف ومئتين دولار»
+# were quoted to the drafter as «الف», and the team note repeated it. The runs of the customer's number words are read
+# with the draft checks' own lexicon (draft_check.word_amounts: every Iraqi teen, «مئتين», «خمسميت», «الميت», «سبعه»),
+# and a run is quoted only when it reads as the extracted amount in its unit; otherwise the drafter gets the generic
+# instruction. A phone or reference number before it is left out of the quote.
+_WORD_TOKEN = re.compile(r"\S+")
+# Not the customer's Arabic words to quote: Latin («100 alf») or Kurdish («50 هەزار») letters; a token of 7 or more
+# digits is a phone or a reference («ربع مليون ل07499966570»), so it ends the run.
+_FOREIGN = re.compile(r"[A-Za-z\u06d5\u06c6\u06ce\u06b5\u0695]")
+_EDGE = "\"'«»()[]،,.!?؟؛:"
 
 
-def own_words(text: str) -> str | None:
-    """The longest run of number words in the ticket that names money («عشر ورقات», «بستين الف»), or None."""
-    runs = [m.group().strip() for m in _OWN_WORDS_R2.finditer(text)
-            if re.search(rf"(?<!\w)(?:و|ب|وب)?{_MONEY_WORD}(?!\w)", m.group())]
-    return max(runs, key=lambda r: len(r.split()), default=None)
+def _number_runs(text: str) -> list[str]:
+    """The runs of amount words in `text` (draft_check._number_word, a lone «و» inside a run), as written."""
+    from .draft_check import _RUN_BREAK, _number_word
+    runs, start, end = [], None, None
+    for m in _WORD_TOKEN.finditer(text):
+        w = m.group().strip(_EDGE)
+        lead = m.group().find(w) if w else 0
+        cut = bool(_RUN_BREAK.search(m.group()[:lead])) if start is not None else False
+        word = (w and not cut and not _FOREIGN.search(w) and sum(c.isdigit() for c in w) < 7
+                and (_number_word(w) or (w == "و" and start is not None)))
+        if word:
+            start = m.start() + lead if start is None else start
+            end = m.start() + lead + len(w)
+            if _RUN_BREAK.search(m.group()[lead + len(w):]):          # «سبعه الاف،»: the run ends here
+                runs.append(text[start:end])
+                start = None
+            continue
+        if start is not None:
+            runs.append(text[start:end])
+        start = None
+    if start is not None:
+        runs.append(text[start:end])
+    return [r for r in (r.removesuffix(" و") for r in runs) if r]
+
+
+def own_words_for(text: str, n, currency: str) -> str | None:
+    """The run of the customer's number words that reads as the amount `n` in `currency` (a run in notes, «عشر ورقات»,
+    reads as n / 100 USD), the longest if several; None when no run does."""
+    found = []
+    for run in _number_runs(text):
+        words = run.split()
+        while len(words) > 1 and (re.fullmatch(r"\d{4,}", words[0]) or words[0] == "و"):
+            words = words[1:]                              # «07438658475 بخمسطعش الف»: the phone is not the amount
+        run = " ".join(words)
+        reads = word_amounts(run)
+        if any(abs(v - n) < 0.01 and u == currency for v, u in reads) or (
+                currency == "usd" and any(u == "note" and abs(v * 100 - n) < 0.01 for v, u in reads)):
+            found.append(run)
+    return max(found, key=lambda r: len(r.split()), default=None)
 
 
 def amount_line(cleaned_text: str, ex: Extraction) -> str | None:
@@ -77,7 +111,7 @@ def amount_line(cleaned_text: str, ex: Extraction) -> str | None:
         return None
     if amount_written(cleaned_text, n, currency) or _written_r2(cleaned_text, n, currency):
         return line
-    words = own_words(cleaned_text)
+    words = own_words_for(cleaned_text, n, currency)
     if words:
         return (f"Amount: the customer wrote «{words}». If you mention the amount, use those words as they are, "
                 "without quotation marks, and write no number for it.")
@@ -177,10 +211,11 @@ def user_prompt(cleaned_text: str, ex: Extraction, team_key: str) -> str:
         lines.append(amount)
     if ex.fee_iqd is not None:
         lines.append(f"Disputed fee: {ex.fee_iqd:,} IQD")
-    if fixes.enabled("draft_rules_r2"):
-        said = security_line(cleaned_text)
-        if said:
-            lines.append(said)
+    # security_line (review before shipping, 7 Nov, adopted): the tick on a typed secret asked the agent to confirm
+    # advice the drafter was never asked to write; the one line from draft_rules_r2, without the rest of its prompt.
+    said = security_line(cleaned_text)
+    if said:
+        lines.append(said)
     missing = ask_for(ex, cleaned_text)
     # The classifier can't see a shop name, agent location or bill type, so those are only asked for
     # when the ticket doesn't already give them.
@@ -199,7 +234,8 @@ _SECURITY = {"card": ("a card number", "stop the card"), "cvv": ("the card's sec
 
 
 def security_line(cleaned_text: str) -> str | None:
-    """draft_rules_r2: the drafter's line when the customer wrote a card number, a PIN or a code (clean.secret_kinds)."""
+    """The drafter's line when the customer wrote a card number, a PIN or a code (clean.secret_kinds): from draft_rules_r2,
+    always given since security_line (7 Nov)."""
     kinds = [k for k in secret_kinds(cleaned_text) if k in _SECURITY]
     if not kinds:
         return None

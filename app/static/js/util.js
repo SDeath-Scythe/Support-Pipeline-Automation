@@ -201,8 +201,10 @@ export function plainText(s) {
 
 // A message padded with blank lines («سطر وحد، 60 سطر فاضي، وبعدين نص») pushed the rest of the ticket and the draft
 // off the screen while approve was on (second round of role-played test sessions). Three or more line breaks, with
-// only spaces between them, are shown as one blank line.
-const BLANK_RUN = /\n(?:[ \t\u00A0]*\n){2,}/g;
+// only spaces between them, are shown as one blank line. A line of only a zero-width, wide or ideographic space, a
+// blank-looking filler, or a carriage return (CRLF line ends) is blank too (review before shipping, 7 Nov: those
+// paddings were shown whole). Each run still becomes two characters, so the cuts below keep their offsets.
+const BLANK_RUN = /\n(?:[\t\r\p{Zs}\u200B-\u200D\u2060\uFEFF\u115F\u1160\u3164\uFFA0\u2800]*\n){2,}/gu;
 /** {text, removed, at(i)}: the text with each run of blank lines kept to one, how many blank lines went, and where
  *  offset i of the original text is in the new one (for the hidden numbers' ranges). */
 export function collapseBlank(s) {

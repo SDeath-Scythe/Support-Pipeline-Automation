@@ -8,7 +8,7 @@ import { streamTicket, liveState } from "./live.js";
 import {
   CHANGE_AR, DECISION_AR, DIFF_AR, FIELD_AR, LIVE_CAUSE_AR, OUTCOME_AR, OUTCOME_SHORT, SECRET_HIDE_AR, SECRET_SHOW_AR, STAGES, TAG_AR,
 } from "./labels.js";
-import { QUICK_S, S, restoreDecisions, summarize } from "./state.js";
+import { QUICK_S, S, restoreDecisions, secretsOf, summarize } from "./state.js";
 import { showToast } from "./ui.js";
 import {
   add, collapseBlank, digitRuns, dict, el, fmtInt, ltr, median, mono, num, openDialog, plainText, reducedMotion, richText, spanned, stampOwn,
@@ -289,7 +289,7 @@ function liveRow(it) {
   const st = it.status === "running" ? "running" : it.result?.outcome || "";
   const b = el("button", { type: "button", class: "prow", "aria-current": P.current === it.key ? "true" : null },
     el("span", { class: `pdot ${st}`, "aria-hidden": "true" }),
-    el("span", { class: "prow-body" }, el("span", { class: "prow-text", dir: "rtl" }, rowText(it.ticket.text, it.result)),
+    el("span", { class: "prow-body" }, el("span", { class: "prow-text", dir: "rtl" }, rowText(it.ticket.text, secretsOf(it))),
       el("span", { class: "prow-meta" }, ticketId(it.key), " · تذكرة مباشرة", st ? ` · ${OUTCOME_SHORT[st] || (st === "running" ? "تنعالج" : "")}` : "")));
   b.addEventListener("click", () => { showLive(it); $("traceTitle")?.focus(); });
   return el("li", {}, b);
@@ -345,7 +345,7 @@ export function showLive(item) {
   clearTimers();
   P.current = item.key;
   drawList();
-  buildView({ id: item.key, text: item.ticket.text }, "تذكرة مباشرة", item.result);
+  buildView({ id: item.key, text: item.ticket.text }, "تذكرة مباشرة", secretsOf(item));
   item.events.forEach(render);
   P.follow = item.key;
 }
@@ -450,8 +450,12 @@ function scale(d) {
 
 function render(e) {
   const d = e.data || {};
+  if (e.stage === "clean" && !H.spans.length && d.secret_spans) {   // a live run: known from its clean event
+    setHidden(H.key, H.plain, d);
+    refreshHidden();
+  }
   if (e.stage === "result") {
-    if (!H.spans.length && d.secret_spans) {   // a live run: its numbers are known once it ends
+    if (!H.spans.length && d.secret_spans) {   // a run saved before the clean event said them: once it ends
       setHidden(H.key, H.plain, d);
       refreshHidden();
     }

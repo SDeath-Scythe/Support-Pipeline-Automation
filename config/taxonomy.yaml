@@ -2,8 +2,9 @@
 # Each subcategory routes to exactly one team. Routing is a rule, not a model decision.
 # A subcategory routes to its category's team unless it names its own `team`.
 #
-# default_priority: P1 (urgent) .. P3 (normal). The router can raise it
-#   (large amount, repeat contact, urgent wording) but never lower it.
+# default_priority: P1 (urgent) .. P3 (normal). The router raises it one level for a large amount only
+#   (>= 1,000,000 IQD or >= 750 USD) and never lowers it. The author's rule: no word, repeat contact or
+#   complaint changes priority (complaint_risk only flags the ticket).
 # high_risk: always sent to the Sonnet re-check, whatever the confidence score.
 # always_escalate: never auto-drafted; a human takes it with a note.
 # required_fields: if the model can't find these in the ticket, the confidence

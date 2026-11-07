@@ -1,4 +1,4 @@
-"""Build a short sheet for the author to check gold labels by hand (CSV, opens in Google Sheets).
+"""Build a short sheet for the author to check gold labels by hand (CSV, opens in a spreadsheet).
 
     python scripts/review_sheet.py --set data/dev/tickets.jsonl --runs rec,rec-r1,baseline,baseline-r1
 

@@ -297,7 +297,8 @@ def test_fix_flags_off_by_default_and_reject_unknown(monkeypatch):
         "claims_done", "repeated_text", "ask_missing", "dialect_words", "fraud_secondary", "secret_in_ticket",
         "strip_format_chars", "device_lost", "complaint_risk", "instructions_in_ticket", "draft_rules_ut",
         "amount_own_words", "secret_forms", "complaint_reasons", "device_lost_negation", "second_request_flag",
-        "drafter_inputs_r2", "style_notes"}
+        "drafter_inputs_r2", "style_notes", "secret_forms_r3", "ticket_rules_r3", "draft_checks_r3", "drafter_inputs_r3",
+        "second_request_unknown", "security_line"}
     assert all("7 Nov 2026" in fixes.ADOPTED[n] for n in fixes.ADOPTED if n not in
                {"hold_reason", "sensitive_number", "escalate_account_risk"})
     monkeypatch.setenv("PIPELINE_FIXES", "draft_check")                    # adopted, so no longer a flag

@@ -11,13 +11,13 @@ import { buildComposer, isBlocking, isStyle, originalDraft } from "./composer.js
 import { factLine, factsOf, fitSpans, secretMask, secretRanges, textWithFacts } from "./facts.js";
 import {
   ACTION_ICON, ACTION_WORD, BECAUSE_AR, BLOCK_AR, CHECK_SHORT_AR, CONFIRM_AR, CONFIRM_OTHER, DRAFT_REASONS, FIELD_AR, IDENTITY_IF_REPLY_AR, NOT_NEEDED_AR,
-  PRIORITY_AR, PRIORITY_RANK, QUIET_AR, SECRET_HIDE_AR, SECRET_MASK, SECRET_SHOW_AR, STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL,
+  PRIORITY_AR, PRIORITY_RANK, QUIET_AR, SECRET_HIDE_AR, SECRET_SHOW_AR, STAGE_DOING, STAGE_ORDER, STATUS, TABS, TICK_ALL,
   TICK_IDENTITY_AND_REST, WHY_AR, WHY_ESC_AR, askMissingAR, complaintAR, notNeededAR, secretAdviceAR,
 } from "./labels.js";
 import {
   QUICK_S, S, allItems, correctedFor, correctionsOf, decide, draftDone, effective, errorEvent, escalatesNow, ev, extractionOf, findItem,
   flagsOf, itemsInTab, mostUrgent, openItems, outcomeOf, pauseClock, priorityRank, refreshDecisions, routeFor,
-  runningItems, startClock, subOf, summarize, tabOf, uid, undo,
+  runningItems, secretsOf, startClock, subOf, summarize, tabOf, uid, undo,
 } from "./state.js";
 import { hideToastIf, setBanner, showToast, toastShows } from "./ui.js";
 import {
@@ -99,17 +99,22 @@ const shownText = (it) => collapseBlank(plainOf(it)).text;
 function secretSpans(it, text) {
   const plain = plainOf(it);
   const c = collapseBlank(plain);
-  return fitSpans(fitSpans(it.result?.secret_spans, plain).map(([s, e]) => [c.at(s), c.at(e)]), text);
+  return fitSpans(fitSpans(secretsOf(it)?.secret_spans, plain).map(([s, e]) => [c.at(s), c.at(e)]), text);
 }
 /** The digits of each hidden number, to hide them wherever a note writes them again (the team note). */
 const secretDigits = (it) => {
   const text = shownText(it);
   return [...new Set(secretSpans(it, text).map(([s, e]) => westernDigits(text.slice(s, e)).replace(/[^0-9]/g, "")).filter(Boolean))];
 };
-/** A row's text: the start of the message, with a card number or a code hidden (never revealed here). */
+/** A row's text: the start of the message, with a card number or a code hidden (never revealed here) as «••••» read
+ *  «رقم مخفي» by a screen reader (facts.js secretMask), as in «رسالة الزبون» (review before shipping, 7 Nov). */
+const HIDDEN_AT = "\uE000";   // a private-use character in place of each hidden number until the nodes are made
 const firstWords = (it) => {
   const text = shownText(it);
-  return rtlText(masked(text, secretSpans(it, text), SECRET_MASK).replace(/\s+/g, " ").slice(0, 140));
+  const words = rtlText(masked(text, secretSpans(it, text), HIDDEN_AT).replace(/\s+/g, " ").slice(0, 140)).split(HIDDEN_AT);
+  const frag = document.createDocumentFragment();
+  words.forEach((part, i) => frag.append(...(i ? [secretMask()] : []), digitRuns(part)));
+  return frag;
 };
 /** A flag shown as a muted note and never ticked (meta.quiet_flags: instructions_in_ticket). */
 const isQuiet = (f) => (S.meta.quiet_flags || []).includes(f);
@@ -153,8 +158,10 @@ function whyLine(it) {
   const box = (kind, title, text) => el("p", { id: "whyLine", class: `callout callout-${kind}`, dir: "rtl" },
     icon(kind === "bad" ? "escalated" : "check"), el("span", {}, title ? el("strong", { text: title }) : null, title && text ? " " : null, text));
   const identity = identityOnEscalation(it) ? ` ${IDENTITY_IF_REPLY_AR}` : "";
-  if (it.status === "lost") return box("bad", "انقطع الاتصال قبل ما تخلص المعالجة.", "اقراها وقرر، أو شغّلها مرة ثانية.");
-  if (it.status === "cancelled") return box("bad", "انلغت المعالجة قبل ما تكمل.", `اقراها وقرر.${identity}`);
+  // A run cut short has no flags, but its clean event says what the customer typed: the advice still comes.
+  const early = !it.result && secretsOf(it)?.secret_kinds?.length ? ` ${secretAdviceAR(secretsOf(it).secret_kinds).why}` : "";
+  if (it.status === "lost") return box("bad", "انقطع الاتصال قبل ما تخلص المعالجة.", `اقراها وقرر، أو شغّلها مرة ثانية.${early}`);
+  if (it.status === "cancelled") return box("bad", "انلغت المعالجة قبل ما تكمل.", `اقراها وقرر.${early}${identity}`);
   // The spending cap is not an error: it is said as what it is (second round of role-played test sessions).
   if ((r.flags || []).includes("budget_reached")) return box("bad", "متصعّدة:", `${WHY_AR.budget_reached}${identity}`);
   if (err) return box("bad", `صار خطأ: ${err.data?.error || ""}`, `التذكرة راحت لموظف بدون مسودة.${identity}`);
@@ -197,10 +204,14 @@ function whyLine(it) {
 /** The fields that are not a point any more on this ticket: marked «ما يحتاج بهالتذكرة» by the agent, and the
  *  reference when the draft check found the customer lost the receipt (ask_missing's reference_lost). */
 function notNeededFields(it) {
-  const out = new Set(S.notNeeded.get(uid(it)) || []);
+  const marks = S.notNeeded.get(uid(it)) || new Set();
+  const out = new Set([...marks].filter((f) => !f.startsWith("!")));
   const st = composer && S.agent.openKey === it.key ? composer.state() : null;
   const found = st ? st.findings : originalDraftFindings(it);
-  if (found.some((f) => f.kind === "ask_missing" && (f.fields || []).includes("reference_lost"))) out.add("reference");
+  // «!reference»: the agent said the reference is needed after all, over the lost-receipt mark (its toggle did nothing).
+  if (found.some((f) => f.kind === "ask_missing" && (f.fields || []).includes("reference_lost")) && !marks.has("!reference")) {
+    out.add("reference");
+  }
   return out;
 }
 const originalDraftFindings = (it) => originalDraft(it).findings || [];
@@ -408,7 +419,7 @@ function row(it, active) {
     // A ticket pasted in this page, done and not decided yet: one small word, so it is found in its tab.
     it.live && !d && it.status !== "running" ? el("span", { class: "row-new", text: "جديدة" }) : null,
     d ? el("span", { class: "row-decision", title: st.word }, icon(st.icon)) : null),
-  el("span", { class: "row-text", dir: "rtl" }, digitRuns(firstWords(it))));
+  el("span", { class: "row-text", dir: "rtl" }, firstWords(it)));
 }
 
 function onListKey(e) {
@@ -756,7 +767,23 @@ function refreshAfterCorrection(it) {
 /** A correction can re-sort the queue (a new priority), a live ticket comes back, a decision opens the next one:
  *  the open row stays in view, clear of the sticky tabs (its scroll-margin-top, app.css). */
 export function rowInView(it) {
-  if (it && !isPhone()) $(`opt-${it.key}`)?.scrollIntoView({ block: "nearest" });
+  if (!it || isPhone()) return;
+  const row = $(`opt-${it.key}`);
+  // The margin is the tabs' own height: a tab with its «P1» mark is a few pixels taller than the stylesheet's 64 px.
+  const tabs = document.querySelector("#agentQueue .tabs");
+  if (row && tabs) row.style.scrollMarginTop = `${Math.ceil(tabs.getBoundingClientRect().height) + 4}px`;
+  row?.scrollIntoView({ block: "nearest" });
+}
+
+/** A number revealed in the inbox is hidden again when the agent leaves it for «كيف يشتغل» (main.js setMode), as one
+ *  revealed there is when they come back (review before shipping, 7 Nov): the hidden view keeps no digits in its nodes. */
+export function hideSecretsAgain() {
+  if (revealedFor === null) return;
+  revealedFor = null;
+  const it = current();
+  if (!it) return;
+  $("custBox")?.replaceWith(customerSection(it));
+  $("handoffBox")?.replaceWith(handoffSection(it));
 }
 
 /** The customer's message, its facts underlined where they were written, and under it one quiet line with
@@ -772,7 +799,7 @@ function customerSection(it) {
   const hide = secrets.length && revealedFor !== uid(it) ? secrets : [];
   // A fact read from a hidden number is hidden in the facts line too.
   const facts = factsOf(extractionOf(it), text, subOf(it)).map((f) => (f.at && hide.some(([s, e]) => f.at.start < e && s < f.at.end)
-    ? { ...f, value: () => SECRET_MASK } : f));
+    ? { ...f, value: secretMask } : f));
   // A mostly Arabic paragraph that starts with a Latin word («SYSTEM: …») reads right to left (util.js rtlStarts).
   const body = el("p", { class: "customer-text", dir: "rtl", lang: "ar" }, textWithFacts(text, facts, hide, rtlStarts(text)));
   const sec = el("section", { id: "custBox", class: "customer", "aria-labelledby": "custTitle" }, el("h3", { id: "custTitle", class: "section-title", text: "رسالة الزبون" }));
@@ -923,14 +950,15 @@ function refreshGate(it) {
       "aria-pressed": String(x.id.endsWith(":not_needed")), "aria-label": `${FIELD_AR[x.field] || x.field}: ${NOT_NEEDED_AR}`,
       onclick: () => {
         const set = S.notNeeded.get(u) || new Set();
-        if (set.has(x.field)) set.delete(x.field); else set.add(x.field);
+        if (x.id.endsWith(":not_needed")) { set.delete(x.field); set.add(`!${x.field}`); } else { set.add(x.field); set.delete(`!${x.field}`); }
         S.notNeeded.set(u, set);
         refreshGate(it);
       } }, NOT_NEEDED_AR) : null);
     const next = t.list.length ? el("div", { id: "confirmBox", class: `confirm${many ? "" : " is-one"}`, tabindex: "-1", role: "group", "aria-labelledby": "confirmTitle" },
       el("p", { id: "confirmTitle", class: many ? "confirm-title" : "sr-only" }, many ? icon("check") : null,
         many ? el("strong", { text: "قبل لا تعتمد:" }) : t.list[0].ask),
-      many ? el("ul", { class: "confirm-list" }, t.list.map((x) => el("li", {}, x.ask, x.field ? " · " : null, notNeeded(x)))) : null,
+      many ? el("ul", { class: "confirm-list" }, t.list.map((x) => el("li", {}, x.ask,
+        x.field ? (x.id.endsWith(":not_needed") ? " " : " · ") : null, notNeeded(x)))) : null,
       el("div", { class: "confirm-row" },
         el("label", { class: "confirm-check" },
           el("input", { type: "checkbox", id: "ackBox", checked: S.acks.get(u) === t.key,

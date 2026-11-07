@@ -132,12 +132,21 @@ def _plausible_date(text: str) -> bool:
 
 # A number after one of these belongs to it, not to an earlier credential word:
 # "نسيان الرقم السري وإكمال الحوالة رقم 9365140" is a transfer reference (dev-0099). "My number"
-# («لرقمي») is where a code was sent, so it doesn't own the number: "الكود اللي اجه لرقمي 482913".
-_OWN_NUMBER = re.compile(r"[وفبل]?(?:ال)?(?:رقم(?:ه|ها|هم)?|مبلغ\w*|حوال\w*|تحويل\w*|عملي\w*)")
-# A number followed by a currency or a time unit is an amount or a wait, not a code:
-# "الرمز ما وصل وحولت 50000 دينار", "اطلب رمز جديد بعد 120 ثانية".
-_UNIT_AFTER = re.compile(r"\s*(?:دينار|د\.ع|[أا]لف|آلاف|الاف|مليون|دولار|IQD|USD|\$|ثاني|ثواني|دقيق|دقايق|ساع)",
-                         re.IGNORECASE)
+# («لرقمي») is where a code was sent, so it doesn't own the number: "الكود اللي اجه لرقمي 482913". A deduction, a
+# withdrawal or a balance makes it an amount: «الرمز ما وصلني وانخصم مني 25000»; «للرقم» owns a number as «الرقم» does
+# (secret_forms_r3, review before shipping, 7 Nov).
+_OWN_NUMBER = re.compile(r"[وفبل]?(?:ال|ل)?(?:رقم(?:ه|ها|هم)?|مبلغ\w*|حوال\w*|تحويل\w*|عملي\w*|رصيد\w*)"
+                         r"|[وف]?(?:انخصم|انقص|انسحب|خصم|سحبت|حولت|دفعت)\w*")
+# A number followed by a currency or a time unit is an amount or a wait, not a code: "الرمز ما وصل وحولت 50000
+# دينار", "اطلب رمز جديد بعد 120 ثانية". Each unit is a whole word (secret_forms_r3): «ساعدوني», «ثاني مرة», «الفلوس»,
+# «الفيزا» and «الف رحمة» after a code were read as a wait or an amount, so «PIN 1234 ساعدوني» was never found.
+_UNIT_AFTER = re.compile(
+    r"\s*(?:دينار|د\.ع|[أا]لف(?!\s+(?:رحم|شكر|مبروك|سلام))|آلاف|الاف|مليون|دولار|IQD|USD|\$"
+    r"|ثاني[ةه]|ثواني|دقيق[ةه]|دقايق|دقائق|ساع[ةه]|ساعات|ساعتين)(?![^\W\d_])", re.IGNORECASE)
+# The end of a card's or a phone's number named by its last digits: «المنتهي بـ 4567», «اللي آخره 1234».
+_TAIL_BEFORE = re.compile(r"(?:المنتهي[ةه]?|ينتهي|تنتهي|منتهي[ةه]?|(?:اللي\s+)?[اآ]خر(?:ه|ها))\s*(?:بـ*|ب\s*)?\s*$")
+# After the code word, «مالتي،», «،», «؟» or «:» before the digits: «الرمز السري مالتي، 2580», «الكود؟ 482913».
+_PUNCT_THEN_DIGITS = re.compile(r"\s*(?:(?:مال|حق|تبع)\w*\s*)?[،,?؟:]\s*$")
 
 
 # «..» or «…» is a pause in a chat line, not the end of a clause: «كود التفعيل.. لا لحظه وصل هسه 482915».
@@ -150,7 +159,9 @@ def _after_credential(text: str, start: int, ends: list[int]) -> int | None:
     "رقم/مبلغ/حوالة" in between; None if there is none. «..» or «…» doesn't end the clause."""
     for end in ends:
         between = _PAUSE.sub(" ", text[end:start])
-        if end > start or _CLAUSE_BREAK.search(between) or re.search(r"\d", between):
+        if end > start or re.search(r"\d", between):
+            continue
+        if _CLAUSE_BREAK.search(between) and not _PUNCT_THEN_DIGITS.fullmatch(between):
             continue
         words = [w for w in between.split() if _LETTER.search(w)]
         if len(words) <= 5 and not any(_OWN_NUMBER.fullmatch(w) for w in words):
@@ -168,8 +179,10 @@ def _card(digits: str) -> bool:
 # A card number written in groups of four with mixed separators («5204-7311 8826 - 4413»), and a
 # 13-19 digit number that the customer says is their card («رقم البطاقة 5213904477162280», «البطاقة اللي عندي رقمها
 # 4211 7781 0093 5526») even when it fails the Luhn check (a typo, or a made-up number: it is still meant as one).
-_GAP = r"[ \u00a0\u2009\u202f]{0,2}[-.]?[ \u00a0\u2009\u202f]{0,2}"
-_CARD_GROUPS = re.compile(rf"(?<![\d,٬])\d{{4}}(?:{_GAP}\d{{4}}){{2}}{_GAP}\d{{1,7}}(?![\d,٬])")
+# secret_forms_r3: «/», «_», «،», «,», an en or em dash between the groups too («4111/1111/1111/1111»); a match still
+# needs the Luhn check or a card word before it, so a list of amounts is not one.
+_GAP = r"[ \u00a0\u2009\u202f]{0,2}[-./_،,–—]?[ \u00a0\u2009\u202f]{0,2}"
+_CARD_GROUPS = re.compile(rf"(?<![\d,٬])\d{{4}}(?:{_GAP}\d{{4}}){{2}}{_GAP}\d{{1,7}}(?![\d٬]|,\d)")
 _CARD_WORD = re.compile(r"(?<!\w)[وفبل]?(?:ال)?(?:بطاق(?:ت|[ةه])\w*|كارت\w*|card)(?!\w)(?!\s+(?:ال)?(?:وطني|موحد|ذكي|تموين|سكن|هوي)\w*)",
                         re.IGNORECASE)
 _NOT_CARD_NUMBER = re.compile(r"[وفبل]?(?:ال)?(?:مبلغ\w*|حوال\w*|تحويل\w*|عملي\w*|هاتف\w*|تلفون\w*|موبايل\w*)")
@@ -203,6 +216,9 @@ def _spans(raw: str, detail: bool = False) -> list[tuple[int, int, str]]:
     The rules read the folded text (so «الرقم السرّي» and «الکود» count), and the spans point into `raw`.
     With `detail`, a code's kind says what it is: "pin", "cvv" or "otp" (_secret_kind)."""
     text, pos = fold(raw)
+    # A line break is a space, as clean() reads it (secret_forms_r3): «الرقم السري مالتي:\n2580», a card one group per
+    # line. The same length, so the spans still point into `raw`.
+    text = text.replace("\r", " ").replace("\n", " ")
     creds = sorted([m.span() for m in CREDENTIAL.finditer(text)] + [m.span() for m in _BACK_OF_CARD.finditer(text)])
     ends = [e for _, e in creds]
     out = []
@@ -234,6 +250,8 @@ def _spans(raw: str, detail: bool = False) -> list[tuple[int, int, str]]:
             kind = "card"
         elif seps == ["-"] and _UNIT_AFTER.match(text, end):
             continue                                       # "بين 5000-10000 دينار": a range of amounts
+        elif len(digits) <= 4 and _TAIL_BEFORE.search(text[max(0, start - 30):start]):
+            continue                                       # «رقمك المنتهي بـ 4567»: the end of a number, named
         elif 3 <= len(digits) <= 8 and not _UNIT_AFTER.match(text, end) and (
                 owner := _after_credential(text, start, ends)) is not None:
             kind = "code"

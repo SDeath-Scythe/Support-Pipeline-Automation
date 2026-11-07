@@ -838,6 +838,10 @@ table.grid tbody tr.click:hover td { background: var(--surface-2); }
   .new-text { min-height: calc(3 * 1.8em + 24px); }
   #newNote { max-height: 3.4em; overflow-y: auto; }
   .dialog-body { padding: 12px 18px; gap: 8px; }
+  /* About 270 px is left for the ticket under the header: with the action bar stuck to the bottom, every ticket
+     opened with its draft under the bar while approve was live (review before shipping, 7 Nov). The bar sits in
+     the flow under the draft instead, so approving means scrolling past the draft. */
+  .actionbar { position: static; box-shadow: none; }
 }
 
 /* A short screen (landscape, or a phone's keyboard open): while the agent types in the draft, the action

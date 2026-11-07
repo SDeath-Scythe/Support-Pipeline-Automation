@@ -25,6 +25,10 @@ singular voice and the stiff words from the drafts, but the judge graded its dra
 
 Then style_notes was opened and adopted the same day: the two style warnings (a stiff or non-Iraqi word, a singular
 voice) stay found and highlighted, but no longer flag a ready ticket or ask for a tick, since friction follows risk.
+
+The review before shipping (7 Nov) opened six more: four code rules and draft checks (secret_forms_r3, ticket_rules_r3,
+draft_checks_r3, second_request_unknown) and two drafter inputs (drafter_inputs_r3, security_line). After with/without
+runs (cache-only, and a few live re-drafts for the two drafter inputs) all six became the normal code the same day.
 """
 
 from __future__ import annotations
@@ -80,6 +84,22 @@ ADOPTED: dict[str, str] = {
     "style_notes": "adopted on 7 Nov 2026 (after the second round): dialect_words and persona_slip (draft_check.STYLE_KINDS) "
                    "are style notes; their draft:<kind> flag is kept, but it never moves a drafted ticket to flagged and "
                    "is never a point to tick",
+    # 7 Nov 2026, the review before shipping: measured cache-only (and the drafter inputs with a few live re-drafts).
+    "secret_forms_r3": "adopted on 7 Nov 2026 (review before shipping): a code before a whole-word unit only («PIN 1234 "
+                       "ساعدوني»), across a line break, after «،» or «؟»; a card with «/», «_», «،», «,» or a dash between "
+                       "its groups; «المنتهي بـ 4567» and a deduction before a bare number are not a code",
+    "ticket_rules_r3": "adopted on 7 Nov 2026 (review before shipping): device_lost reads an app not locked as open, and not "
+                       "«ما كانت مفتوحة», a phone not lost or only feared lost; complaint_risk needs a repeat contact to us, "
+                       "takes no negated threat, and counts «ثاني مرة اكتبلكم» and «شكوى رسمية»",
+    "draft_checks_r3": "adopted on 7 Nov 2026 (review before shipping): more code requests («بلاش ... وتدزلنا», indirect "
+                       "forms), tipping-off forms, done claims, the advice to hide a code, a forward about money, adjacent "
+                       "amounts, asked and given fields, and the style words",
+    "drafter_inputs_r3": "adopted on 7 Nov 2026 (review before shipping): the drafter's amount line and the team note quote "
+                         "the customer's words only when they read as the extracted amount, else the generic instruction",
+    "second_request_unknown": "adopted on 7 Nov 2026 (review before shipping): a second type outside the taxonomy is read "
+                              "as «unclear», so it is a second request",
+    "security_line": "adopted on 7 Nov 2026 (review before shipping): the drafter is told when the customer wrote a card "
+                     "number or a code and what to advise",
 }
 
 

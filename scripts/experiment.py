@@ -36,7 +36,8 @@ from pipeline.requirements import REFERENCE_ALTERNATIVES, REFERENCE_NOT_NEEDED  
 # 7 Nov role-played test sessions, became the normal code the same day; F34 is still under test. F35-F38 (secret_forms,
 # complaint_reasons, device_lost_negation, second_request_flag), opened after the second round of sessions, became the
 # normal code the same day, and so did F40 (drafter_inputs_r2) and then F41 (style_notes); F39 (draft_rules_r2) is still
-# under test.
+# under test. F42-F47 (secret_forms_r3, ticket_rules_r3, draft_checks_r3, drafter_inputs_r3, second_request_unknown,
+# security_line), from the review before shipping, became the normal code the same day.
 CODES: dict[str, str] = {"F34": "summary_qualifiers", "F39": "draft_rules_r2"}
 DEFAULT_SET = ROOT / "data/probes/fixes_30.jsonl"
 CACHE = ROOT / "runs/cache"

@@ -113,7 +113,7 @@ export function secretAdviceAR(kinds) {
     ask: `تأكد إن الرد ينبّه الزبون ${todo}`, done: `تأكدت إن الرد ينبّه الزبون ${todo}` };
 }
 // Why complaint_risk fired (result.complaint_reasons, from the complaint_reasons rule).
-const COMPLAINT_WHY = dict({ threat: "الزبون يهدد بشكوى علينا أو للجهات الرقابية", repeat: "الزبون راسلنا قبل وما وصله رد" });
+const COMPLAINT_WHY = dict({ threat: "الزبون يهدد بشكوى علينا أو للجهات الرقابية", repeat: "الزبون راسلنا قبل" });
 export function complaintAR(reasons) {
   const said = (reasons || []).map((r) => COMPLAINT_WHY[r]).filter(Boolean);
   if (!said.length) return { why: WHY_AR.complaint_risk, ...CONFIRM_AR.complaint_risk };
@@ -151,7 +151,9 @@ export const SECRET_HIDE_AR = "اخفي الرقم";
 export const CONFIRM_OTHER = { ask: "اقرا الملاحظة اللي فوق", done: "قريت الملاحظة" };
 // A missing field the agent marked as not needed for this ticket (logged as missing:<field>:not_needed).
 export const NOT_NEEDED_AR = "ما يحتاج بهالتذكرة";
-export const notNeededAR = (field) => ({ ask: `${field}: ${NOT_NEEDED_AR}`, done: `راجعت: ${field} ${NOT_NEEDED_AR}` });
+// The point names the field only: the pressed «ما يحتاج بهالتذكرة» after it says the rest, so the line does not say it
+// twice («رقم العملية: ما يحتاج بهالتذكرة · ما يحتاج بهالتذكرة», review before shipping, 7 Nov).
+export const notNeededAR = (field) => ({ ask: `${field}:`, done: `راجعت: ${field}` });
 // The one tick when the identity check is among several points: it names the attestation first.
 export const TICK_IDENTITY_AND_REST = "تأكدت من هوية الزبون وراجعت باقي النقاط";
 export const TICK_ALL = "راجعت كل النقاط فوق";

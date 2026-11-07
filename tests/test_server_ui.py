@@ -490,29 +490,37 @@ def test_recomputed_spans_are_cached_until_the_file_or_the_flags_change(old_runs
 # The 7 Nov warnings on seven drafts, and since the second round of role-played test sessions persona_slip («أكدر
 # أوعدك», «آني أتفهم», «وياي»), more stiff words («نرجو», «وكذلك», «هلا وغلا») and ask_missing on t2-0052 (it asks
 # the amount handed «للوكيل», not the agent's name or place).
+# With draft_checks_r3 (review before shipping, 7 Nov) persona_slip also reads the drafter's own singular forms
+# («وصلتني», «تكتبلي», «أعتذر»): 16 more drafts get that style note, and none of them moves.
 SAVED_NEW_WARNINGS = {
-    "t2-0004": ["amount_not_in_ticket"], "t2-0010": ["dialect_words", "persona_slip"], "t2-0013": ["amount_not_in_ticket"],
-    "t2-0017": ["ask_missing", "dialect_words"], "t2-0019": ["dialect_words"], "t2-0023": ["dialect_words", "persona_slip"],
-    "t2-0024": ["persona_slip"], "t2-0029": ["dialect_words", "persona_slip"], "t2-0030": ["persona_slip"],
-    "t2-0031": ["persona_slip"], "t2-0038": ["persona_slip"], "t2-0043": ["dialect_words"], "t2-0046": ["dialect_words"],
-    "t2-0052": ["ask_missing", "dialect_words"], "t2-0056": ["ask_missing"], "t2-0058": ["amount_not_in_ticket"],
-    "t2-0065": ["dialect_words", "persona_slip"], "t2-0069": ["dialect_words"], "t2-0075": ["persona_slip"],
-    "t2-0079": ["dialect_words"], "t2-0080": ["persona_slip"]}
+    "t2-0002": ["persona_slip"], "t2-0004": ["amount_not_in_ticket"], "t2-0005": ["persona_slip"], "t2-0006": ["persona_slip"],
+    "t2-0009": ["persona_slip"], "t2-0010": ["dialect_words", "persona_slip"], "t2-0011": ["persona_slip"],
+    "t2-0012": ["persona_slip"], "t2-0013": ["amount_not_in_ticket", "persona_slip"], "t2-0015": ["persona_slip"],
+    "t2-0017": ["ask_missing", "dialect_words"], "t2-0019": ["dialect_words", "persona_slip"],
+    "t2-0023": ["dialect_words", "persona_slip"], "t2-0024": ["persona_slip"], "t2-0026": ["persona_slip"],
+    "t2-0029": ["dialect_words", "persona_slip"], "t2-0030": ["persona_slip"], "t2-0031": ["persona_slip"],
+    "t2-0032": ["persona_slip"], "t2-0038": ["persona_slip"], "t2-0040": ["persona_slip"], "t2-0043": ["dialect_words"],
+    "t2-0046": ["dialect_words"], "t2-0049": ["persona_slip"], "t2-0052": ["ask_missing", "dialect_words"],
+    "t2-0053": ["persona_slip"], "t2-0056": ["ask_missing"], "t2-0058": ["amount_not_in_ticket", "persona_slip"],
+    "t2-0062": ["persona_slip"], "t2-0065": ["dialect_words", "persona_slip"], "t2-0067": ["persona_slip"],
+    "t2-0069": ["dialect_words", "persona_slip"], "t2-0070": ["persona_slip"], "t2-0075": ["persona_slip"],
+    "t2-0077": ["persona_slip"], "t2-0079": ["dialect_words"], "t2-0080": ["persona_slip"]}
 SAVED_NEW_WARNINGS_KINDS = ("claims_done", "repeated_text", "ask_missing", "dialect_words", "amount_not_in_ticket",
                             "persona_slip", "asks_given")
 # Saved as flagged already (a missing field, a type check, the identity tick): their outcome does not move.
-SAVED_FLAGGED = {"t2-0017", "t2-0029", "t2-0046", "t2-0052", "t2-0075", "t2-0080"}
+SAVED_FLAGGED = {"t2-0009", "t2-0017", "t2-0026", "t2-0029", "t2-0046", "t2-0052", "t2-0075", "t2-0080"}
 # Ready ones whose new findings are style notes only (style_notes, after the second round): they get the flags and stay
 # ready.
-SAVED_STYLE_ONLY = {"t2-0010", "t2-0019", "t2-0023", "t2-0024", "t2-0030", "t2-0031", "t2-0038", "t2-0043", "t2-0065",
-                    "t2-0069", "t2-0079"}
+SAVED_STYLE_ONLY = {"t2-0002", "t2-0005", "t2-0006", "t2-0010", "t2-0011", "t2-0012", "t2-0015", "t2-0019", "t2-0023",
+                    "t2-0024", "t2-0030", "t2-0031", "t2-0032", "t2-0038", "t2-0040", "t2-0043", "t2-0049", "t2-0053",
+                    "t2-0062", "t2-0065", "t2-0067", "t2-0069", "t2-0070", "t2-0077", "t2-0079"}
 
 
 def test_committed_final_run_gets_spans_that_agree_with_its_saved_checks(srv):
     """The spans are recomputed with today's rules: the rules the run was saved with find what it saved, and the
-    warnings adopted on 7 Nov and in the second round add findings on 21 drafts. Each is served as run.py flags it
-    today: a flag draft:<kind> for each new finding, and those that were ready are «تحتاج تأكيد» (apply_current_rules),
-    unless every new finding is a style note (draft_check.STYLE_KINDS): those 11 stay ready."""
+    warnings adopted on 7 Nov, in the second round and in the review before shipping add findings on 37 drafts. Each is
+    served as run.py flags it today: a flag draft:<kind> for each new finding, and those that were ready are «تحتاج تأكيد»
+    (apply_current_rules), unless every new finding is a style note (draft_check.STYLE_KINDS): those 25 stay ready."""
     status, _, raw = call(srv, "GET", "/api/run?name=saved/test2/final")
     assert status == 200
     run = json.loads(raw)
@@ -608,7 +616,7 @@ def test_committed_final_run_shows_the_six_account_risk_tickets_flagged(srv):
     assert [by[i]["flags"] for i in risky] == [
         ["account_risk"], ["account_risk"], ["account_risk", "draft:dialect_words", "draft:persona_slip", "second_request"],
         ["account_risk", "complaint_risk"], ["account_risk"], ["account_risk", "draft:persona_slip"]]
-    assert by["t2-0009"]["flags"] == ["recheck_used_second"] and "account_risk_recomputed" not in by["t2-0009"]
+    assert by["t2-0009"]["flags"] == ["recheck_used_second", "draft:persona_slip"] and "account_risk_recomputed" not in by["t2-0009"]
     outcomes = [r["outcome"] for r in by.values()]
     # 15 / 6 / 59 with account_risk alone; the 7 Nov draft warnings moved six more ready tickets (21 / 6 / 53), and the
     # second round's warnings and second_request ten more (31 / 6 / 43, apply_current_rules). Since style_notes a style
@@ -687,7 +695,7 @@ def test_saved_runs_get_today_s_text_rules_and_draft_flags_and_nothing_else_chan
     r = ordered["result"]
     assert r["flags"] == ["account_risk", "draft:promise", "draft:dialect_words", "complaint_risk"]
     # «ثالث مرة اكتبلكم» is a repeat contact: the note says so (second round of role-played test sessions)
-    assert r["notes_ar"] == [FLAG_AR[x] for x in r["flags"][:-1]] + ["الزبون راسلنا قبل وما وصله رد: انتبه للرد"]
+    assert r["notes_ar"] == [FLAG_AR[x] for x in r["flags"][:-1]] + ["الزبون راسلنا قبل: انتبه للرد"]
     assert "outcome_recomputed" not in r and r["complaint_reasons"] == ["repeat"]
     assert r["rules_recomputed"] == ["draft:dialect_words", "complaint_risk"]
     r = escalated["result"]   # no draft flag on an escalation; its note gets the rules' lines before the identity reminder

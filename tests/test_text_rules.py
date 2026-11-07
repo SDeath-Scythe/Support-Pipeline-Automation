@@ -1,6 +1,8 @@
 """Text rules with no model call: draft checks (asks_secret, promise, hold_reason, sensitive_number and
 their spans), masking for saved runs, and neutralising <ticket> tags the customer typed."""
 
+import json
+
 import pytest
 
 from pipeline import classify, draft, draft_check
@@ -1416,15 +1418,36 @@ def test_drafter_gets_the_customers_words_for_an_amount_not_written_as_a_number(
     assert "50,000" not in words and "write no number for it" in words and "«" not in words.split("Amount:")[1]
 
 
-@pytest.mark.parametrize("text, words", [
-    ("دزيت عشر ورقات لصديقي", "عشر ورقات"), ("حولت مليون ونص دينار", "مليون ونص دينار"),
-    ("دزيت 5 ورقات", "5 ورقات"), ("دزيت خمسين ورقة، وانتظرت عشر دقايق", "خمسين ورقة"),
-    ("صارلي عشر دقايق انتظر", None), ("حولت خمسين لأخوي", None),
-    ("ادفع بمتجر بستين الف وطلعت مرفوضة", "بستين الف"), ("سويت transfer ميت الف لصديقي", "ميت الف"),
-    ("الف شكر، حولت خمسمية الف دينار", "خمسمية الف دينار"),
+@pytest.mark.parametrize("text, n, cur, words", [
+    ("دزيت عشر ورقات لصديقي", 1000, "usd", "عشر ورقات"), ("حولت مليون ونص دينار", 1_500_000, "iqd", "مليون ونص دينار"),
+    ("دزيت 5 ورقات", 500, "usd", "5 ورقات"), ("دزيت خمسين ورقة، وانتظرت عشر دقايق", 5000, "usd", "خمسين ورقة"),
+    ("صارلي عشر دقايق انتظر", 10, "iqd", None), ("حولت خمسين لأخوي", 50_000, "iqd", None),
+    ("ادفع بمتجر بستين الف وطلعت مرفوضة", 60_000, "iqd", "بستين الف"), ("سويت transfer ميت الف لصديقي", 100_000, "iqd", "ميت الف"),
+    ("الف شكر، حولت خمسمية الف دينار", 500_000, "iqd", "خمسمية الف دينار"),
+    # CHECKS-7 (review before shipping): every Iraqi teen, «مئتين», the run that reads as the amount, no phone in it
+    ("حولت سبعطعش الف لرقم غلط", 17_000, "iqd", "سبعطعش الف"), ("حولت ثنعش الف لرقم غلط", 12_000, "iqd", "ثنعش الف"),
+    ("حولت اربعطعش الف لرقم غلط", 14_000, "iqd", "اربعطعش الف"), ("حولت حدعش الف لرقم غلط", 11_000, "iqd", "حدعش الف"),
+    ("دزيت الف ومئتين دولار", 1200, "usd", "الف ومئتين دولار"), ("دزيت مئتين الف لاخوي", 200_000, "iqd", "مئتين الف"),
+    ("حولت مليون ومئتين الف لرقم غلط", 1_200_000, "iqd", "مليون ومئتين الف"),
+    ("شحنت لامي 07438658475 بخمسطعش الف", 15_000, "iqd", "بخمسطعش الف"), ("حولت بخمستعشر الف", 15_000, "iqd", "بخمستعشر الف"),
+    ("وصلته الميت الف مرتين", 100_000, "iqd", "الميت الف"), ("حولت خمسميت الف لصديقي", 500_000, "iqd", "خمسميت الف"),
+    ("الوكيل كصلي سبعه الاف عموله", 7000, "iqd", "سبعه الاف"),
+    ("حولت خمسين الف", 40_000, "iqd", None),                   # the words don't read as the amount: not quoted
+    ("حولت 100 alf لاخوي", 100_000, "iqd", None),              # not Arabic words to quote
 ])
-def test_own_words_finds_number_words_that_name_money(text, words):
-    assert draft.own_words(text) == words
+def test_own_words_quotes_the_run_that_reads_as_the_amount(text, n, cur, words):
+    assert draft.own_words_for(text, n, cur) == words
+
+
+def test_the_drafter_and_the_note_never_get_a_wrong_amount_in_words():
+    """CHECKS-7: «سبعطعش الف» (17,000) was given to the drafter, and the team note, as «الف»."""
+    from pipeline import handoff
+    ex = Extraction(category="transfers", subcategory="wrong_recipient", amount_iqd=17_000, confidence=0.9)
+    line = draft.amount_line("حولت سبعطعش الف لرقم غلط", ex)
+    assert "«سبعطعش الف»" in line and "«الف»" not in line
+    assert handoff._amount(ex, "حولت سبعطعش الف لرقم غلط") == "المبلغ «سبعطعش الف» (قراه النموذج 17,000 دينار)"
+    wrong = ex.model_copy(update={"amount_iqd": 40_000})
+    assert "«" not in draft.amount_line("حولت خمسين الف لرقم غلط", wrong).split("Amount:")[1]
 
 
 # --- the second round of role-played test sessions (7 Nov) ---
@@ -1647,14 +1670,213 @@ def test_drafter_inputs_r2_asks_no_shop_at_a_cash_machine(monkeypatch):
 
 
 def test_draft_rules_r2_tells_the_drafter_about_a_secret_and_swaps_the_prompt(monkeypatch):
-    """R09: the drafter was never told the customer wrote a secret; R20, R21, R22, R34 are prompt rules."""
+    """R09: the drafter was never told the customer wrote a secret; R20, R21, R22, R34 are prompt rules. Since
+    security_line (review before shipping, 7 Nov: LIVE-3) the Security: line is given without the flag, and the
+    system prompt stays the adopted one."""
     e = Extraction(category="transfers", subcategory="not_received", confidence=0.9)
     text = "البطاقة اللي عندي رقمها 4211 7781 0093 5526 والرقم السري مالها 1958"
     monkeypatch.delenv("PIPELINE_FIXES", raising=False)
-    assert "Security:" not in draft.user_prompt(text, e, "transfers") and "Security:" not in draft.system_prompt()
+    assert "Security:" in draft.user_prompt(text, e, "transfers") and "Security:" not in draft.system_prompt()
+    assert "Security:" not in draft.user_prompt("حولت فلوس وما وصلت", e, "transfers")
     monkeypatch.setenv("PIPELINE_FIXES", "draft_rules_r2")
     line = next(x for x in draft.user_prompt(text, e, "transfers").split("\n") if x.startswith("Security:"))
     assert line == "Security: the customer wrote a card number, their PIN in the ticket. Never repeat it. Advise them to stop the card and change their PIN."
     assert "1958" not in line and "4211" not in line
     prompt = draft.system_prompt()
     assert "Security:" in prompt and "«فهمنا»" in prompt and "هلا وغلا" in prompt and "«أما طلب …»" in prompt
+
+
+# --- the review before shipping (7 Nov): secret_forms_r3, ticket_rules_r3, draft_checks_r3 (adopted) ---
+
+@pytest.mark.parametrize("text", [
+    # CHECKS-1: a unit is a whole word: «ساعدوني», «ثاني مرة», «الف رحمة», «الفلوس», «الفيزا» after a code
+    "PIN 1234 ساعدوني", "الرمز السري مالتي 2580 ساعدوني", "الكود 482913 ثاني مرة يطلع غلط",
+    "الرقم السري 1234 الف رحمة لوالديكم", "الرمز السري 1234 الفلوس راحت", "OTP 482913 الفاتورة", "رمز ال CVV 123 الفيزا مالتي",
+    # CHECKS-2: a line break between the code word and the code, or between a card's groups
+    "الرقم السري مالتي:\n2580\nوما يشتغل بالصراف", "PIN:\n1234", "كود التحقق\n482913", "CVV\n731", "الرقم السري مالتي:\r\n2580",
+    "4111\n1111\n1111\n1111", "رقم بطاقتي\n4211 7781 0093 5526",
+    # CHECKS-3: other separators between a card's groups; a comma or a question mark after the code word
+    "رقم بطاقتي 4111/1111/1111/1111", "رقم بطاقتي 4111،1111،1111،1111", "رقم بطاقتي 4111–1111–1111–1111",
+    "رقم بطاقتي 4111_1111_1111_1111", "رقم بطاقتي 5204/7311/8826/4413", "الرقم السري مالتي، 2580", "الكود؟ 482913",
+    "تريدون الكود؟ 482913", "PIN, 1234", "OTP? 482913",
+    # still found: a code sent to the customer's number, given back
+    "الكود اللي وصل لرقمك 482913 لا تنطيه لأحد.", "الرمز السري للبطاقة 1234 لا تشاركه.", "رمز التحقق انرسل لرقمك المنتهي بـ 482913",
+])
+def test_review_secret_forms_are_found_and_masked(text):
+    from pipeline import run, ticket_rules
+    from pipeline.clean import clean
+    assert sensitive_numbers(text), text
+    assert "secret_in_ticket" in run.text_flags(text, clean(text))
+    assert ticket_rules.secret_spans(text) and ticket_rules.secret_kinds(text)
+    masked = mask_for_logs(text)
+    for s, e, kind in sensitive_numbers(text):
+        part = masked[s:e]
+        assert (not any(c.isdigit() for c in part)) if kind == "code" else part.count("*") >= len(part.replace(" ", "")) - 8
+
+
+@pytest.mark.parametrize("text", [
+    "الرمز ما وصل وحولت 50000 دينار", "اطلب رمز جديد بعد 120 ثانية", "الكود ما وصل بعد 5 دقايق", "الرمز بعد 2 ساعة",
+    "الرمز ما وصل 3 الاف", "بين 5000-10000 دينار", "1,111,111", "الكود ما وصل، رقمي 07701234567", "الكود ما وصل، 25000 انخصمت",
+    # CHECKS-12: a deduction before a bare number makes it an amount; CHECKS-15: the end of a number named by its last digits
+    "الرمز ما وصلني وانخصم مني 25000", "الكود ما اشتغل وانسحب 25000",
+    "رمز التحقق انرسل لرقمك المنتهي بـ 4567، إذا ما وصلك خبرنا.", "الرمز السري للبطاقة المنتهية بـ 1234 تكدر تغيره من التطبيق.",
+])
+def test_review_amounts_and_number_tails_are_not_codes(text):
+    assert sensitive_numbers(text) == [], text
+
+
+def test_review_a_pin_on_its_own_line_is_hidden_in_the_note_and_the_saved_run():
+    """CHECKS-2: the flag fired on the cleaned text, but the spans, the digits and the kinds read the raw text, where a
+    line break ended the clause: the PIN showed in the inbox and in the team note, and was saved unmasked."""
+    from pipeline import handoff, ticket_rules
+    from pipeline.clean import clean, mask_run
+    raw = "الرقم السري مالتي:\n2580\nوما يشتغل بالصراف"
+    assert ticket_rules.secret_spans(raw) == [[19, 23]] and ticket_rules.secret_digits(raw) == ["2580"]
+    assert ticket_rules.secret_kinds(raw) == ["pin"]
+    assert "2580" not in json.dumps(mask_run({"raw": raw, "clean": clean(raw)}), ensure_ascii=False)
+    ex = Extraction(category="cards", subcategory="card_payment_failed", confidence=0.9)
+    note = handoff.note(ex, ["secret_in_ticket"], summary="الزبون يگول الرقم السري 2580 ما يشتغل",
+                        secrets=ticket_rules.secret_digits(raw), secret_kinds=ticket_rules.secret_kinds(raw))
+    assert "2580" not in note and "يغيّر رمزه السري" in note
+
+
+@pytest.mark.parametrize("text, lost", [
+    # CHECKS-9: not locked is open
+    ("موبايلي انسرق والمحفظة مو مقفولة", True), ("موبايلي انسرق والتطبيق ما يطلب رمز", True),
+    ("موبايلي انسرق والتطبيق ما يحتاج رمز", True), ("موبايلي انسرق والمحفظة مو مسكرة", True),
+    ("موبايلي انسرق والمحفظة غير مقفول", True), ("موبايلي انسرق ومو حاط رمز", True),
+    ("موبايلي انسرق والمحفظة ما عليها قفل", True), ("تلفوني ضاع والحساب مفتوح عليه", True),
+    # CHECKS-10: «ما كانت مفتوحة», a phone not lost, or lost only in a question
+    ("موبايلي انسرق والمحفظة ما كانت مفتوحة", False), ("موبايلي انسرق والمحفظة ما چانت مفتوحة", False),
+    ("لو ضاع موبايلي والمحفظة مفتوحة شنو اسوي؟", False), ("اذا انسرق تلفوني والتطبيق مفتوح شلون اوقفه؟", False),
+    ("ما ضاع موبايلي، بس المحفظة مفتوحة على لابتوب", False), ("تلفوني ما انسرق بس المحفظة مفتوحة على جهاز ثاني", False),
+    ("موبايلي انسرق والمحفظة مقفولة", False), ("موبايلي انسرق والمحفظة عليها بصمة", False),
+])
+def test_review_device_lost(text, lost):
+    from pipeline import ticket_rules
+    assert ticket_rules.device_lost(text) is lost
+
+
+@pytest.mark.parametrize("text, want", [
+    # CHECKS-11: a transfer sent yesterday is not a repeat contact; a negated threat is none
+    ("دزيت حوالة امس وما وصلت", []), ("اتصلت بالوكيل امس وما رد", []), ("دزيت المبلغ قبل ساعتين وما وصل", []),
+    ("دزيت لاخوي امس 100 الف", []), ("كلمت اخوي امس وكال ما وصلته", []), ("اتصلت بصاحبي قبل شوية", []),
+    ("مو ناوي اشتكي للبنك المركزي، بس ساعدوني", []), ("ما راح اشتكي للبنك المركزي", []),
+    ("ما اريد اشتكي للبنك المركزي بس ردوا", []),
+    # and real ones still count, or now do
+    ("ثاني مرة اكتبلكم", ["repeat"]), ("للمرة الثانية اكتبلكم", ["repeat"]), ("مو اول مرة اتصل بيكم", ["repeat"]),
+    ("راح اقدم شكوى رسمية", ["threat"]), ("اتصلت قبل كم يوم وقالولي انتظر 48 ساعة", ["repeat"]),
+    ("راسلتكم قبل وكالولي ننتظر", ["repeat"]),
+])
+def test_review_complaint_reasons(text, want):
+    from pipeline import handoff, ticket_rules
+    assert ticket_rules.complaint_reasons(text) == want
+    assert handoff.COMPLAINT_NOTE_AR["repeat"] == "الزبون راسلنا قبل"   # not «وما وصله رد»: some were answered
+
+
+@pytest.mark.parametrize("text", [
+    # CHECKS-4: «بلاش» before «don't forget / be late», as «لا» was
+    "بلاش تنسى وتدزلنا الرمز", "بلاش تتأخر وترسلنا الرمز", "بلاش تقلق وتدزلنا الرمز", "بلاش تستحي وترسلنا الرمز",
+    "بلاش تتردد وترسل الرمز إلنا",
+    # CHECKS-5: indirect requests
+    "لا تدزلنا صورة الهوية، بس الرمز", "مو لازم صورة الهوية، بس الرمز", "ما نحتاج صورة الهوية، الرمز بس",
+    "انسخ الكود والصقه بالرد.", "جاوبنا بالرمز اللي وصلك.", "ممكن الـ OTP؟", "ممكن الـ CVV؟", "ممكن الـ OTP لو سمحت؟",
+    "دزلنا تاريخ انتهاء البطاقة والأرقام اللي وراها.", "لحد هسه ما دزيتلنا الرمز.", "ما وصلنا الرمز منك لحد الآن.",
+    "لحد الآن ما وصلنا منك الرمز.",
+    # and still: the hide verb does not cover a plain request
+    "الرمز دزه إلنا.", "دزلنا الرمز قبل ما تدزها.",
+])
+def test_review_asks_secret_catches(text):
+    assert "asks_secret" in problems(text, "")
+
+
+@pytest.mark.parametrize("text", [
+    "وبلاش ترسل رقم البطاقة", "بلاش تدزلنا الرمز",
+    # CHECKS-13: the advice to hide the code before sending a photo
+    "دزلنا صورة الشاشة، وغطي الرمز قبل ما تدزها.", "امسح الرمز من الصورة قبل ما تدزها.", "خفي الرمز وبعدين دزها إلنا.",
+    "لا تخلي الرمز يبين بالصورة لما تدزها.", "دز صورة الإشعار، وغطي الرمز قبل ما تدزه.",
+    "دزلنا صورة الشاشة، وانتبه تغطي الرمز قبل ما تدزها.", "دزلنا صورة الرسالة اللي وصلتك",
+    "دزلنا صورة الهوية، بس الرمز لا تشاركه", "دزلنا صورة الهوية، بس الرمز خليه عندك",
+    "الرمز يوصلك برسالة، انسخه والصقه بخانة التحقق بالتطبيق.",
+])
+def test_review_asks_secret_passes(text):
+    assert "asks_secret" not in problems(text, "")
+
+
+@pytest.mark.parametrize("text, held", [
+    # CHECKS-6: the regulator by name, a court, monitoring, «التحري», «نشك», a report on the account
+    ("حسابك تحت الرقابة", True), ("البنك المركزي طلب نوقف حسابك", True), ("حسابك موقوف بقرار قضائي", True),
+    ("نشك بالحوالة", True), ("حسابك قيد التحري", True), ("حسابك عليه بلاغ", True), ("الحساب موقوف بسبب بلاغ", True),
+    ("حسابك موقوف بقرار من المحكمة", True), ("حسابك مراقب حالياً", True), ("وصلنا بلاغ بخصوص حسابك", True),
+    ("المحكمة أمرت بحجز حسابك", True),
+    ("نشكرك على صبرك", False), ("تحرير المبلغ راح يصير بعد المراجعة", False), ("وصلنا بلاغك وراح نتابعه", False),
+])
+def test_review_hold_reason(text, held):
+    assert ("hold_reason" in problems(text, "")) is held
+
+
+@pytest.mark.parametrize("text, claimed", [
+    # CHECKS-8: «فلوسك», «ألغينا الحوالة», done said with no "we"
+    ("رجعنا فلوسك لحسابك", True), ("تم إرجاع فلوسك", True), ("ألغينا الحوالة", True), ("تم إلغاء الحوالة", True),
+    ("المبلغ رجع لحسابك", True), ("انضاف المبلغ لرصيدك", True), ("حسابك انفتح", True), ("فلوسك رجعت لحسابك", True),
+    ("المبلغ ما رجع لحسابك", False), ("إذا المبلغ رجع لحسابك خبرنا", False), ("هل المبلغ رجع لحسابك؟", False),
+    ("لسه المبلغ ما رجع لحسابك", False),
+    # CHECKS-14: a forward about the money is a forward
+    ("حولنا طلبك بخصوص المبلغ للقسم المختص.", False), ("حولنا شكواك بخصوص الرسوم لقسم المدفوعات.", False),
+    ("حولنا طلبك بخصوص الحوالة لقسم التحويلات", False), ("حولنا المبلغ لحسابك", True),
+])
+def test_review_claims_done(text, claimed):
+    assert ("claims_done" in problems(text, "")) is claimed
+
+
+def _ask(ticket, sure, maybe=""):
+    return (f"<ticket>\n{ticket}\n</ticket>\n\nIssue: x\nAsk the customer for: {sure}"
+            + (f"\nAlso ask for these, but only if the ticket does not already give them: {maybe}" if maybe else ""))
+
+
+def test_review_word_amounts_and_the_amount_check():
+    """CHECKS-16 and CHECKS-7's draft-check part: two amounts after «و» or in two units are two amounts, «250.000» is
+    250,000, «حدعش»/«طنعش» are 11 and 12."""
+    from pipeline.draft_check import word_amounts
+    assert word_amounts("حولت خمسين الف و عشرين الف") == [(50000.0, "iqd"), (20000.0, "iqd")]
+    assert word_amounts("مية دولار وخمسين الف دينار") == [(100.0, "usd"), (50000.0, "iqd")]
+    assert word_amounts("حولت 250.000 دينار") == [(250000.0, "iqd")]
+    assert word_amounts("مية وخمسين الف") == [(150000.0, "iqd")] and word_amounts("الف ونص") == [(1500.0, "iqd")]
+    assert word_amounts("حدعش الف") == [(11000.0, "iqd")] and word_amounts("طنعش الف") == [(12000.0, "iqd")]
+
+    def kinds(ticket, d):
+        return {f["kind"] for f in findings(d, f"<ticket>\n{ticket}\n</ticket>")} & {"amount_not_in_ticket"}
+    assert kinds("حولت خمسين الف و عشرين الف لنفس الرقم", "بخصوص الحوالتين 50,000 دينار و20,000 دينار") == set()
+    assert kinds("حولت خمسين الف و عشرين الف لنفس الرقم", "بخصوص الحوالة 70,000 دينار")
+    assert kinds("سحبت مية دولار وخمسين الف دينار من الوكيل", "بخصوص 150,000 دولار")
+    assert kinds("سحبت مية دولار وخمسين الف دينار من الوكيل", "بخصوص 100 دولار") == set()
+    assert kinds("حولت 250.000 دينار", "بخصوص 250 دينار") and kinds("حولت حدعش الف لرقم غلط", "بخصوص 1,000 دينار")
+    assert kinds("حولت حدعش الف لرقم غلط", "بخصوص 11,000 دينار") == set()
+
+
+def test_review_ask_missing_and_asks_given():
+    """CHECKS-17: «وكم حولت؟» and «وقيمتها؟» ask the amount; «بأقرب وقت» is not the date; «رقم موبايلك» is not the
+    recipient's; «من موبايلي» does not name the bill type, «فاتورة الموبايل» does."""
+    from pipeline.draft_check import ask_missing_fields
+    t = "حولت فلوس لرقم غلط"
+    assert ask_missing_fields("ممكن تدزلنا رقم العملية وكم حولت؟", _ask(t, "رقم العملية, المبلغ")) == []
+    assert ask_missing_fields("ممكن تدزلنا رقم الحوالة وقيمتها؟", _ask(t, "رقم العملية, المبلغ")) == []
+    assert ask_missing_fields("راح نراجع الطلب بأقرب وقت، ممكن تدزلنا رقم العملية؟",
+                              _ask(t, "رقم العملية, تاريخ ووقت العملية")) == ["date"]
+    assert ask_missing_fields("ممكن تدزلنا رقم العملية وشوكت صارت؟", _ask(t, "رقم العملية, تاريخ ووقت العملية")) == []
+    assert ask_missing_fields("ممكن تدزلنا رقم موبايلك؟", _ask(t, "رقم المستلم")) == ["recipient_number"]
+    assert ask_missing_fields("ممكن تدزلنا رقم موبايل المستلم؟", _ask(t, "رقم المستلم")) == []
+    bill = "دفعت فاتورة من موبايلي وانقص المبلغ وما انحسبت"
+    assert problems("ممكن تكتبلنا نوع الفاتورة؟", _ask(bill, "nothing", "نوع الفاتورة")) == []
+    assert ask_missing_fields("شكراً لتواصلك.", _ask(bill, "nothing", "نوع الفاتورة")) == ["bill_type"]
+    assert "asks_given" in problems("ممكن تكتبلنا نوع الفاتورة؟", _ask("دفعت فاتورة الموبايل وما انحسبت", "nothing", "نوع الفاتورة"))
+
+
+@pytest.mark.parametrize("text, kinds", [
+    # CHECKS-19: an order to the customer, «انت أعرف», «توصلنا» are not slips; LIVE-5: the drafter's own singular forms are
+    ("اعرف رصيدك بسهولة من التطبيق.", []), ("انت أعرف بظروفك، واحنا وياك.", []), ("دز صورة الوصل حتى توصلنا ونتابعها.", []),
+    ("وصلتني مشكلتك وراح نتابعها", ["persona_slip"]), ("ممكن تكتبلي رقم العملية؟", ["persona_slip"]),
+    ("وأعتذر منك عن التأخير", ["persona_slip"]), ("ما أگدر أوعدك", ["persona_slip"]), ("ما أكدر أوعدك", ["persona_slip"]),
+])
+def test_review_style_notes(text, kinds):
+    assert [f["kind"] for f in findings(text, "") if f["kind"] in draft_check.STYLE_KINDS] == kinds

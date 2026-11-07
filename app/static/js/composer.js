@@ -168,17 +168,49 @@ export function buildComposer(item, onUpdate) {
   }
   const later = debounce(() => { run(); }, 400);
 
+  /** Replace ta.value[a:b] with `str` as an edit the browser keeps in its undo history (execCommand): setting
+   *  ta.value from script empties that history, so Ctrl+Z could not undo a paste or typing that was reformatted
+   *  (review before shipping, 7 Nov). Falls back to setting the value where the command is not there. */
+  let editing = false;
+  function edit(a, b, str) {
+    const before = ta.value;
+    ta.setSelectionRange(a, b);
+    editing = true;
+    let ok = false;
+    try { ok = str ? document.execCommand("insertText", false, str) : document.execCommand("delete"); } catch { ok = false; }
+    editing = false;
+    if (!ok || ta.value === before) ta.value = before.slice(0, a) + str + before.slice(b);
+  }
+
+  /** Show typed or pasted text like the draft was (shownDraft), changing only the part that differs, as one edit. */
+  function reformat() {
+    const cur = ta.value;
+    const want = shownDraft(cur);
+    if (want === cur) return;
+    const [from, to, way] = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection];
+    const [rf, rt] = [realAt(cur, from), realAt(cur, to)];
+    let a = 0;
+    while (a < cur.length && a < want.length && cur[a] === want[a]) a++;
+    let z = 0;
+    while (z < cur.length - a && z < want.length - a && cur[cur.length - 1 - z] === want[want.length - 1 - z]) z++;
+    edit(a, cur.length - z, want.slice(a, want.length - z));
+    ta.setSelectionRange(shownAt(ta.value, rf), shownAt(ta.value, rt), way);
+  }
+
   function changed(e) {
+    if (editing) return;   // our own edit (reformat, a key handled below): the input event after it does the work
     // Typed or pasted text is shown like the draft was: a no-break space between digit groups, a
     // non-breaking hyphen in a reference, a left-to-right mark before a hyphenated number. The caret keeps its
     // place in the real text (a mark added before it moves it one along). Not while an input method is
-    // composing (it would break the word being composed).
-    if (!e?.isComposing && shownDraft(ta.value) !== ta.value) {
-      const [from, to, way] = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection];
-      const [rf, rt] = [realAt(ta.value, from), realAt(ta.value, to)];
-      ta.value = shownDraft(ta.value);
-      ta.setSelectionRange(shownAt(ta.value, rf), shownAt(ta.value, rt), way);
+    // composing (it would break the word being composed). An undo or a redo that lands on text not shown that way
+    // stepped through the reformat of an edit: one more step goes to the state before (or after) the edit itself.
+    const history = e?.inputType === "historyUndo" || e?.inputType === "historyRedo";
+    if (history && shownDraft(ta.value) !== ta.value) {
+      editing = true;
+      try { document.execCommand(e.inputType === "historyUndo" ? "undo" : "redo"); } catch { /* the text stays */ }
+      editing = false;
     }
+    if (!e?.isComposing && !history) reformat();
     const shown = ta.value;
     text = shown === shownDraft(orig.text) ? orig.text : realDraft(shown);
     // Any edit makes every check in flight stale: a late answer is for an older text.
@@ -231,6 +263,44 @@ export function buildComposer(item, onUpdate) {
 
   ta.addEventListener("input", changed);
   ta.addEventListener("compositionend", changed);
+  // Backspace or Delete next to the left-to-right mark before a hyphenated number removed only the mark, which the
+  // reformat put back: the key did nothing however often it was pressed. It takes the character the agent sees.
+  ta.addEventListener("beforeinput", (e) => {
+    const [a, b] = [ta.selectionStart, ta.selectionEnd];
+    if (a !== b || e.isComposing) return;
+    const v = ta.value;
+    if (e.inputType === "deleteContentBackward" && a >= 2 && v[a - 1] === "\u200E") {
+      e.preventDefault();
+      edit(a - 2, a, "");
+      changed();
+    } else if (e.inputType === "deleteContentForward" && v[a] === "\u200E" && a + 2 <= v.length) {
+      e.preventDefault();
+      edit(a, a + 2, "");
+      changed();
+    } else if (e.inputType === "deleteWordBackward" && a >= 1 && v[a - 1] === "\u200E") {
+      e.preventDefault();
+      let s0 = a - 1;
+      while (s0 > 0 && /\s/.test(v[s0 - 1])) s0--;
+      while (s0 > 0 && !/\s/.test(v[s0 - 1])) s0--;
+      edit(s0, a, "");
+      changed();
+    }
+  });
+  // The box shows a left-to-right mark, no-break spaces and non-breaking hyphens; the reply is the text without them.
+  // Copying from it gave the shown characters, so a reference pasted elsewhere did not match (review before shipping).
+  const copied = (e) => {
+    const [a, b] = [ta.selectionStart, ta.selectionEnd];
+    if (a === b || !e.clipboardData) return false;
+    e.clipboardData.setData("text/plain", realDraft(ta.value.slice(a, b)));
+    e.preventDefault();
+    return true;
+  };
+  ta.addEventListener("copy", copied);
+  ta.addEventListener("cut", (e) => {
+    if (!copied(e) || ta.readOnly) return;
+    edit(ta.selectionStart, ta.selectionEnd, "");
+    changed();
+  });
   restore.addEventListener("click", () => { ta.value = shownDraft(orig.text); changed(); ta.focus(); });
   requestAnimationFrame(fit);
   window.addEventListener("resize", fit, { passive: true });
