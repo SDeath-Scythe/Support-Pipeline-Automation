@@ -1526,7 +1526,8 @@ def _dialect_words(norm: str, pos: list[int]) -> tuple[int, int] | None:
 
 
 # amount_not_in_ticket (flag amount_own_words): an amount in the draft, a number with its money word («1000 دولار»,
-# «50 ألف»), that the ticket never wrote as a number: «عشر ورقات» read as 1,000 USD is the classifier's reading.
+# «50 ألف»), that the ticket writes neither as a number nor in number words in the same unit: «50,000 دينار» for
+# «خمسين الف» is the customer's amount, but «عشر ورقات» read as 1,000 USD is the classifier's conversion.
 _DRAFT_AMOUNT = re.compile(r"(\$\s*)?(\d[\d,٬]*(?:\.\d+)?)\s*(?:(مليون|ملايين)|([أا]لف|آلاف|الاف))?\s*"
                            r"(دينار|دولار|IQD|USD|\$)?", re.IGNORECASE)
 _TICKET = re.compile(r"<ticket>\n?(.*?)\n?</ticket>", re.DOTALL)
@@ -1549,18 +1550,107 @@ def amount_written(text: str, n: int | float | None, currency: str) -> bool:
     return any(re.search(t, text) for t in tries)
 
 
+# The customer's number words read as they stand, in their own unit: «خمسين الف» is 50,000 dinars, so a draft
+# that writes «50,000 دينار» is faithful; «عشر ورقات» is ten notes, so «1000 دولار» is a conversion and still warns.
+_WORD_VALUE = {
+    "واحد": 1, "وحدة": 1, "ثنين": 2, "اثنين": 2, "ثنتين": 2, "ثلاث": 3, "ثلاثة": 3, "تلاث": 3, "تلاثة": 3,
+    "اربع": 4, "أربع": 4, "اربعة": 4, "أربعة": 4, "خمس": 5, "خمسة": 5, "ست": 6, "ستة": 6, "سبع": 7, "سبعة": 7,
+    "ثمان": 8, "ثمانية": 8, "ثمن": 8, "ثمنية": 8, "تسع": 9, "تسعة": 9, "عشر": 10, "عشرة": 10, "عشرين": 20, "ثلاثين": 30, "تلاثين": 30, "اربعين": 40, "أربعين": 40,
+    "خمسين": 50, "ستين": 60, "سبعين": 70, "ثمانين": 80, "ثمنين": 80, "تسعين": 90, "مية": 100, "مئة": 100,
+    "ميت": 100, "ميتين": 200, "مئتين": 200, "متين": 200, "ربع": 0.25, "نص": 0.5, "نصف": 0.5,
+}
+_HUNDRED_OF = {"ثلاث": 3, "ثلث": 3, "تلاث": 3, "تلث": 3, "اربع": 4, "أربع": 4, "ربع": 4, "خمس": 5, "ست": 6,
+               "سبع": 7, "ثمان": 8, "ثمن": 8, "تسع": 9}
+_HUNDREDS = re.compile(rf"({'|'.join(_HUNDRED_OF)})(?:مية|مئة|ميت)")
+_TEEN_OF = {"احد": 1, "اثن": 2, "ثن": 2, "ثل": 3, "ثلاث": 3, "ثلث": 3, "اربع": 4, "أربع": 4, "ربع": 4, "خمس": 5,
+            "ست": 6, "سبع": 7, "ثمان": 8, "ثمن": 8, "تسع": 9}
+_TEENS = re.compile(rf"({'|'.join(sorted(_TEEN_OF, key=len, reverse=True))})[طت]?عشر?")   # «خمسطعش», «خمستعشر»
+_MULTIPLIER = {"الف": (1, 1000), "ألف": (1, 1000), "آلاف": (1, 1000), "الاف": (1, 1000), "ألاف": (1, 1000),
+               "الفين": (2, 1000), "ألفين": (2, 1000), "مليون": (1, 10**6), "ملايين": (1, 10**6), "مليونين": (2, 10**6),
+               "alf": (1, 1000), "هەزار": (1, 1000)}
+_UNIT = {"دينار": "iqd", "دولار": "usd", "دولارات": "usd", "ورقة": "note", "ورقات": "note", "اوراق": "note",
+         "أوراق": "note"}
+_WORD_PREFIX = ("وبال", "بال", "وال", "ال", "وب", "و", "ب", "ل")
+_NOT_AMOUNT = {"لواحد", "لوحدة", "لوحده"}                # «حولت خمسين الف لواحد»: "to someone"
+_RUN_BREAK = re.compile(r"(?<!\d)[,٬.](?!\d)|[،؛؟?!:;()«»\"]")
+
+
+def _number_word(w: str) -> tuple[str, object] | None:
+    """One word of an amount: ("num", 50), ("mult", (count, 1000)), ("unit", "usd"), or None."""
+    w = w.lower()
+    if w in _NOT_AMOUNT:
+        return None
+    for word in [w] + [w[len(p):] for p in _WORD_PREFIX if w.startswith(p) and len(w) > len(p) + 1]:
+        word = word if word in _WORD_VALUE else re.sub(r"ه$", "ة", word)      # «عشره», «ميه», «ورقه»
+        hundreds, teens = _HUNDREDS.fullmatch(word), _TEENS.fullmatch(word)
+        if re.fullmatch(r"\d[\d,٬]*", word):
+            return "num", int(re.sub(r"[,٬]", "", word))
+        if word in _WORD_VALUE:
+            return "num", _WORD_VALUE[word]
+        if hundreds:
+            return "num", 100 * _HUNDRED_OF[hundreds.group(1)]
+        if teens:
+            return "num", 10 + _TEEN_OF[teens.group(1)]
+        if word in _MULTIPLIER:
+            return "mult", _MULTIPLIER[word]
+        if word in _UNIT:
+            return "unit", _UNIT[word]
+    return None
+
+
+def _read_run(words: list[tuple[str, object]]) -> list[tuple[float, str]]:
+    """(value, unit) readings of one run of amount words; a run with no «الف», «مليون» or unit word names no
+    money. A number of 1000 or more after the last «الف»/«مليون» is a reference, not part of the amount, and
+    «مليون و200» also reads the colloquial way, as 1,200,000."""
+    total, cur, last, unit = 0.0, 0.0, 0, None
+    for kind, v in words:
+        if kind == "num":
+            cur = 0 if cur >= 1000 else cur                                 # a phone or reference number before it
+            cur = cur * 100 if v == 100 and 1 <= cur < 10 else cur + v      # «خمس مية» is 500
+        elif kind == "mult":
+            count, m = v
+            total, cur, last = total + (cur or 1) * count * m, 0.0, m
+        else:
+            unit = unit or v
+    if not (last or unit):
+        return []
+    values = [total + (cur * last if 0 < cur < 1 and last else 0 if cur >= 1000 and last else cur)]
+    if last == 10**6 and 1 <= cur < 1000 and cur == int(cur):
+        values.append(total + cur * 1000)
+    return [(v, unit or "iqd") for v in values if v > 0]
+
+
+def word_amounts(text: str) -> list[tuple[float, str]]:
+    """Every amount the text writes with number words, as (value, unit), unit "iqd", "usd" or "note" (a 100 USD
+    note, «ورقة»). Amount words without a currency are dinars. «خمسين الف» -> (50000, "iqd")."""
+    out, run = [], []
+    for w in _RUN_BREAK.sub(" | ", text).split() + ["|"]:
+        word = _number_word(w)
+        if word:
+            run.append(word)
+            continue
+        out += _read_run(run)
+        run = []
+    return out
+
+
 def _amount_not_in_ticket(norm: str, pos: list[int], allowed_text: str) -> tuple[int, int] | None:
     m = _TICKET.search(allowed_text)
     ticket = clean(m.group(1) if m else allowed_text)
+    read = word_amounts(ticket)
     for a in _DRAFT_AMOUNT.finditer(norm):
         dollar, number, million, thousand, unit = a.groups()
         if not (dollar or million or thousand or unit):
             continue                                           # a number with no money word: not an amount
         value = float(number.replace(",", "").replace("٬", ""))
         value *= 1_000_000 if million else 1000 if thousand else 1
-        if not amount_written(ticket, int(value) if value == int(value) else value, "iqd"):
-            last = max(g for g in range(2, 6) if a.group(g))
-            return _raw(pos, a.start(1) if dollar else a.start(2), a.end(last))
+        said = "usd" if dollar or (unit or "").lower() in ("دولار", "usd", "$") else "iqd" if unit else None
+        if amount_written(ticket, int(value) if value == int(value) else value, "iqd"):
+            continue
+        if any(abs(v - value) < 0.01 and (u == said or (said is None and u != "note")) for v, u in read):
+            continue                                           # the customer's own words, in the same unit
+        last = max(g for g in range(2, 6) if a.group(g))
+        return _raw(pos, a.start(1) if dollar else a.start(2), a.end(last))
     return None
 
 
